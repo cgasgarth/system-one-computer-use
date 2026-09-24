@@ -1,90 +1,127 @@
 # System One Computer Use
 
-A local computer use harness for models that return probability distributions
-over typed decisions. It accepts a text task, observes the desktop through Cua
-Driver, builds candidates from visible controls, and lets a System One decision
-model choose the next action. A small text model reads the request once to name
-an application or supply text to enter. The harness checks each action against
-the current Cua snapshot before it acts.
+A provider-neutral computer-use harness for System One decision models. Give it
+a text task. It reads live controls through CUA, asks a model to choose an action,
+executes that action, and observes the result before the next decision.
 
-The decision model, text generator, and computer driver are separate interfaces.
-The first driver holds one Cua MCP connection to the installed `cua-driver`
-daemon and its macOS permission identity. The text generator can be any local service with a compatible chat
-completion endpoint. Voice input from Handy will feed the same task interface
-after the text path is verified.
+CLM, Jev, Kev, and other compatible services use the same HTTP adapter. The
+decision model, text model, and computer driver are separate interfaces. This
+repository does not train or include a custom decision model.
 
-## Local setup
+## Run
 
-Install [Bun](https://bun.sh/) and [Cua Driver](https://github.com/trycua/cua),
-then start `CuaDriver.app` and grant its required macOS permissions.
+Install [Bun](https://bun.sh/) and [CUA Driver](https://github.com/trycua/cua).
+Start `CuaDriver.app` and grant its Accessibility and Screen Recording permissions.
+Start Chrome for browser tasks.
 
 ```bash
-bun install
-export SYSTEM_ONE_URL=http://127.0.0.1:8009/v1/systemone
-export SYSTEM_ONE_MODEL=your-system-one-model
-export TEXT_MODEL_URL=http://127.0.0.1:8080/v1/chat/completions
-export TEXT_MODEL_ID=mlx-community/Qwen3.5-2B-4bit
-bun run start "Open System Settings and find Bluetooth settings"
-```
-
-The tested text service is [Qwen3.5-2B 4-bit for MLX](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit),
-at revision `674aaa7240b91e8012fcad5d791b7dfe5ba90207`. Start an
-OpenAI-compatible service for it on port 8080, for example with `mlx-lm`:
-
-```bash
-uv tool install mlx-lm
-mlx_lm.server --model mlx-community/Qwen3.5-2B-4bit \
-  --chat-template-args '{"enable_thinking":false}'
-```
-
-The text model extracts task fields once. The harness accepts only application
-names, URLs, and exact text found in the task, so an invented URL cannot drive
-browser navigation. Its output is validated before the System One model sees
-the current controls.
-
-For browser tasks, start Chrome once, then use Cua's isolated Chrome profile:
-
-```bash
-export CUA_MODE=browser
-export CUA_BROWSER_APP='Google Chrome'
+bun install --frozen-lockfile
+cp .env.example .env
+# Set your decision and text endpoints in .env.
 bun run start "Open https://example.com and inspect the page"
 ```
 
-The browser adapter binds the exact isolated tab, reads semantic page controls,
-and uses short-lived action refs from each new snapshot. It does not attach to
-or change the user's Chrome profile. The current task plan can open an exact URL
-given in the request, click visible controls, and type into visible fields.
-Browser clicks use Cua's explicit DOM event route because trusted background
-input is refused on this setup; each click needs a fresh page observation to
-confirm its effect. Sites that require trusted input may not respond.
-Screens with only pixels still need visual grounding. Handy transcription will
-feed the same task entry point.
+| Setting                | Purpose                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| `SYSTEM_ONE_URL`       | Complete System One HTTP endpoint, including `/v1/systemone` |
+| `SYSTEM_ONE_MODEL`     | The provider's model ID                                      |
+| `SYSTEM_ONE_API_KEY`   | Optional bearer token                                        |
+| `TEXT_MODEL_URL`       | Chat-completion endpoint for task text                       |
+| `TEXT_MODEL_ID`        | The text provider's model ID                                 |
+| `TEXT_MODEL_API_KEY`   | Optional bearer token                                        |
+| `CUA_MODE`             | `browser` or `desktop`                                       |
+| `CUA_BROWSER_APP`      | Browser application; defaults to Google Chrome               |
+| `SYSTEM_ONE_MAX_STEPS` | Decision limit; defaults to 16                               |
+| `SYSTEM_ONE_TRACE`     | Set to `1` to print each decision                            |
 
-To use Handy, run `bun run web`, open the local address it prints, and focus the
-task field. Dictate with Handy, then press **Run task** after Handy pastes the
-transcript. The page sends the text through the same task loop as the CLI. The
-web server listens only on `127.0.0.1`, runs one task at a time, and does not
-store transcripts.
+The example configuration uses local CLM. To use a hosted model, replace the
+decision URL, model ID, and optional key. The task loop contains no provider list
+or model-name branches. A provider with another protocol can implement
+[`DecisionModel`](src/models/system-one.ts).
 
-The CLI prints a compact JSON trace. It does not record screenshots or voice.
-Set `SYSTEM_ONE_MAX_STEPS` for longer tasks and `SYSTEM_ONE_TRACE=1` to stream
-each model decision to stderr while it runs. The final trace is written under
-ignored `runs/` only when the task completes.
-The persistent Cua connection measured about 3 ms median for read-only desktop
-observations on the development Mac, versus about 53 ms when starting the CLI
-for every observation. These numbers do not measure a full task.
+### Local CLM on Apple Silicon
 
-## Boundaries
+The optional [CLM MLX integration](integrations/clm-mlx/README.md) serves the
+published CLM-8B heads with a Qwen3-8B encoder running in MLX:
 
-- Cua supplies native window or browser page controls. The small text model supplies
-  the requested application or text, and cannot send actions directly to Cua.
-- The System One model chooses from current controls and returns probabilities.
-- The harness accepts an element only when its one-use Cua token is present in
-  the latest observation. A stale or invented token fails with a clear error.
-- Each action is followed by a new observation. The loop stops on a selected
-  `finish` action only when the observed app, URL, entered text, or requested
-  target supports completion. Repeated controls are blocked within the same
-  window. A refused Cua action is recorded and cannot count as success.
-- Native controls outside the target window and switch controls are not
-  offered as actions. Some macOS search results appear as static text with no
-  reliable Cua accessibility action; those tasks stop with a clear error.
+```bash
+uv run --project integrations/clm-mlx --frozen clm-mlx --bits 4
+```
+
+This provides `http://127.0.0.1:8700/v1/systemone` with model ID `clm-latest`.
+The first start downloads the pinned public weights. This integration is
+independent of the TypeScript task loop.
+
+### Text service
+
+Any compatible chat-completion service can supply task text. One tested local
+option is Qwen3.5-2B in MLX:
+
+```bash
+uv tool install mlx-lm==0.31.3
+mlx_lm.server --model mlx-community/Qwen3.5-2B-4bit --port 8080 \
+  --chat-template-args '{"enable_thinking":false}'
+```
+
+For `mlx-lm`, `TEXT_MODEL_ID=default_model` selects the model loaded by the server.
+The text model extracts the requested app, URL, target, and text once per task.
+Only values present in the user request can drive navigation or typing.
+
+### Task page and Handy
+
+```bash
+bun run web
+```
+
+Open the printed local address. Type a task, or dictate with Handy into the task
+field, then press **Run task**. The page and CLI use the same task loop. The local
+page accepts one task at a time and keeps credentials on the server.
+
+## How it works
+
+- External configuration, requests, CUA results, and model responses are validated
+  with Zod at their boundaries. Internal functions use the resulting types.
+- The model receives semantic action descriptions. Temporary CUA handles stay
+  local, so changing a handle does not invalidate a model's action-text cache.
+- The selected action must refer to a control in the latest observation.
+  Browser observations use CUA's exact tab binding; desktop observations stay
+  inside the selected native window.
+- Text is inserted in one operation. A Return action is available only after
+  the requested text is visible in a field.
+- Completion requires an observed result. A previous task's completion status
+  cannot complete a new task. Refused CUA operations are recorded as failures.
+- The text plan distinguishes opening a URL or app from a larger task. Simple
+  opening tasks stop when the requested URL or app is observed; complex tasks
+  continue through the decision model.
+
+The browser driver uses an isolated Chrome profile and CUA's explicit DOM-event
+click route. Sites that require trusted input can reject that route. Controls
+that exist only as pixels still need a visual-grounding adapter.
+
+Completed CLI traces are written to ignored `runs/`. They report total time,
+decision time, actions, and probabilities. Full-task time includes planning and
+computer operations; model response time measures a different boundary.
+
+## Development
+
+```bash
+bun run check       # Oxlint plus strict TypeScript checks
+bun test
+bun run format
+```
+
+`tsconfig.json` extends `@tsconfig/strictest`. Oxlint enables all categories at
+error severity, uses type-aware checks, and allows zero warnings. Source files
+have a hard 600-line limit. [Engineering rules](docs/engineering.md) explain the
+small set of syntax and SDK compatibility exceptions.
+
+```text
+src/
+  agent/       action candidates, completion, execution, task loop
+  app/         CLI, local task page, configuration and HTTP boundaries
+  computer/    CUA transport schemas and native/browser adapters
+  models/      System One and text-provider contracts and adapters
+integrations/
+  clm-mlx/     optional local CLM serving adapter
+tests/         task behavior and provider protocol checks
+```

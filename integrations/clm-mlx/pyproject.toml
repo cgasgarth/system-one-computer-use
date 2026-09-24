@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "system-one-clm-mlx"
+version = "0.1.0"
+description = "Optional Apple Silicon serving adapter for published CLM models"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "clm[serve,hf]",
+  "mlx==0.32.2",
+  "mlx-lm==0.31.3",
+  "transformers==5.17.0",
+  "torch==2.8.0",
+]
+
+[project.scripts]
+clm-mlx = "clm_mlx.server:main"
+
+[tool.uv.sources]
+clm = { git = "https://github.com/Contrastive-LM/CLM", rev = "7956937c58ed5839c06ddc4dc6b6b61c3a3e4094" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clm_mlx"]

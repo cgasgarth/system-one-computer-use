@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>System One Computer Use</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./client.ts"></script>
+  </head>
+  <body>
+    <main>
+      <h1>System One Computer Use</h1>
+      <p>Type a task, or dictate with Handy. Run it when the text is ready.</p>
+      <form>
+        <label for="task">Your task</label>
+        <textarea
+          id="task"
+          required
+          autofocus
+          placeholder="Open https://example.com and inspect the page"
+        ></textarea>
+        <div class="row">
+          <select id="mode" aria-label="Computer surface">
+            <option value="browser">Chrome</option>
+            <option value="desktop">macOS desktop</option>
+          </select>
+          <button id="run" type="submit">Run task</button>
+        </div>
+      </form>
+      <pre id="status" role="status">Ready.</pre>
+    </main>
+  </body>
+</html>
