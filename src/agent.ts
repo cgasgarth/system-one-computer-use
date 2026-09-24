@@ -48,9 +48,10 @@ function candidates(task: string, plan: TaskPlan, observation: Observation, hasA
                      reason: 'Submit text if the field requires Return' });
     }
   }
-  const bounded = actions.slice(0, hasActed ? 63 : 64);
-  if (hasActed) bounded.push({ kind: 'finish', summary: task,
-                              reason: 'Select only when the observed state proves the task is complete' });
+  const canFinish = hasActed && !!observation.window;
+  const bounded = actions.slice(0, canFinish ? 63 : 64);
+  if (canFinish) bounded.push({ kind: 'finish', summary: task,
+                                reason: 'Select only when the observed state proves the task is complete' });
   return validateActions(bounded, observation);
 }
 
