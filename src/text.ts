@@ -21,6 +21,7 @@ Open System Settings and find Bluetooth settings -> {"app":"System Settings","te
 Open https://example.com and inspect the page -> {"url":"https://example.com"}
 Open https://example.com and click Learn more -> {"url":"https://example.com","targetLabel":"Learn more"}
 Type ORD to JFK into the route field -> {"textToEnter":"ORD to JFK"}
+Reach the 256 tile in 2048 -> {"targetLabel":"256"}
 Return JSON only. Never invent a URL, app, or text.`;
 
 export class ChatCompletionTextModel implements TextModel {

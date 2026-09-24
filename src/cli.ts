@@ -23,7 +23,10 @@ const text = new ChatCompletionTextModel(
 const decision = new SystemOneHttpDecisionModel(
   required('SYSTEM_ONE_URL'), required('SYSTEM_ONE_MODEL'),
 );
-const result = await runTask(task, computer, text, decision).finally(() => computer.close());
+const maxSteps = Number(Bun.env.SYSTEM_ONE_MAX_STEPS || 16);
+const result = await runTask(task, computer, text, decision, maxSteps,
+  Bun.env.SYSTEM_ONE_TRACE === '1' ? step => console.error(JSON.stringify(step)) : undefined,
+).finally(() => computer.close());
 const dir = resolve('runs');
 await mkdir(dir, { recursive: true });
 const path = resolve(dir, `task-${new Date().toISOString().replaceAll(':', '-')}.json`);

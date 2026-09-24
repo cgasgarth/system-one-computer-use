@@ -96,11 +96,12 @@ export class CuaBrowserComputer implements Computer {
     const page = pageSchema.parse(await this.call('get_browser_state', {
       target_id: this.targetId, tab_id: this.tabId, snapshot_format: 'semantic_v2',
     }));
-    this.pageTitle = page.page.url;
+    this.pageTitle = `${page.page.title} | ${page.page.url}`;
     return { pid, window_id: windowId, snapshot_id: page.snapshot.id,
       app_name: this.browserApp, window_title: this.pageTitle,
       elements: [...page.refs, ...(page.content_refs || [])]
-        .filter(ref => ref.visibility === 'in_viewport').slice(0, 150).map((ref, index) => ({
+        .filter(ref => ['in_viewport', 'near_viewport'].includes(ref.visibility))
+        .slice(0, 150).map((ref, index) => ({
         element_index: index, element_token: ref.ref, role: ref.role,
         label: ref.name || ref.role, value: ref.value,
         actions: [

@@ -94,3 +94,20 @@ test('a setting search result is not proof that its page opened', async () => {
   await expect(runTask('Open Bluetooth settings', computer, text, decision, 3))
     .rejects.toThrow('No live Cua action');
 });
+
+test('a page with pending status cannot finish after navigation', async () => {
+  let navigated = false;
+  const browser: Computer = {
+    desktop: async () => desktop,
+    window: async () => ({ ...window, window_title: navigated ? 'https://example.com/' : 'about:blank',
+      elements: navigated ? [{ element_index: 1, element_token: 'p1:1', role: 'status', label: 'Task pending', actions: [] }] : [] }),
+    navigate: async () => { navigated = true; },
+    launchApp: async () => {}, clickElement: async () => {}, typeText: async () => {}, pressKey: async () => {},
+  };
+  const text: TextModel = { prepare: async () => ({ url: 'https://example.com' }) };
+  const decision: DecisionModel = { choose: async (_task, _observation, actions) => ({
+    action: actions[0], probabilities: { A0: 1 }, latencyMs: 1,
+  }) };
+  await expect(runTask('Open https://example.com', browser, text, decision, 3))
+    .rejects.toThrow('No live Cua action');
+});

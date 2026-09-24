@@ -25,6 +25,9 @@ function taskLooksComplete(plan: TaskPlan, observation: Observation,
                            clickedTargetBeforeTitle?: string): boolean {
   const window = observation.window;
   if (!window) return false;
+  const status = window.elements.find(element => element.role === 'status' &&
+    ['Task pending', 'Task complete', 'Task failed'].includes(element.label || ''));
+  if (status) return status.label === 'Task complete';
   const title = window.window_title.toLocaleLowerCase();
   if (plan.targetLabel) {
     const target = plan.targetLabel.toLocaleLowerCase();
@@ -42,7 +45,11 @@ function taskLooksComplete(plan: TaskPlan, observation: Observation,
 }
 
 function attemptKey(observation: Observation, action: Action): string {
-  return `${observation.window?.window_title || 'desktop'}|${action.kind}|${action.reason}`;
+  const state = observation.window
+    ? JSON.stringify([observation.window.window_title,
+        observation.window.elements.map(element => [element.role, element.label, element.value])])
+    : 'desktop';
+  return `${state}|${action.kind}|${action.reason}`;
 }
 
 function candidates(task: string, plan: TaskPlan, observation: Observation, hasActed: boolean,
@@ -71,7 +78,7 @@ function candidates(task: string, plan: TaskPlan, observation: Observation, hasA
                        element_token: element.element_token,
                        reason: `Activate ${element.label || element.role}` });
       }
-      if (plan.textToEnter && (editable ||
+      if (plan.textToEnter && element.value !== plan.textToEnter && (editable ||
                                (element.actions || []).includes('AXSetValue'))) {
         actions.push({ kind: 'type_text', pid, window_id,
                        element_token: element.element_token, text: plan.textToEnter,
@@ -93,7 +100,8 @@ function candidates(task: string, plan: TaskPlan, observation: Observation, hasA
 }
 
 export async function runTask(task: string, computer: Computer, text: TextModel,
-                              decision: DecisionModel, maxSteps = 16): Promise<TaskResult> {
+                              decision: DecisionModel, maxSteps = 16,
+                              onStep?: (step: TaskStep) => void): Promise<TaskResult> {
   if (!task.trim()) throw new Error('A text task is required');
   if (!Number.isInteger(maxSteps) || maxSteps < 1) throw new Error('maxSteps must be positive');
   const started = performance.now();
@@ -159,6 +167,7 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
         const totalMs = performance.now() - started;
         steps.push({ index: index + 1, action, probabilities: choice.probabilities,
                      decisionMs: choice.latencyMs, elapsedMs: totalMs });
+        onStep?.(steps.at(-1)!);
         return { task, summary: action.summary, totalMs, textMs,
                  requestsPerSecond: steps.length / (totalMs / 1000), steps };
       }
@@ -168,12 +177,14 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
       const elapsedMs = performance.now() - started;
       steps.push({ index: index + 1, action, probabilities: choice.probabilities,
                    decisionMs: choice.latencyMs, elapsedMs, error: String(error) });
+      onStep?.(steps.at(-1)!);
       history.push(`${describeAction(action)} Failed: ${String(error)}`);
       continue;
     }
     const elapsedMs = performance.now() - started;
     steps.push({ index: index + 1, action, probabilities: choice.probabilities,
                  decisionMs: choice.latencyMs, elapsedMs });
+    onStep?.(steps.at(-1)!);
     history.push(describeAction(action));
   }
   throw new Error(`Task did not finish within ${maxSteps} decisions; last action: ${history.at(-1) || 'none'}`);

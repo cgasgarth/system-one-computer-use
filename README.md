@@ -67,6 +67,9 @@ web server listens only on `127.0.0.1`, runs one task at a time, and does not
 store transcripts.
 
 The CLI prints a compact JSON trace. It does not record screenshots or voice.
+Set `SYSTEM_ONE_MAX_STEPS` for longer tasks and `SYSTEM_ONE_TRACE=1` to stream
+each model decision to stderr while it runs. The final trace is written under
+ignored `runs/` only when the task completes.
 The persistent Cua connection measured about 3 ms median for read-only desktop
 observations on the development Mac, versus about 53 ms when starting the CLI
 for every observation. These numbers do not measure a full task.
