@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 
-const driverModeSchema = z.enum(["browser", "desktop"]);
+const driverModeSchema = z.enum(["auto", "browser", "desktop"]);
 const taskTextSchema = z.string().trim().min(1);
 const taskInputSchema = z.strictObject({ mode: driverModeSchema, task: taskTextSchema });
 const countSchema = z.number().int().nonnegative();

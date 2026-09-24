@@ -135,7 +135,7 @@
       }
     },
     {
-      "files": ["src/agent/loop.ts", "src/computer/browser-adapter.ts"],
+      "files": ["src/agent/loop.ts"],
       "rules": {
         "eslint/no-await-in-loop": "off"
       }

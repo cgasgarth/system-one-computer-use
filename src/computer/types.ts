@@ -1,15 +1,12 @@
 import type { Action, Desktop, Window } from "../agent/contracts.ts";
+import { z } from "zod";
+
+const computerModeSchema = z.enum(["browser", "desktop"]);
+type ComputerMode = z.infer<typeof computerModeSchema>;
 
 type ClickAction = Extract<Action, { kind: "click_element" }>;
 type TypeAction = Extract<Action, { kind: "type_text" }>;
 type KeyAction = Extract<Action, { kind: "press_key" }>;
-
-interface BrowserTarget {
-  readonly pid: number;
-  readonly tabId: string;
-  readonly targetId: string;
-  readonly windowId: number;
-}
 
 interface Computer {
   readonly desktop: () => Promise<Desktop>;
@@ -25,4 +22,5 @@ interface ManagedComputer extends Computer {
   readonly close: () => Promise<void>;
 }
 
-export type { BrowserTarget, ClickAction, Computer, KeyAction, ManagedComputer, TypeAction };
+export { computerModeSchema };
+export type { ClickAction, Computer, ComputerMode, KeyAction, ManagedComputer, TypeAction };

@@ -76,7 +76,7 @@ test("lets the decision model choose live computer actions", async () => {
     computer: fixture.computer,
     decision: decisionFixture(),
     task: "Open Bluetooth settings",
-    text: textFixture({ app: "Settings", goal: "task" }),
+    text: textFixture({ app: "Settings", goal: "task", targetLabel: "Bluetooth" }),
   });
   expect(fixture.clicked).toEqual(["s00000001:1"]);
   expect(result.steps.map((step) => step.action.kind)).toEqual([

@@ -86,7 +86,17 @@ const openAppPlan = z.strictObject({
   goal: z.literal("open_app"),
 });
 const generalPlan = z.strictObject({ ...planFields, goal: z.literal("task") });
-const taskPlanSchema = z.discriminatedUnion("goal", [openUrlPlan, openAppPlan, generalPlan]);
+const enterTextPlan = z.strictObject({
+  ...planFields,
+  goal: z.literal("enter_text"),
+  textToEnter: z.string().min(1),
+});
+const taskPlanSchema = z.discriminatedUnion("goal", [
+  openUrlPlan,
+  openAppPlan,
+  enterTextPlan,
+  generalPlan,
+]);
 type TaskPlan = ReadonlyDeep<z.infer<typeof taskPlanSchema>>;
 
 function validateActions(actions: readonly Action[], observation: Observation): Action[] {

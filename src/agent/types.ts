@@ -2,7 +2,7 @@ import type { Computer } from "../computer/types.ts";
 import type { ActionProbabilities } from "../models/system-one-schema.ts";
 import type { DecisionModel } from "../models/system-one.ts";
 import type { TextModel } from "../models/text.ts";
-import type { Action } from "./contracts.ts";
+import type { Action, TaskPlan } from "./contracts.ts";
 
 interface TaskStep {
   readonly action: Action;
@@ -27,6 +27,8 @@ interface TaskOptions {
   readonly onStep?: (step: TaskStep) => void;
   readonly task: string;
   readonly text: TextModel;
+  readonly plan?: TaskPlan;
+  readonly preparationMs?: number;
 }
 interface WindowTarget {
   readonly pid: number;

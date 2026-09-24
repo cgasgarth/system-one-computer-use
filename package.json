@@ -5,15 +5,16 @@
   "type": "module",
   "scripts": {
     "start": "bun src/app/cli.ts",
-    "web": "bun src/app/web.ts",
     "test": "bun test tests",
     "lint": "oxlint --max-warnings 0 --report-unused-disable-directives",
     "check": "oxlint --type-aware --type-check --max-warnings 0 --report-unused-disable-directives && bun scripts/check-source-size.ts",
     "format": "oxfmt --write src tests scripts README.md AGENTS.md docs integrations/clm-mlx/README.md .oxlintrc.json .oxfmtrc.json tsconfig.json package.json",
-    "format:check": "oxfmt --check src tests scripts README.md AGENTS.md docs integrations/clm-mlx/README.md .oxlintrc.json .oxfmtrc.json tsconfig.json package.json"
+    "format:check": "oxfmt --check src tests scripts README.md AGENTS.md docs integrations/clm-mlx/README.md .oxlintrc.json .oxfmtrc.json tsconfig.json package.json",
+    "app:install": "bun scripts/install-macos.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.1.0",
+    "@playwright/mcp": "^0.0.82",
     "zod": "^4.1.12"
   },
   "devDependencies": {

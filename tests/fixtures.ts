@@ -49,7 +49,11 @@ function sceneWindow(
     return { ...window, window_title: "Sharing" };
   }
   if (scene === "settings") {
-    return { ...window, elements: clicked.length === 0 ? window.elements : [] };
+    return {
+      ...window,
+      elements: clicked.length === 0 ? window.elements : [],
+      window_title: clicked.length === 0 ? "Settings" : "Bluetooth",
+    };
   }
   if (navigated.length === 0) {
     return { ...window, elements: [], window_title: "about:blank" };
@@ -108,6 +112,9 @@ function computerFixture(scene: Scene): Fixture {
 
 function textFixture(plan: TaskPlan): TextModel {
   return {
+    async route() {
+      return "desktop";
+    },
     async prepare() {
       return plan;
     },

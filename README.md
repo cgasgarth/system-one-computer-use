@@ -1,61 +1,105 @@
 # System One Computer Use
 
-A provider-neutral computer-use harness for System One decision models. Give it
-a text task. It reads live controls through CUA, asks a model to choose an action,
-executes that action, and observes the result before the next decision.
+A native macOS menu-bar app and Bun harness for System One decision models.
+Enter a task or dictate with Handy. The harness reads live controls, asks the
+model to choose an action, executes it, and checks the resulting state.
 
-CLM, Jev, Kev, and other compatible services use the same HTTP adapter. The
-decision model, text model, and computer driver are separate interfaces. This
-repository does not train or include a custom decision model.
+The decision model, text model, and computer driver are separate interfaces.
+CLM, Jev, Kev, and other compatible services use the same HTTP adapter. This
+repository does not train a custom decision model.
 
-## Run
+## macOS app
 
-Install [Bun](https://bun.sh/) and [CUA Driver](https://github.com/trycua/cua).
-Start `CuaDriver.app` and grant its Accessibility and Screen Recording permissions.
-Start Chrome for browser tasks.
+Install [Bun](https://bun.sh/), Xcode Command Line Tools, and
+[CUA Driver](https://github.com/trycua/cua). Native tasks use CUA's Accessibility
+and Screen Recording grants. Browser tasks use the
+[Playwright Chrome extension](https://github.com/microsoft/playwright/tree/main/packages/extension).
 
 ```bash
 bun install --frozen-lockfile
 cp .env.example .env
-# Set your decision and text endpoints in .env.
-bun run start "Open https://example.com and inspect the page"
+# Configure your decision and text model services, then start them.
+bun run app:install
+open "$HOME/Applications/System One Computer Use.app"
 ```
 
-| Setting                | Purpose                                                      |
-| ---------------------- | ------------------------------------------------------------ |
-| `SYSTEM_ONE_URL`       | Complete System One HTTP endpoint, including `/v1/systemone` |
-| `SYSTEM_ONE_MODEL`     | The provider's model ID                                      |
-| `SYSTEM_ONE_API_KEY`   | Optional bearer token                                        |
-| `TEXT_MODEL_URL`       | Chat-completion endpoint for task text                       |
-| `TEXT_MODEL_ID`        | The text provider's model ID                                 |
-| `TEXT_MODEL_API_KEY`   | Optional bearer token                                        |
-| `CUA_MODE`             | `browser` or `desktop`                                       |
-| `CUA_BROWSER_APP`      | Browser application; defaults to Google Chrome               |
-| `SYSTEM_ONE_MAX_STEPS` | Decision limit; defaults to 16                               |
-| `SYSTEM_ONE_TRACE`     | Set to `1` to print each decision                            |
+Click the **cursor icon** in the menu bar. The dropdown contains task input,
+voice control, status, and timing. It has no web portal or detached task window.
 
-The example configuration uses local CLM. To use a hosted model, replace the
-decision URL, model ID, and optional key. The task loop contains no provider list
-or model-name branches. A provider with another protocol can implement
-[`DecisionModel`](src/models/system-one.ts).
+- **Any** is the default. Model planning selects Chrome or a native application.
+  Chrome and macOS remain explicit overrides.
+- **Command–Option–C** starts Handy dictation. Press it again to stop. Handy
+  pastes its transcript into the task field, which starts the task.
+- **Settings** opens a separate page inside the dropdown. Change the voice
+  shortcut, default computer, decision endpoint/model, and text endpoint/model.
+- **Stop** cancels the task or voice input. Click outside to dismiss the dropdown.
 
-### Local CLM on Apple Silicon
+[Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`
+with its microphone access and a transcription model configured. Use Handy's
+standard clipboard paste method. The app does not change your regular Handy
+shortcut. Live speech requires a working microphone; a silent recording cannot
+produce a task.
 
-The optional [CLM MLX integration](integrations/clm-mlx/README.md) serves the
-published CLM-8B heads with a Qwen3-8B encoder running in MLX:
+The installed runtime is bundled inside the app. Local settings and task traces
+live in `~/Library/Application Support/SystemOneComputerUse/`. The installer
+copies `.env` there on first install. Later Settings changes affect that app
+configuration. The CLI continues to use the checkout's `.env`.
+
+### Chrome connection
+
+Keep Chrome and its Playwright extension available. Set
+`PLAYWRIGHT_MCP_EXTENSION_TOKEN`, or reuse the existing Playwright token in
+`~/.claude.json`. Credentials stay local. The token avoids repeated connection
+approval dialogs.
+
+The current Playwright extension gives each connected client its own tab group.
+The app keeps one connection across tasks. Drag an existing tab into the
+**system-one-computer-use** group to make it available. The connection's Welcome
+tab closes after a usable tab is attached. Other clients' tabs remain outside
+this connection.
+
+Playwright MCP is installed from npm's latest release and locked in `bun.lock`.
+The browser adapter uses that release's `target` references for clicks and typing.
+
+### Timing
+
+The task dropdown shows:
+
+| Metric       | Definition                                                      |
+| ------------ | --------------------------------------------------------------- |
+| Avg request  | Mean System One HTTP decision latency, in milliseconds          |
+| Requests / s | Completed System One decisions divided by total task time       |
+| Task time    | Time including model planning, driver operations, and decisions |
+
+Planning calls use the text model and are included in task time. They are not
+counted as System One decisions. Observation and completion decisions do count.
+These are measured values; they are not a model-only theoretical throughput.
+
+## Model services
+
+| Setting                          | Purpose                                      |
+| -------------------------------- | -------------------------------------------- |
+| `SYSTEM_ONE_URL`                 | Complete endpoint, including `/v1/systemone` |
+| `SYSTEM_ONE_MODEL`               | Decision provider's model ID                 |
+| `SYSTEM_ONE_API_KEY`             | Optional bearer token                        |
+| `TEXT_MODEL_URL`                 | Chat-completion endpoint                     |
+| `TEXT_MODEL_ID`                  | Text provider's model ID                     |
+| `TEXT_MODEL_API_KEY`             | Optional bearer token                        |
+| `CUA_MODE`                       | `auto` (default), `browser`, or `desktop`    |
+| `CUA_DRIVER_BIN`                 | CUA executable; defaults to `cua-driver`     |
+| `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Optional explicit Chrome extension token     |
+| `SYSTEM_ONE_MAX_STEPS`           | Decision limit; defaults to 16               |
+| `SYSTEM_ONE_TRACE`               | Set to `1` for CLI decision output           |
+
+The optional [CLM MLX integration](integrations/clm-mlx/README.md) runs published
+CLM-8B heads with an MLX Qwen3-8B encoder:
 
 ```bash
 uv run --project integrations/clm-mlx --frozen clm-mlx --bits 4
 ```
 
-This provides `http://127.0.0.1:8700/v1/systemone` with model ID `clm-latest`.
-The first start downloads the pinned public weights. This integration is
-independent of the TypeScript task loop.
-
-### Text service
-
-Any compatible chat-completion service can supply task text. One tested local
-option is Qwen3.5-2B in MLX:
+It serves `http://127.0.0.1:8700/v1/systemone` with model ID `clm-latest`.
+A separate small chat model supplies task text. For example:
 
 ```bash
 uv tool install mlx-lm==0.31.3
@@ -63,65 +107,64 @@ mlx_lm.server --model mlx-community/Qwen3.5-2B-4bit --port 8080 \
   --chat-template-args '{"enable_thinking":false}'
 ```
 
-For `mlx-lm`, `TEXT_MODEL_ID=default_model` selects the model loaded by the server.
-The text model extracts the requested app, URL, target, and text once per task.
-Only values present in the user request can drive navigation or typing.
+For `mlx-lm`, `TEXT_MODEL_ID=default_model` uses the loaded model.
 
-### Task page and Handy
+## CLI
 
 ```bash
-bun run web
+bun run start "Open https://example.com and inspect the page"
+CUA_MODE=desktop bun run start "Open Calculator"
 ```
 
-Open the printed local address. Type a task, or dictate with Handy into the task
-field, then press **Run task**. The page and CLI use the same task loop. The local
-page accepts one task at a time and keeps credentials on the server.
+CLI traces go to ignored `runs/`. The app uses a persistent JSON-lines worker
+with the same task loop and adapters. Provider protocols other than System One
+can implement [`DecisionModel`](src/models/system-one.ts).
 
-## How it works
+## Behavior and limits
 
-- External configuration, requests, CUA results, and model responses are validated
-  with Zod at their boundaries. Internal functions use the resulting types.
-- The model receives semantic action descriptions. Temporary CUA handles stay
-  local, so changing a handle does not invalidate a model's action-text cache.
-- The selected action must refer to a control in the latest observation.
-  Browser observations use CUA's exact tab binding; desktop observations stay
-  inside the selected native window.
-- Text is inserted in one operation. A Return action is available only after
-  the requested text is visible in a field.
-- Completion requires an observed result. A previous task's completion status
-  cannot complete a new task. Refused CUA operations are recorded as failures.
-- The text plan distinguishes opening a URL or app from a larger task. Simple
-  opening tasks stop when the requested URL or app is observed; complex tasks
-  continue through the decision model.
+External configuration, HTTP responses, model output, and driver data are
+validated with Zod. Swift validates its IPC messages with Codable. Internal
+TypeScript uses schema-derived types and concrete driver methods.
 
-The browser driver uses an isolated Chrome profile and CUA's explicit DOM-event
-click route. Sites that require trusted input can reject that route. Controls
-that exist only as pixels still need a visual-grounding adapter.
+Actions use current references. Native tasks stay inside a named application's
+windows. CUA's own authorization windows and the harness UI are excluded.
+Temporary native window activation failures receive a bounded retry. Driver
+refusals remain failures.
 
-Completed CLI traces are written to ignored `runs/`. They report total time,
-decision time, actions, and probabilities. Full-task time includes planning and
-computer operations; model response time measures a different boundary.
+The current planner supports explicit URLs, opening named apps, clicking named
+controls, and entering supplied text. A verified simple goal stops further
+actions. General tasks must provide observable completion evidence.
+
+**Complex workflows remain under development.** Diagram authoring, arbitrary
+canvas interaction, and reliable multi-app workflows are not validated yet.
+A System One model ranks supplied choices; it does not independently generate
+arbitrary text, coordinates, or a complete workflow. Small text models can also
+misclassify tasks. Failed validation stops the task and displays an error.
 
 ## Development
 
 ```bash
-bun run check       # Oxlint plus strict TypeScript checks
+bun run check
 bun test
 bun run format
+bun run app:install
 ```
 
-`tsconfig.json` extends `@tsconfig/strictest`. Oxlint enables all categories at
-error severity, uses type-aware checks, and allows zero warnings. Source files
-have a hard 600-line limit. [Engineering rules](docs/engineering.md) explain the
-small set of syntax and SDK compatibility exceptions.
+TypeScript extends `@tsconfig/strictest`. Oxlint enables all categories at error
+severity with type-aware checks and zero warnings. Source files, including Swift,
+have a hard 600-line limit. See [engineering rules](docs/engineering.md).
 
 ```text
 src/
-  agent/       action candidates, completion, execution, task loop
-  app/         CLI, local task page, configuration and HTTP boundaries
-  computer/    CUA transport schemas and native/browser adapters
-  models/      System One and text-provider contracts and adapters
+  agent/       candidates, completion, execution, task loop
+  app/         CLI, native worker, settings and configuration boundaries
+  computer/    CUA and Playwright adapters
+  models/      decision and text model adapters
+native/
+  SystemOne/   AppKit menu-bar UI, settings, shortcuts, IPC
 integrations/
   clm-mlx/     optional local CLM serving adapter
-tests/         task behavior and provider protocol checks
 ```
+
+Keep recordings and experiments under ignored `runs/`. Demo videos use real app
+footage and remain local. No GitHub Actions or YouTube uploads.

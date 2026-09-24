@@ -1,5 +1,6 @@
 import type { Desktop, Window } from "../agent/contracts.ts";
 import { CuaConnection } from "./connection.ts";
+import { taskDesktop } from "./targets.ts";
 import type { ClickAction, Computer, KeyAction, TypeAction } from "./types.ts";
 
 const HALF = 2;
@@ -16,7 +17,7 @@ class CuaMcpComputer implements Computer {
   }
 
   public async desktop(): Promise<Desktop> {
-    return this.connection.desktop();
+    return taskDesktop(await this.connection.desktop());
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {

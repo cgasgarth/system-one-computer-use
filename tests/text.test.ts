@@ -43,7 +43,11 @@ test("rejects prose in place of a task plan", async () => {
 
 test("accepts fenced JSON and grounds its fields in the user task", async () => {
   const server = Bun.serve({
-    fetch() {
+    async fetch(request) {
+      const input = textRequestSchema.parse(await request.json());
+      if (input.messages[0]?.content.startsWith("Classify") === true) {
+        return Response.json({ choices: [{ message: { content: "enter_text" } }] });
+      }
       return Response.json({
         choices: [
           {
@@ -60,7 +64,7 @@ test("accepts fenced JSON and grounds its fields in the user task", async () => 
   try {
     const model = new ChatCompletionTextModel(server.url.href, "small-text");
     const plan = await model.prepare("Type ORD to JFK into the route field");
-    expect(plan).toEqual({ goal: "task", textToEnter: "ORD to JFK" });
+    expect(plan).toEqual({ goal: "enter_text", textToEnter: "ORD to JFK" });
   } finally {
     await server.stop(true);
   }

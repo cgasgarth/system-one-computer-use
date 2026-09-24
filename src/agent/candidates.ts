@@ -18,17 +18,19 @@ interface CandidateContext {
 
 function desktopActions(plan: TaskPlan, observation: Observation): Action[] {
   const actions: Action[] = [];
-  if (
-    plan.app !== undefined &&
-    !observation.desktop.windows.some((window) => window.app_name === plan.app)
-  ) {
+  const windows = observation.desktop.windows.filter(
+    (window) =>
+      plan.app === undefined ||
+      window.app_name.toLocaleLowerCase() === plan.app.toLocaleLowerCase(),
+  );
+  if (plan.app !== undefined && windows.length === 0) {
     actions.push({
       kind: "launch_app",
       name: plan.app,
       reason: "Open the application named in the task",
     });
   }
-  for (const window of observation.desktop.windows) {
+  for (const window of windows) {
     actions.push({
       kind: "observe_window",
       pid: window.pid,

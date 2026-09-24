@@ -23,8 +23,8 @@ function completed(options: TaskOptions, steps: readonly TaskStep[], timing: Tim
 }
 
 async function runTask(options: TaskOptions): Promise<TaskResult> {
-  const started = performance.now();
-  const plan = await options.text.prepare(options.task);
+  const started = performance.now() - (options.preparationMs ?? 0);
+  const plan = options.plan ?? (await options.text.prepare(options.task));
   const textMs = performance.now() - started;
   let progress = initialProgress();
   const steps: TaskStep[] = [];

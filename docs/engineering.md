@@ -38,3 +38,8 @@ The configuration makes explicit compatibility choices:
 No blanket unsafe-type suppressions are used. The test suite checks provider
 interchangeability, response validation, live action grounding, typing conditions,
 and observed task completion.
+
+The native shell uses Swift 6 and AppKit. Its JSON messages have Codable
+contracts; model settings cross a Zod boundary in the Bun process before saving.
+The installer bundles the worker and Playwright runtime. The app reads its own
+Application Support configuration and does not need access to the source checkout.

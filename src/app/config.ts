@@ -1,26 +1,23 @@
 import type { ReadonlyDeep } from "type-fest";
 import { z } from "zod";
-import { CuaBrowserComputer } from "../computer/browser-adapter.ts";
+import { PlaywrightComputer } from "../computer/playwright/computer.ts";
 import { CuaMcpComputer } from "../computer/native.ts";
-import type { ManagedComputer } from "../computer/types.ts";
+import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import { SystemOneHttpDecisionModel } from "../models/system-one.ts";
 import type { DecisionModel } from "../models/system-one.ts";
 import { ChatCompletionTextModel } from "../models/text.ts";
 import type { TextModel } from "../models/text.ts";
 import { driverModeSchema } from "./task-schema.ts";
+import type { TaskPlan } from "../agent/contracts.ts";
 
-const DEFAULT_PORT = 8787;
-const MAX_PORT = 65_535;
 const DEFAULT_STEPS = 16;
 const endpointSchema = z.url({ protocol: /^https?$/u });
 const optionalKey = z.string().min(1).optional();
 const stepsSchema = z.coerce.number().int().positive().default(DEFAULT_STEPS);
-const portSchema = z.coerce.number().int().positive().max(MAX_PORT).default(DEFAULT_PORT);
 const configSchema = z.object({
-  CUA_BROWSER_APP: z.string().default("Google Chrome"),
   CUA_DRIVER_BIN: z.string().default("cua-driver"),
-  CUA_MODE: driverModeSchema.default("browser"),
-  PORT: portSchema,
+  CUA_MODE: driverModeSchema.default("auto"),
+  PLAYWRIGHT_MCP_EXTENSION_TOKEN: optionalKey,
   SYSTEM_ONE_API_KEY: optionalKey,
   SYSTEM_ONE_MAX_STEPS: stepsSchema,
   SYSTEM_ONE_MODEL: z.string().min(1),
@@ -35,6 +32,12 @@ type DriverMode = z.infer<typeof driverModeSchema>;
 interface Models {
   readonly decision: DecisionModel;
   readonly text: TextModel;
+}
+interface RoutingContext {
+  readonly mode: DriverMode;
+  readonly task: string;
+  readonly model: TextModel;
+  readonly plan: TaskPlan;
 }
 
 function loadConfig(): Config {
@@ -56,12 +59,29 @@ function createModels(config: Config): Models {
   };
 }
 
-function createComputer(config: Config, mode: DriverMode): ManagedComputer {
+function createComputer(config: Config, mode: ComputerMode): ManagedComputer {
   if (mode === "browser") {
-    return new CuaBrowserComputer(config.CUA_BROWSER_APP, config.CUA_DRIVER_BIN);
+    return new PlaywrightComputer(config.PLAYWRIGHT_MCP_EXTENSION_TOKEN);
   }
   return new CuaMcpComputer(config.CUA_DRIVER_BIN);
 }
 
-export { createComputer, createModels, loadConfig };
+async function resolveMode({ mode, task, model, plan }: RoutingContext): Promise<ComputerMode> {
+  if (mode !== "auto") {
+    return mode;
+  }
+  // A model-selected URL requires the browser driver's navigation capability.
+  if (plan.url !== undefined) {
+    return "browser";
+  }
+  const selected = await model.route(task);
+  if (selected === "desktop" && plan.app === undefined) {
+    throw new Error(
+      "The model could not identify the native app. Include the app name in your task.",
+    );
+  }
+  return selected;
+}
+
+export { createComputer, createModels, loadConfig, resolveMode };
 export type { Config, DriverMode };

@@ -5,22 +5,7 @@ import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 import { desktopSchema, windowSchema } from "../agent/contracts.ts";
 import type { Desktop, Window } from "../agent/contracts.ts";
-import {
-  appsSchema,
-  bindingSchema,
-  pageSchema,
-  preparedSchema,
-  windowsSchema,
-} from "./browser-schema.ts";
-import type {
-  Apps,
-  BrowserBinding,
-  BrowserPage,
-  NativeWindow,
-  NativeWindows,
-  PreparedBrowser,
-} from "./browser-schema.ts";
-import type { BrowserTarget, ClickAction, KeyAction, TypeAction } from "./types.ts";
+import type { ClickAction, KeyAction, TypeAction } from "./types.ts";
 import { CuaError } from "./errors.ts";
 
 const ERROR_DETAIL_LIMIT = 800;
@@ -33,11 +18,22 @@ const acceptedStatus = z
   )
   .optional();
 const resultStatus = z.object({ effect: acceptedStatus, status: acceptedStatus });
+const nativeWindowsSchema = z.object({
+  windows: z.array(desktopSchema.shape.windows.element.extend({ layer: z.number() })),
+});
+const launchedSchema = z.object({ pid: z.number().int().positive() });
+const unavailableWindowSchema = z.object({
+  degraded_reason: z.string(),
+  pid: z.number().int(),
+  window_id: z.number().int(),
+});
+const observedWindowSchema = z.union([windowSchema, unavailableWindowSchema]);
+const WINDOW_ATTEMPTS = 15;
+const WINDOW_SETTLE_MS = 100;
 
 class CuaConnection {
   private readonly binary: string;
   private readonly client = new Client({ name: "system-one-computer-use", version: "0.1.0" });
-  private readonly session = `system-one-browser-${crypto.randomUUID()}`;
   private connected: Promise<void> | undefined = undefined;
 
   public constructor(binary = "cua-driver") {
@@ -74,122 +70,50 @@ class CuaConnection {
   }
 
   public async desktop(): Promise<Desktop> {
-    return this.invoke({ name: "get_accessibility_tree" }, desktopSchema);
+    const [desktop, all] = await Promise.all([
+      this.invoke({ name: "get_accessibility_tree" }, desktopSchema),
+      this.invoke({ name: "list_windows" }, nativeWindowsSchema),
+    ]);
+    return {
+      ...desktop,
+      windows: all.windows.filter((window) => window.layer === 0 && window.title.length > 0),
+    };
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {
-    return this.invoke(
+    await this.invoke(
+      { name: "bring_to_front", arguments: { pid, window_id: windowId } },
+      resultStatus,
+    );
+    return this.readWindow(pid, windowId, WINDOW_ATTEMPTS);
+  }
+
+  private async readWindow(pid: number, windowId: number, attempts: number): Promise<Window> {
+    const state = await this.invoke(
       {
+        name: "get_window_state",
         arguments: {
           include_screenshot: false,
           max_elements: MAX_ELEMENTS,
           pid,
           window_id: windowId,
         },
-        name: "get_window_state",
       },
-      windowSchema,
+      observedWindowSchema,
     );
-  }
-
-  public async apps(): Promise<Apps> {
-    return this.invoke({ name: "list_apps" }, appsSchema);
-  }
-
-  public async windows(): Promise<NativeWindows> {
-    return this.invoke({ name: "list_windows" }, windowsSchema);
-  }
-
-  public async prepareBrowser(pid: number): Promise<PreparedBrowser> {
-    return this.invoke(
-      {
-        arguments: {
-          allow_launch: true,
-          pid,
-          profile: { mode: "isolated_new" },
-          session: this.session,
-        },
-        name: "browser_prepare",
-      },
-      preparedSchema,
-    );
-  }
-
-  public async bindBrowser(window: NativeWindow): Promise<BrowserBinding> {
-    return this.invoke(
-      {
-        arguments: {
-          pid: window.pid,
-          session: this.session,
-          snapshot_format: "semantic_v2",
-          window_id: window.window_id,
-        },
-        name: "get_browser_state",
-      },
-      bindingSchema,
-    );
-  }
-
-  public async browserPage(target: BrowserTarget): Promise<BrowserPage> {
-    return this.invoke(
-      {
-        arguments: {
-          session: this.session,
-          snapshot_format: "semantic_v2",
-          tab_id: target.tabId,
-          target_id: target.targetId,
-        },
-        name: "get_browser_state",
-      },
-      pageSchema,
-    );
-  }
-
-  public async navigateBrowser(target: BrowserTarget, url: string): Promise<void> {
-    await this.invoke(
-      {
-        arguments: { session: this.session, tab_id: target.tabId, target_id: target.targetId, url },
-        name: "browser_navigate",
-      },
-      resultStatus,
-    );
-  }
-
-  public async clickBrowser(target: BrowserTarget, action: ClickAction): Promise<void> {
-    await this.invoke(
-      {
-        arguments: {
-          input_route: "dom_event",
-          ref: action.element_token,
-          session: this.session,
-          tab_id: target.tabId,
-          target_id: target.targetId,
-        },
-        name: "browser_click",
-      },
-      resultStatus,
-    );
-  }
-
-  public async typeBrowser(target: BrowserTarget, action: TypeAction): Promise<void> {
-    await this.invoke(
-      {
-        arguments: {
-          ref: action.element_token,
-          replace: true,
-          session: this.session,
-          tab_id: target.tabId,
-          target_id: target.targetId,
-          text: action.text,
-        },
-        name: "browser_type",
-      },
-      resultStatus,
-    );
+    if (!("degraded_reason" in state)) {
+      return state;
+    }
+    if (!state.degraded_reason.startsWith("ax_window_unresolved") || attempts <= 1) {
+      throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
+    }
+    await Bun.sleep(WINDOW_SETTLE_MS);
+    return this.readWindow(pid, windowId, attempts - 1);
   }
 
   public async launchApp(name: string): Promise<void> {
-    await this.invoke({ arguments: { name }, name: "launch_app" }, resultStatus);
+    const app = await this.invoke({ arguments: { name }, name: "launch_app" }, launchedSchema);
+    await this.invoke({ name: "bring_to_front", arguments: { pid: app.pid } }, resultStatus);
   }
 
   public async click(action: ClickAction): Promise<void> {
