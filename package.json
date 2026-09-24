@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/cli.ts",
+    "web": "bun src/web.ts",
     "test": "bun test"
   },
   "dependencies": {

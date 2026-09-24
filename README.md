@@ -43,7 +43,13 @@ Browser clicks use Cua's explicit DOM event route because trusted background
 input is refused on this setup; each click needs a fresh page observation to
 confirm its effect. Sites that require trusted input may not respond.
 Screens with only pixels still need visual grounding. Handy transcription will
-feed the same task entry point after live tasks are verified.
+feed the same task entry point.
+
+To use Handy, run `bun run web`, open the local address it prints, and focus the
+task field. Dictate with Handy, then press **Run task** after Handy pastes the
+transcript. The page sends the text through the same task loop as the CLI. The
+web server listens only on `127.0.0.1`, runs one task at a time, and does not
+store transcripts.
 
 The CLI prints a compact JSON trace. It does not record screenshots or voice.
 The persistent Cua connection measured about 3 ms median for read-only desktop
