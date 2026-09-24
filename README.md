@@ -7,8 +7,8 @@ decision model choose the next action. The harness checks each action against
 the current Cua snapshot before it acts.
 
 The decision model, text generator, and computer driver are separate interfaces.
-The first driver uses the installed `cua-driver` daemon and its macOS permission
-identity. The text generator can be any local service with a compatible chat
+The first driver holds one Cua MCP connection to the installed `cua-driver`
+daemon and its macOS permission identity. The text generator can be any local service with a compatible chat
 completion endpoint. Voice input from Handy will feed the same task interface
 after the text path is verified.
 
@@ -31,6 +31,9 @@ that exposes only pixels needs a separate visual grounding provider before the
 harness can act on it. Browser tabs and Handy transcription are later adapters.
 
 The CLI prints a compact JSON trace. It does not record screenshots or voice.
+The persistent Cua connection measured about 3 ms median for read-only desktop
+observations on the development Mac, versus about 53 ms when starting the CLI
+for every observation. These numbers do not measure a full task.
 
 ## Boundaries
 
