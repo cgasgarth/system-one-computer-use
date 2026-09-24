@@ -16,6 +16,7 @@ export class ChatCompletionTextModel implements TextModel {
   async prepare(task: string): Promise<TaskPlan> {
     const response = await fetch(this.endpoint, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { 'content-type': 'application/json', ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
       body: JSON.stringify({ model: this.modelId, temperature: 0, max_tokens: 180,
         messages: [

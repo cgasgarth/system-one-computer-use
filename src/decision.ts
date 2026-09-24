@@ -31,6 +31,7 @@ export class SystemOneHttpDecisionModel implements DecisionModel {
     const start = performance.now();
     const response = await fetch(this.endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json' },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
         model: this.modelId, state,
         questions: { next_action: {

@@ -14,6 +14,7 @@ export type TaskResult = {
   task: string;
   summary: string;
   totalMs: number;
+  textMs: number;
   requestsPerSecond: number;
   steps: TaskStep[];
 };
@@ -59,8 +60,10 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
   if (!Number.isInteger(maxSteps) || maxSteps < 1) throw new Error('maxSteps must be positive');
   const started = performance.now();
   const plan = await text.prepare(task);
+  const textMs = performance.now() - started;
   const steps: TaskStep[] = [];
   let target: { pid: number; windowId: number } | undefined;
+  let hasEffectfulAction = false;
   const history: string[] = [];
 
   for (let index = 0; index < maxSteps; index++) {
@@ -72,7 +75,7 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
       target = undefined;
     }
     const observation: Observation = { desktop, window };
-    const actions = candidates(task, plan, observation, history.length > 0);
+    const actions = candidates(task, plan, observation, hasEffectfulAction);
     if (!actions.length) throw new Error(`No live Cua action is available for task step ${index + 1}`);
     const choice = await decision.choose(task, observation, actions);
     const action = choice.action;
@@ -83,21 +86,25 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
       case 'launch_app':
         await computer.launchApp(action.name);
         target = undefined;
+        hasEffectfulAction = true;
         break;
       case 'click_element':
         await computer.clickElement(action.pid, action.window_id, action.element_token);
+        hasEffectfulAction = true;
         break;
       case 'type_text':
         await computer.typeText(action.pid, action.window_id, action.element_token, action.text);
+        hasEffectfulAction = true;
         break;
       case 'press_key':
         await computer.pressKey(action.pid, action.window_id, action.key, action.modifiers);
+        hasEffectfulAction = true;
         break;
       case 'finish': {
         const totalMs = performance.now() - started;
         steps.push({ index: index + 1, action, probabilities: choice.probabilities,
                      decisionMs: choice.latencyMs, elapsedMs: totalMs });
-        return { task, summary: action.summary, totalMs,
+        return { task, summary: action.summary, totalMs, textMs,
                  requestsPerSecond: steps.length / (totalMs / 1000), steps };
       }
     }
