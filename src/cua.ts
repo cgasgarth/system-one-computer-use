@@ -21,7 +21,8 @@ export class CuaMcpComputer implements Computer {
     this.connected ??= this.client.connect(new StdioClientTransport({ command: this.binary, args: ['mcp'] }));
     await this.connected;
     const result = await this.client.callTool({ name, arguments: args });
-    if (result.isError) {
+    const state = result.structuredContent as { status?: string; effect?: string } | undefined;
+    if (result.isError || state?.status === 'refused' || state?.effect === 'refused') {
       const detail = result.content?.filter(item => item.type === 'text').map(item => item.text).join(' ') || 'unknown error';
       throw new Error(`Cua ${name} failed: ${detail.slice(0, 800)}`);
     }
@@ -38,9 +39,19 @@ export class CuaMcpComputer implements Computer {
   }
 
   async window(pid: number, windowId: number): Promise<Window> {
-    return windowSchema.parse(await this.call('get_window_state', {
+    const snapshot = windowSchema.parse(await this.call('get_window_state', {
       pid, window_id: windowId, include_screenshot: false, max_elements: 150,
     }));
+    const root = snapshot.elements.find(element => element.role === 'AXWindow' && element.frame)?.frame;
+    if (!root) return snapshot;
+    return { ...snapshot, elements: snapshot.elements.filter(element => {
+      const frame = element.frame;
+      if (!frame) return false;
+      const middleX = frame.x + frame.w / 2;
+      const middleY = frame.y + frame.h / 2;
+      return middleX >= root.x && middleX <= root.x + root.w &&
+        middleY >= root.y && middleY <= root.y + root.h;
+    }) };
   }
 
   async launchApp(name: string): Promise<void> {

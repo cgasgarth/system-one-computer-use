@@ -26,6 +26,15 @@ describe('live Cua action boundary', () => {
       reason: 'Invented target' };
     expect(validateActions([action], { desktop })).toEqual([]);
   });
+
+  test('does not type into a static text label', () => {
+    const staticWindow = { ...window, elements: [
+      { element_index: 2, element_token: 's00000001:2', role: 'AXStaticText', label: 'Sharing', actions: ['AXPress'] },
+    ] };
+    const action: Action = { kind: 'type_text', pid: 7, window_id: 9,
+      element_token: 's00000001:2', text: 'Bluetooth', reason: 'Search settings' };
+    expect(validateActions([action], { desktop, window: staticWindow })).toEqual([]);
+  });
 });
 
 test('text task drives observed action through the decision model', async () => {
@@ -54,7 +63,7 @@ test('a browser task navigates through a live isolated tab once', async () => {
   const navigated: string[] = [];
   const browser: Computer = {
     desktop: async () => desktop,
-    window: async () => ({ ...window, window_title: navigated.length ? 'Example Domain' : 'about:blank', elements: [] }),
+    window: async () => ({ ...window, window_title: navigated.length ? 'https://example.com/' : 'about:blank', elements: [] }),
     navigate: async url => { navigated.push(url); },
     launchApp: async () => { throw new Error('unexpected launch'); },
     clickElement: async () => { throw new Error('unexpected click'); },
@@ -68,4 +77,20 @@ test('a browser task navigates through a live isolated tab once', async () => {
   const result = await runTask('Open https://example.com', browser, text, decision);
   expect(navigated).toEqual(['https://example.com']);
   expect(result.steps.map(step => step.action.kind)).toEqual(['observe_window', 'navigate', 'finish']);
+});
+
+test('a setting search result is not proof that its page opened', async () => {
+  const computer: Computer = {
+    desktop: async () => desktop,
+    window: async () => ({ ...window, window_title: 'Sharing', elements: [
+      { element_index: 1, element_token: 's00000001:1', role: 'AXButton', label: 'Bluetooth', actions: ['AXPress'] },
+    ] }),
+    launchApp: async () => {}, clickElement: async () => {}, typeText: async () => {}, pressKey: async () => {},
+  };
+  const text: TextModel = { prepare: async () => ({ app: 'Settings', targetLabel: 'Bluetooth' }) };
+  const decision: DecisionModel = { choose: async (_task, _observation, actions) => ({
+    action: actions[0], probabilities: { A0: 1 }, latencyMs: 1,
+  }) };
+  await expect(runTask('Open Bluetooth settings', computer, text, decision, 3))
+    .rejects.toThrow('No live Cua action');
 });

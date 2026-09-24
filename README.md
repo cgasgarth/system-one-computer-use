@@ -79,4 +79,9 @@ for every observation. These numbers do not measure a full task.
 - The harness accepts an element only when its one-use Cua token is present in
   the latest observation. A stale or invented token fails with a clear error.
 - Each action is followed by a new observation. The loop stops on a selected
-  `finish` action or its step limit.
+  `finish` action only when the observed app, URL, entered text, or requested
+  target supports completion. Repeated controls are blocked within the same
+  window. A refused Cua action is recorded and cannot count as success.
+- Native controls outside the target window and switch controls are not
+  offered as actions. Some macOS search results appear as static text with no
+  reliable Cua accessibility action; those tasks stop with a clear error.

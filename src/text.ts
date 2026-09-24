@@ -10,13 +10,16 @@ const completionSchema = z.object({
 });
 const rawPlanSchema = z.strictObject({
   app: z.string().optional(), url: z.string().optional(), textToEnter: z.string().optional(),
+  targetLabel: z.string().optional(),
 });
 const planPrompt = `Extract only values that occur in the user's task. Return one JSON object, with no Markdown.
 Use app only when the task names an application. Use url only when the task contains that exact full URL.
-Use textToEnter only for text the task explicitly asks to type or write. Omit unused fields.
+Use textToEnter only for text the task explicitly asks to type, write, or find in a search field.
+Use targetLabel for the named setting, page control, or result that must be reached. Omit unused fields.
 Examples:
-Open System Settings and find Bluetooth settings -> {"app":"System Settings"}
+Open System Settings and find Bluetooth settings -> {"app":"System Settings","textToEnter":"Bluetooth","targetLabel":"Bluetooth"}
 Open https://example.com and inspect the page -> {"url":"https://example.com"}
+Open https://example.com and click Learn more -> {"url":"https://example.com","targetLabel":"Learn more"}
 Type ORD to JFK into the route field -> {"textToEnter":"ORD to JFK"}
 Return JSON only. Never invent a URL, app, or text.`;
 
@@ -51,6 +54,8 @@ export class ChatCompletionTextModel implements TextModel {
         ? { url: raw.url.trim() } : {}),
       ...(raw.textToEnter?.trim() && contains(raw.textToEnter.trim())
         ? { textToEnter: raw.textToEnter.trim() } : {}),
+      ...(raw.targetLabel?.trim() && contains(raw.targetLabel.trim())
+        ? { targetLabel: raw.targetLabel.trim() } : {}),
     });
   }
 }

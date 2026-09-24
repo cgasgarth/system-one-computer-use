@@ -12,7 +12,7 @@ export const windowSchema = z.object({
   window_id: z.number().int(),
   snapshot_id: z.string(),
   app_name: z.string(),
-  window_title: z.string(),
+  window_title: z.string().default(''),
   elements: z.array(z.object({
     element_index: z.number().int(),
     element_token: z.string(),
@@ -20,6 +20,7 @@ export const windowSchema = z.object({
     label: z.string().optional(),
     value: z.unknown().optional(),
     actions: z.array(z.string()).optional(),
+    frame: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
   })),
 });
 
@@ -43,6 +44,7 @@ export const taskPlanSchema = z.strictObject({
   app: z.string().min(1).optional(),
   textToEnter: z.string().min(1).optional(),
   url: z.url().optional(),
+  targetLabel: z.string().min(1).optional(),
 });
 export type TaskPlan = z.infer<typeof taskPlanSchema>;
 
@@ -62,7 +64,8 @@ export function validateActions(actions: Action[], observation: Observation): Ac
     if (action.kind === 'click_element') {
       return (element.actions || []).some(name => ['AXPress', 'AXPick', 'AXConfirm', 'AXOpen'].includes(name));
     }
-    return element.role.includes('Text') || (element.actions || []).includes('AXSetValue');
+    return ['AXTextField', 'AXTextArea', 'textbox', 'searchbox', 'combobox'].includes(element.role) ||
+      (element.actions || []).includes('AXSetValue');
   });
 }
 
