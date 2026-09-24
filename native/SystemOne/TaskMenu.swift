@@ -49,10 +49,14 @@ final class TaskMenu: NSViewController {
     let elapsed = NSTextField(labelWithString: "—")
     private let stateIcon = NSImageView()
     private var locked = false
+    private var baseFrames: [(NSView, NSRect)] = []
+    var onSizeChange: ((NSSize) -> Void)?
 
     override func loadView() {
         view = MenuSurface(frame: NSRect(origin: .zero, size: Self.size))
         view.wantsLayer = true
+        view.autoresizesSubviews = false
+        preferredContentSize = Self.size
         let heading = NSTextField(labelWithString: "System One")
         heading.font = .systemFont(ofSize: 15, weight: .semibold)
         heading.frame = NSRect(x: 18, y: 295, width: 200, height: 22)
@@ -90,8 +94,8 @@ final class TaskMenu: NSViewController {
         view.addSubview(stateIcon)
         status.frame = NSRect(x: 40, y: 65, width: 301, height: 28)
         status.font = .systemFont(ofSize: 11)
-        status.maximumNumberOfLines = 2
-        status.lineBreakMode = .byTruncatingTail
+        status.maximumNumberOfLines = 0
+        status.lineBreakMode = .byWordWrapping
         view.addSubview(status)
         let line = NSBox(frame: NSRect(x: 18, y: 57, width: 324, height: 1))
         line.boxType = .separator
@@ -103,6 +107,7 @@ final class TaskMenu: NSViewController {
         rate.toolTip = "Completed decisions per second, including planning and computer operations."
         elapsed.toolTip = "Total task time in seconds."
         editor.onChange = { [weak self] in self?.updateRunButton() }
+        baseFrames = view.subviews.filter { $0.frame.minY >= 105 }.map { ($0, $0.frame) }
         setStatus("Ready", symbol: "circle", color: .secondaryLabelColor)
         updateRunButton()
     }
@@ -142,6 +147,18 @@ final class TaskMenu: NSViewController {
     }
 
     func setStatus(_ message: String, symbol: String, color: NSColor) {
+        let measured = (message as NSString).boundingRect(
+            with: NSSize(width: 301, height: 500), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: 11)])
+        let height = max(28, ceil(measured.height) + 16)
+        let delta = height - 28
+        for (child, frame) in baseFrames { child.frame = frame.offsetBy(dx: 0, dy: delta) }
+        stateIcon.frame.origin.y = 75 + delta
+        status.frame.size.height = height
+        let size = NSSize(width: Self.size.width, height: Self.size.height + height - 28)
+        view.setFrameSize(size)
+        preferredContentSize = size
+        onSizeChange?(size)
         status.stringValue = message
         status.textColor = color
         status.toolTip = message

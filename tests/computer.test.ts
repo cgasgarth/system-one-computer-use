@@ -53,6 +53,42 @@ test("maps Playwright references, editable values, and disabled controls", () =>
   expect(elements[1]?.element_token).toBe("e2");
 });
 
+test("reads quoted YAML links and frame-qualified Playwright references", () => {
+  const elements = snapshotElements(
+    [
+      "- 'link \"Example: Book a table\" [ref=f5e280] [cursor=pointer]':",
+      "  - /url: https://example.com/",
+      '  - heading "Example: Book a table" [ref=f5e281]',
+      '- textbox "Name" [ref=f5e282]: Ada Lovelace',
+    ].join("\n"),
+    "https://www.google.com/search?q=example",
+  );
+  expect(elements[0]).toMatchObject({
+    label: "Example: Book a table",
+    element_token: "f5e280",
+    href: "https://example.com/",
+    actions: ["AXPress"],
+  });
+  expect(elements.at(-1)).toMatchObject({ value: "Ada Lovelace", actions: ["AXSetValue"] });
+});
+
+test("reads nested input values without treating select menus as text fields", () => {
+  const elements = snapshotElements(
+    [
+      '- combobox "Party size" [ref=e1]:',
+      '  - option "2 people" [selected]',
+      "- combobox [ref=e2]:",
+      '  - textbox "Location" [ref=e3]:',
+      "    - /placeholder: Restaurant or cuisine",
+      "    - text: Chicago",
+    ].join("\n"),
+  );
+  const inputs = elements.filter((element) => element.actions?.includes("AXSetValue") === true);
+  expect(inputs).toHaveLength(1);
+  expect(inputs[0]?.element_token).toBe("e3");
+  expect(inputs[0]?.value).toBe("Chicago");
+});
+
 test("validates the observed page URL before it can complete a task", () => {
   const text =
     '### Page\n- Page URL: https://example.com/\n- Page Title: Example\n### Snapshot\n```yaml\n- link "Learn more" [ref=e1]\n```';

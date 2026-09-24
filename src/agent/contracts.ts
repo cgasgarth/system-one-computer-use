@@ -24,6 +24,7 @@ const windowSchema = z.object({
       element_token: z.string(),
       role: z.string(),
       label: z.string().optional(),
+      href: z.url().optional(),
       value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
       actions: z.array(z.string()).optional(),
       frame: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
@@ -80,6 +81,11 @@ const planFields = {
   url: z.url().optional(),
 };
 const openUrlPlan = z.strictObject({ ...planFields, goal: z.literal("open_url"), url: z.url() });
+const openWebsitePlan = z.strictObject({
+  ...planFields,
+  goal: z.literal("open_website"),
+  website: z.string().trim().min(1),
+});
 const openAppPlan = z.strictObject({
   ...planFields,
   app: z.string().min(1),
@@ -93,6 +99,7 @@ const enterTextPlan = z.strictObject({
 });
 const taskPlanSchema = z.discriminatedUnion("goal", [
   openUrlPlan,
+  openWebsitePlan,
   openAppPlan,
   enterTextPlan,
   generalPlan,

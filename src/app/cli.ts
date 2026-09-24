@@ -29,7 +29,6 @@ async function executeTask(): Promise<TaskResult> {
       plan,
       preparationMs: performance.now() - started,
       computer,
-      maxSteps: config.SYSTEM_ONE_MAX_STEPS,
       onStep: trace,
       task,
     });

@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         content.loadViewIfNeeded()
+        content.onSizeChange = { [weak self] size in
+            guard let self, self.popover.contentViewController === self.content else { return }
+            self.popover.contentSize = size
+        }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "System One Computer Use")
         item.button?.toolTip = "System One Computer Use"
@@ -100,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func showTasks() {
         shortcut.stopRecording()
         popover.contentViewController = content
-        popover.contentSize = TaskMenu.size
+        popover.contentSize = content.preferredContentSize
         content.focus()
     }
 

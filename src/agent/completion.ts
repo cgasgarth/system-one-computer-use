@@ -1,14 +1,18 @@
 import type { Observation, TaskPlan, Window } from "./contracts.ts";
 import type { Progress } from "./types.ts";
+import { appNameMatches } from "./app-name.ts";
 
 function matchesPlan(plan: TaskPlan, window: Window, progress: Progress): boolean {
   const title = window.window_title.toLocaleLowerCase();
   const { targetLabel, textToEnter } = plan;
   if (plan.goal === "enter_text" && textToEnter !== undefined) {
     return (
-      progress.hasTaskAction &&
+      progress.textEntry?.text === textToEnter &&
       window.elements.some(
-        (element) => typeof element.value === "string" && element.value.includes(textToEnter),
+        (element) =>
+          element.value === textToEnter &&
+          element.label === progress.textEntry?.label &&
+          (element.actions ?? []).includes("AXSetValue"),
       )
     );
   }
@@ -28,11 +32,23 @@ function taskLooksComplete(plan: TaskPlan, observation: Observation, progress: P
   if (window === undefined) {
     return false;
   }
+  if (plan.goal === "open_website") {
+    if (!progress.hasTaskAction || window.url === undefined || window.url === plan.url) {
+      return false;
+    }
+    const name = plan.website.toLocaleLowerCase().replaceAll(/\s/gu, "");
+    const title = window.window_title.toLocaleLowerCase().replaceAll(/\s/gu, "");
+    const host = new URL(window.url).hostname;
+    return (
+      !["www.google.com", "google.com"].includes(host) &&
+      (title.includes(name) || host.replaceAll(".", "").includes(name))
+    );
+  }
   if (plan.goal === "open_url") {
     return window.url !== undefined && new URL(window.url).href === new URL(plan.url).href;
   }
   if (plan.goal === "open_app") {
-    return window.app_name.toLocaleLowerCase() === plan.app.toLocaleLowerCase();
+    return appNameMatches(window.app_name, plan.app);
   }
   const status = window.elements.find(
     (element) =>

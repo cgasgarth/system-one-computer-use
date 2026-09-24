@@ -1,15 +1,19 @@
 import { createInterface } from "node:readline";
 import { runTask } from "../agent/loop.ts";
 import { describeAction } from "../agent/contracts.ts";
+import type { TaskPlan } from "../agent/contracts.ts";
+import type { TaskStep } from "../agent/types.ts";
 import { createComputer, createModels, loadConfig, resolveMode } from "./config.ts";
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import { taskInputSchema } from "./task-schema.ts";
+import type { TaskInput } from "./task-schema.ts";
 
 const MS_PER_SECOND = 1000;
 const config = loadConfig();
 const models = createModels(config);
 const computers = new Map<ComputerMode, ManagedComputer>();
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const shutdown = new AbortController();
 
 function computerFor(mode: ComputerMode): ManagedComputer {
   const existing = computers.get(mode);
@@ -21,14 +25,40 @@ function computerFor(mode: ComputerMode): ManagedComputer {
   return computer;
 }
 
-async function execute(line: string): Promise<void> {
+async function closeComputers(): Promise<void> {
+  const current = [...computers.values()];
+  computers.clear();
+  await Promise.all(current.map(async (computer) => computer.close()));
+}
+
+async function closeStoppedComputers(): Promise<void> {
   try {
-    const started = performance.now();
-    let modelMs = 0;
-    const task = taskInputSchema.parse(JSON.parse(line));
+    await closeComputers();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Driver shutdown failed");
+  }
+}
+
+function stop(): void {
+  shutdown.abort(new Error("Stopped by user"));
+  input.close();
+  void closeStoppedComputers();
+}
+process.once("SIGTERM", stop);
+process.once("SIGINT", stop);
+
+async function execute(line: string): Promise<void> {
+  const started = performance.now();
+  const steps: TaskStep[] = [];
+  let modelMs = 0;
+  let task: TaskInput | undefined = undefined;
+  let plan: TaskPlan | undefined = undefined;
+  try {
+    task = taskInputSchema.parse(JSON.parse(line));
     console.log(JSON.stringify({ status: "running", message: "Planning task…" }));
-    const plan = await models.text.prepare(task.task);
+    plan = await models.text.prepare(task.task);
     const mode = await resolveMode({ mode: task.mode, task: task.task, model: models.text, plan });
+    shutdown.signal.throwIfAborted();
     console.log(
       JSON.stringify({
         status: "running",
@@ -38,11 +68,12 @@ async function execute(line: string): Promise<void> {
     const result = await runTask({
       ...models,
       plan,
+      signal: shutdown.signal,
       preparationMs: performance.now() - started,
       computer: computerFor(mode),
-      maxSteps: config.SYSTEM_ONE_MAX_STEPS,
       task: task.task,
       onStep(step) {
+        steps.push(step);
         modelMs += step.decisionMs;
         const totalSeconds = (performance.now() - started) / MS_PER_SECOND;
         console.log(
@@ -57,33 +88,48 @@ async function execute(line: string): Promise<void> {
         );
       },
     });
-    const trace = `runs/task-${new Date().toISOString().replaceAll(":", "-")}.json`;
-    await Bun.write(trace, JSON.stringify(result), { createPath: true });
+    await Bun.write(
+      `runs/task-${new Date().toISOString().replaceAll(":", "-")}.json`,
+      JSON.stringify({ ...result, plan, status: "complete" }),
+      {
+        createPath: true,
+      },
+    );
     console.log(
       JSON.stringify({
         status: "complete",
         message: result.summary,
-        decisions: result.steps.length,
-        requestsPerSecond: result.steps.length / ((performance.now() - started) / MS_PER_SECOND),
+        decisions: steps.length,
+        requestsPerSecond: steps.length / ((performance.now() - started) / MS_PER_SECOND),
         totalSeconds: (performance.now() - started) / MS_PER_SECOND,
-        modelMs: modelMs / result.steps.length,
+        modelMs: modelMs / steps.length,
       }),
     );
   } catch (error) {
-    console.log(
-      JSON.stringify({
-        status: "error",
-        message: error instanceof Error ? error.message : "Task failed",
-      }),
-    );
+    const totalSeconds = (performance.now() - started) / MS_PER_SECOND;
+    const failure = {
+      status: "error",
+      message: error instanceof Error ? error.message : "Task failed",
+      totalSeconds,
+      decisions: steps.length,
+      requestsPerSecond: steps.length / totalSeconds,
+      modelMs: steps.length === 0 ? 0 : modelMs / steps.length,
+    };
+    const trace = `runs/failed-${new Date().toISOString().replaceAll(":", "-")}.json`;
+    await Bun.write(trace, JSON.stringify({ ...failure, task: task?.task, plan, steps }), {
+      createPath: true,
+    });
+    console.log(JSON.stringify(failure));
   }
 }
 
 try {
   for await (const line of input) {
-    // Tasks must run in order because they share the user's computer.
+    if (shutdown.signal.aborted) {
+      break;
+    }
     await execute(line);
   }
 } finally {
-  await Promise.all([...computers.values()].map(async (computer) => computer.close()));
+  await closeComputers();
 }

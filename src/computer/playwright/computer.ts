@@ -9,6 +9,7 @@ const MODIFIERS = { cmd: "Meta", ctrl: "Control", option: "Alt", shift: "Shift",
 class PlaywrightComputer implements ManagedComputer {
   private readonly connection: PlaywrightConnection;
   private title = "Current Chrome tab";
+  private prepared: Promise<void> | undefined = undefined;
 
   public constructor(token?: string) {
     this.connection = new PlaywrightConnection(token);
@@ -20,6 +21,8 @@ class PlaywrightComputer implements ManagedComputer {
 
   public async desktop(): Promise<Desktop> {
     await this.connection.ready();
+    this.prepared ??= closeConnectionPage(this.connection);
+    await this.prepared;
     return {
       apps: [{ bundle_id: "com.google.Chrome", name: "Google Chrome", pid: 0 }],
       windows: [{ app_name: "Google Chrome", pid: 0, title: this.title, window_id: 0 }],

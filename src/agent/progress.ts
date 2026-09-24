@@ -15,6 +15,7 @@ function initialProgress(): Progress {
     hasActed: false,
     hasNavigated: false,
     hasTaskAction: false,
+    textEntry: undefined,
     target: undefined,
   };
 }
@@ -52,6 +53,17 @@ function afterAction(context: UpdateContext): Progress {
   }
   if (action.kind === "navigate") {
     return { ...progress, hasActed: true, hasNavigated: true };
+  }
+  if (action.kind === "type_text") {
+    const label = observation.window?.elements.find(
+      (element) => element.element_token === action.element_token,
+    )?.label;
+    return {
+      ...progress,
+      hasActed: true,
+      hasTaskAction: true,
+      textEntry: { text: action.text, label },
+    };
   }
   const label = plan.targetLabel;
   if (

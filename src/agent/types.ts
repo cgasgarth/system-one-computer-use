@@ -25,7 +25,7 @@ interface TaskResult {
 interface TaskOptions {
   readonly computer: Computer;
   readonly decision: DecisionModel;
-  readonly maxSteps?: number;
+  readonly signal?: Readonly<Pick<AbortSignal, "aborted" | "throwIfAborted">>;
   readonly onStep?: (step: TaskStep) => void;
   readonly task: string;
   readonly text: TextModel;
@@ -42,6 +42,7 @@ interface Progress {
   readonly hasActed: boolean;
   readonly hasNavigated: boolean;
   readonly hasTaskAction: boolean;
+  readonly textEntry: { readonly text: string; readonly label: string | undefined } | undefined;
   readonly target: WindowTarget | undefined;
 }
 

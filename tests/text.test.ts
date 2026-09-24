@@ -66,6 +66,28 @@ test("repairs a missing app field before returning a trusted plan", async () => 
   }
 });
 
+test("resolves a named website through search without guessing its domain", async () => {
+  const server = Bun.serve({
+    fetch() {
+      return Response.json({
+        choices: [{ message: { content: '{"goal":"open_website","website":"open table"}' } }],
+      });
+    },
+    port: 0,
+  });
+  try {
+    const model = new ChatCompletionTextModel(server.url.href, "small-text");
+    const plan = await model.prepare("open chrome and go to open table");
+    expect(plan).toEqual({
+      goal: "open_website",
+      website: "open table",
+      url: "https://www.google.com/search?q=open+table+official+website",
+    });
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("accepts fenced JSON and grounds its fields in the user task", async () => {
   const server = Bun.serve({
     async fetch(request) {

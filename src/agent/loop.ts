@@ -1,9 +1,7 @@
-import { describeAction } from "./contracts.ts";
 import { performStep } from "./execute.ts";
 import { initialProgress } from "./progress.ts";
 import type { TaskOptions, TaskResult, TaskStep } from "./types.ts";
 
-const DEFAULT_STEPS = 16;
 const MS_PER_SECOND = 1000;
 interface Timing {
   readonly started: number;
@@ -28,8 +26,8 @@ async function runTask(options: TaskOptions): Promise<TaskResult> {
   const textMs = performance.now() - started;
   let progress = initialProgress();
   const steps: TaskStep[] = [];
-  const maxSteps = options.maxSteps ?? DEFAULT_STEPS;
-  for (let index = 0; index < maxSteps; index += 1) {
+  for (let index = 0; ; index += 1) {
+    options.signal?.throwIfAborted();
     const result = await performStep({ index, options, plan, progress, started });
     const { done, progress: nextProgress, step } = result;
     progress = nextProgress;
@@ -39,9 +37,6 @@ async function runTask(options: TaskOptions): Promise<TaskResult> {
       return completed(options, steps, { started, textMs });
     }
   }
-  const last = steps.at(-1);
-  const description = last === undefined ? "none" : describeAction(last.action);
-  throw new Error(`Task did not finish within ${maxSteps} decisions; last action: ${description}`);
 }
 
 export { runTask };

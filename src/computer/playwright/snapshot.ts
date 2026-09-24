@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { isMap, isScalar, isSeq, parseDocument, visit } from "yaml";
 import type { Window } from "../../agent/contracts.ts";
 
 const pageSchema = z.object({ url: z.url(), title: z.string(), snapshot: z.string() });
 const lineSchema = z.object({
   role: z.string(),
   name: z.string(),
-  ref: z.string().regex(/^e\d+$/u),
+  ref: z.string().regex(/^(?:f\d+)?e\d+$/u),
   suffix: z.string(),
 });
 const EDITABLE = new Set(["textbox", "searchbox", "combobox", "spinbutton"]);
@@ -24,12 +25,29 @@ const CLICKABLE = new Set([
   "combobox",
 ]);
 
-function snapshotElements(snapshot: string): Window["elements"] {
-  return snapshot.split("\n").flatMap((line, index) => {
+const scalarValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+interface ControlOptions {
+  readonly href?: string;
+  readonly nested: boolean;
+}
+
+function snapshotElements(snapshot: string, baseUrl?: string): Window["elements"] {
+  const document = parseDocument(snapshot);
+  if (document.errors.length > 0) {
+    throw new Error("Playwright returned an invalid YAML snapshot");
+  }
+  const elements: Window["elements"][number][] = [];
+  function add(
+    descriptor: string,
+    value: z.infer<typeof scalarValue>,
+    options: ControlOptions,
+  ): void {
     const match =
-      /^\s*- (?<role>\w+)(?: "(?<name>.*?)")?[^\n]*?\[ref=(?<ref>e\d+)\](?<suffix>.*)$/u.exec(line);
+      /^(?<role>\w+)(?: "(?<name>.*?)")?[^\n]*?\[ref=(?<ref>(?:f\d+)?e\d+)\](?<suffix>.*)$/u.exec(
+        descriptor,
+      );
     if (match === null) {
-      return [];
+      return;
     }
     const control = lineSchema.parse({ ...match.groups, name: match.groups?.["name"] ?? "" });
     const disabled = control.suffix.includes("[disabled]");
@@ -37,20 +55,60 @@ function snapshotElements(snapshot: string): Window["elements"] {
     if (!disabled && CLICKABLE.has(control.role)) {
       actions.push("AXPress");
     }
-    if (!disabled && EDITABLE.has(control.role)) {
+    if (
+      !disabled &&
+      EDITABLE.has(control.role) &&
+      !(control.role === "combobox" && options.nested)
+    ) {
       actions.push("AXSetValue");
     }
-    return [
-      {
-        actions,
-        element_index: index,
-        element_token: control.ref,
-        label: control.name || control.role,
-        role: control.role,
-        value: control.suffix.includes(": ") ? control.suffix.split(": ").slice(1).join(": ") : "",
-      },
-    ];
+    elements.push({
+      actions,
+      element_index: elements.length,
+      element_token: control.ref,
+      label: control.name || control.role,
+      role: control.role,
+      value,
+      ...(options.href === undefined ? {} : { href: options.href }),
+    });
+  }
+  visit(document, {
+    Pair(_key, pair) {
+      if (!isScalar(pair.key)) {
+        return;
+      }
+      const descriptor = z.string().safeParse(pair.key.value);
+      if (!descriptor.success) {
+        return;
+      }
+      const children = isSeq(pair.value)
+        ? pair.value.items.flatMap((item) => (isMap(item) ? item.items : []))
+        : [];
+      const link = children.find((item) => isScalar(item.key) && item.key.value === "/url");
+      const text = children.find((item) => isScalar(item.key) && item.key.value === "text");
+      const content =
+        text !== undefined && isScalar(text.value) ? scalarValue.parse(text.value.value) : "";
+      const value = isScalar(pair.value) ? scalarValue.parse(pair.value.value) : content;
+      const url =
+        link !== undefined && isScalar(link.value) ? z.string().parse(link.value.value) : undefined;
+      const href =
+        url !== undefined && baseUrl !== undefined ? new URL(url, baseUrl).href : undefined;
+      add(descriptor.data, value, {
+        nested: isSeq(pair.value),
+        ...(href === undefined ? {} : { href }),
+      });
+    },
+    Scalar(key, node) {
+      if (typeof key !== "number") {
+        return;
+      }
+      const descriptor = z.string().safeParse(node.value);
+      if (descriptor.success) {
+        add(descriptor.data, "", { nested: false });
+      }
+    },
   });
+  return elements;
 }
 
 function parseSnapshot(text: string): Window {
@@ -61,7 +119,7 @@ function parseSnapshot(text: string): Window {
   });
   return {
     app_name: "Google Chrome",
-    elements: snapshotElements(page.snapshot),
+    elements: snapshotElements(page.snapshot, page.url),
     pid: 0,
     snapshot_id: crypto.randomUUID(),
     url: page.url,

@@ -1,12 +1,14 @@
 import { taskLooksComplete } from "./completion.ts";
 import { NoActionsError } from "./errors.ts";
+import { appNameMatches } from "./app-name.ts";
 import { validateActions } from "./contracts.ts";
 import type { Action, ActionChoices, Observation, TaskPlan, Window } from "./contracts.ts";
 import { attemptKey } from "./progress.ts";
 import type { Progress } from "./types.ts";
 
 const MAX_ACTIONS = 64;
-const EDITABLE_ROLES = new Set(["AXTextField", "AXTextArea", "textbox", "searchbox", "combobox"]);
+const MAX_REASON_LENGTH = 280;
+const EDITABLE_ROLES = new Set(["AXTextField", "AXTextArea", "textbox", "searchbox"]);
 const CLICK_ACTIONS = new Set(["AXPress", "AXPick", "AXConfirm", "AXOpen"]);
 
 interface CandidateContext {
@@ -20,9 +22,7 @@ interface CandidateContext {
 function desktopActions(plan: TaskPlan, observation: Observation): Action[] {
   const actions: Action[] = [];
   const windows = observation.desktop.windows.filter(
-    (window) =>
-      plan.app === undefined ||
-      window.app_name.toLocaleLowerCase() === plan.app.toLocaleLowerCase(),
+    (window) => plan.app === undefined || appNameMatches(window.app_name, plan.app),
   );
   if (plan.app !== undefined && windows.length === 0) {
     actions.push({
@@ -61,7 +61,11 @@ function elementActions(
     actions.push({
       ...target,
       kind: "click_element",
-      reason: `Activate ${element.label ?? element.role}`,
+      reason:
+        `Activate ${element.label ?? element.role}${element.href === undefined ? "" : ` (${element.href})`}`.slice(
+          0,
+          MAX_REASON_LENGTH,
+        ),
     });
   }
   if (
@@ -79,14 +83,53 @@ function elementActions(
   return actions;
 }
 
+function navigationElements(
+  window: Window,
+  plan: TaskPlan,
+  progress: Progress,
+): Window["elements"] {
+  if (plan.goal !== "open_website" || !progress.hasNavigated || window.url === undefined) {
+    return window.elements;
+  }
+  // A website-opening task must not interact with the destination before verification.
+  if (new URL(window.url).hostname !== "www.google.com") {
+    return [];
+  }
+  const links = window.elements.filter(
+    (element) =>
+      element.role === "link" &&
+      element.href !== undefined &&
+      new URL(element.href).protocol === "https:" &&
+      new URL(element.href).hostname !== "www.google.com",
+  );
+  const homepages = links.filter(
+    (element) => element.href !== undefined && new URL(element.href).pathname === "/",
+  );
+  return homepages.length > 0 ? homepages : links;
+}
+
 function windowActions(window: Window, context: CandidateContext): Action[] {
   const { canNavigate, plan, progress } = context;
   const actions: Action[] = [];
   if (canNavigate && plan.url !== undefined && !progress.hasNavigated) {
-    actions.push({ kind: "navigate", reason: "Open the URL in the task", url: plan.url });
+    actions.push({
+      kind: "navigate",
+      reason:
+        plan.goal === "open_website"
+          ? `Find the official website for ${plan.website}`
+          : "Open the URL in the task",
+      url: plan.url,
+    });
+    return actions;
   }
-  for (const element of window.elements) {
+  for (const element of navigationElements(window, plan, progress)) {
     actions.push(...elementActions(element, window, plan));
+  }
+  if (plan.goal === "enter_text") {
+    const typing = actions.filter((action) => action.kind === "type_text");
+    if (typing.length > 0) {
+      return typing;
+    }
   }
   if (
     plan.textToEnter !== undefined &&

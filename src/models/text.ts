@@ -19,21 +19,19 @@ const ERROR_DETAIL_LIMIT = 350;
 const FENCE_LENGTH = 3;
 const entryGoalSchema = z.enum(["open_url", "open_app", "enter_text", "task"]);
 const entryGoalPrompt = `Classify the task. Reply with one word: open_url, open_app, enter_text, or task. Choose enter_text when the user asks to type into a field, including after navigation.`;
-const planPrompt = `Convert the request to one complete JSON task plan. Return JSON only.
-Required goal: open_app, open_url, enter_text, or task.
-For open_app, app is REQUIRED. For open_url, url is REQUIRED. For enter_text, textToEnter is REQUIRED.
-Optional fields: app, url, textToEnter, targetLabel. Omit unused fields.
-Use open_app when opening an app completes the request. Possessives such as "my calendar" refer to the Calendar application.
-Use open_url when visiting a URL completes the request. Use enter_text when the request ends with entering supplied text, even after navigation.
-Use task for other workflows, including submission after typing.
-Copy URLs and requested text exactly. App names can use normal capitalization. Do not invent a URL, text, or app.
+const planPrompt = `Extract a task plan as JSON. Never invent a URL. Goals:
+open_website: the user wants to visit a named website. REQUIRED website: copy the website name exactly from the request. Browser names are not website names.
+open_url: visit an explicit URL. REQUIRED url.
+open_app: open a native app only. REQUIRED app.
+enter_text: enter supplied text in a field. REQUIRED textToEnter.
+task: other work. Optional app, url, targetLabel, textToEnter.
 Examples:
+"open chrome and go to hacker news" -> {"goal":"open_website","website":"hacker news"}
+"go to github" -> {"goal":"open_website","website":"github"}
 "open my calendar" -> {"goal":"open_app","app":"Calendar"}
-"open my notes" -> {"goal":"open_app","app":"Notes"}
-"visit https://example.com" -> {"goal":"open_url","url":"https://example.com"}
-"Open https://example.com and click Learn more" -> {"goal":"task","url":"https://example.com","targetLabel":"Learn more"}
-"Type hello into Message" -> {"goal":"enter_text","textToEnter":"hello","targetLabel":"Message"}
-Return the full object, never just goal.`;
+"open Chrome" -> {"goal":"open_app","app":"Chrome"}
+"Type Chicago into the search field" -> {"goal":"enter_text","textToEnter":"Chicago","targetLabel":"search"}
+Return a complete JSON object only.`;
 
 function acceptedText(task: string, value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -61,7 +59,20 @@ function parsePlan(content: string): TaskPlan {
   }
 }
 
+function websitePlan(task: string, raw: Extract<TaskPlan, { goal: "open_website" }>): TaskPlan {
+  const website = acceptedText(task, raw.website);
+  if (website === undefined) {
+    throw new PlanValidationError("website must be copied from the request");
+  }
+  const search = new URL("https://www.google.com/search");
+  search.searchParams.set("q", `${website} official website`);
+  return { goal: "open_website", website, url: search.href };
+}
+
 function groundedPlan(task: string, raw: TaskPlan): TaskPlan {
+  if (raw.goal === "open_website") {
+    return websitePlan(task, raw);
+  }
   const app = acceptedText(task, raw.app);
   const targetLabel = acceptedText(task, raw.targetLabel);
   const textToEnter = acceptedText(task, raw.textToEnter);

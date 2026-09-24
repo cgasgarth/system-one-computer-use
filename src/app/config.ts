@@ -10,16 +10,13 @@ import type { TextModel } from "../models/text.ts";
 import { driverModeSchema } from "./task-schema.ts";
 import type { TaskPlan } from "../agent/contracts.ts";
 
-const DEFAULT_STEPS = 16;
 const endpointSchema = z.url({ protocol: /^https?$/u });
 const optionalKey = z.string().min(1).optional();
-const stepsSchema = z.coerce.number().int().positive().default(DEFAULT_STEPS);
 const configSchema = z.object({
   CUA_DRIVER_BIN: z.string().default("cua-driver"),
   CUA_MODE: driverModeSchema.default("auto"),
   PLAYWRIGHT_MCP_EXTENSION_TOKEN: optionalKey,
   SYSTEM_ONE_API_KEY: optionalKey,
-  SYSTEM_ONE_MAX_STEPS: stepsSchema,
   SYSTEM_ONE_MODEL: z.string().min(1),
   SYSTEM_ONE_TRACE: z.enum(["0", "1"]).default("0"),
   SYSTEM_ONE_URL: endpointSchema,

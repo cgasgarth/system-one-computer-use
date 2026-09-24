@@ -27,6 +27,9 @@ async function closeConnectionPage(
     await connection.call({ name: "browser_tabs", arguments: { action: "list" } }),
   );
   const usable = tabs.find((tab) => !isConnectionPage(tab.url));
+  if (tabs.length > 0 && tabs.every((tab) => !isConnectionPage(tab.url))) {
+    return;
+  }
   await connection.call({
     name: "browser_tabs",
     arguments:

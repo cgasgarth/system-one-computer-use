@@ -32,7 +32,7 @@ voice control, status, and timing. It has no web portal or detached task window.
   pastes its transcript into the task field, which starts the task.
 - **Settings** opens a separate page inside the dropdown. Change the voice
   shortcut, default computer, decision endpoint/model, and text endpoint/model.
-- **Stop** cancels the task or voice input. Click outside to dismiss the dropdown.
+- **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit; they end on completion, execution failure, or Stop. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`
 with its microphone access and a transcription model configured. Use Handy's
@@ -88,7 +88,6 @@ These are measured values; they are not a model-only theoretical throughput.
 | `CUA_MODE`                       | `auto` (default), `browser`, or `desktop`    |
 | `CUA_DRIVER_BIN`                 | CUA executable; defaults to `cua-driver`     |
 | `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Optional explicit Chrome extension token     |
-| `SYSTEM_ONE_MAX_STEPS`           | Decision limit; defaults to 16               |
 | `SYSTEM_ONE_TRACE`               | Set to `1` for CLI decision output           |
 
 The optional [CLM MLX integration](integrations/clm-mlx/README.md) runs published
@@ -131,8 +130,10 @@ windows. CUA's own authorization windows and the harness UI are excluded.
 Temporary native window activation failures receive a bounded retry. Driver
 refusals remain failures.
 
-The current planner supports explicit URLs, opening named apps, clicking named
-controls, and entering supplied text. A verified simple goal stops further
+The planner supports explicit URLs, named websites, opening named apps, clicking named
+controls, and entering supplied text. Named websites are found through visible search
+results; the model selects an observed destination link instead of inventing a domain.
+Typing completes only after a text-entry action and a matching value in the same editable field. A verified simple goal stops further
 actions. General tasks must provide observable completion evidence.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
@@ -187,3 +188,5 @@ Task traces separate `observationMs`, `decisionMs`, and `actionMs`. Request
 latency varies with screen size and cache state; a large Calendar observation
 can take much longer than a small page. The menu shows the measured mean for
 the current task.
+
+See [validation](docs/validation.md) for installed-app checks and their limits.

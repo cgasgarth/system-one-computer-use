@@ -45,6 +45,7 @@ async function observe(computer: Computer, target: WindowTarget | undefined): Pr
 }
 
 async function observeChoices(context: StepContext, retries: number): Promise<ReadyObservation> {
+  context.options.signal?.throwIfAborted();
   const { options, plan } = context;
   const { observation, target } = await observe(options.computer, context.progress.target);
   const current = { ...context.progress, target };
@@ -103,6 +104,7 @@ async function performStep(context: StepContext): Promise<StepResult> {
   const { observation, current, actions } = await observeChoices(context, OBSERVATION_RETRIES);
   const observationMs = performance.now() - observing;
   const choice = await options.decision.choose(options.task, observation, actions);
+  options.signal?.throwIfAborted();
   let progress = markAttempt(current, observation, choice.action);
   let message: string | undefined = undefined;
   const executing = performance.now();
