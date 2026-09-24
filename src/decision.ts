@@ -25,6 +25,8 @@ export class SystemOneHttpDecisionModel implements DecisionModel {
       `Task: ${task}`,
       `Windows: ${observation.desktop.windows.map(w => `${w.app_name} (${w.pid}/${w.window_id}): ${w.title}`).join(' | ') || 'none'}`,
       observation.window ? `Current window: ${observation.window.app_name}: ${observation.window.window_title}` : 'No window selected.',
+      observation.window ? `Visible controls and values: ${observation.window.elements.slice(0, 100).map(e =>
+        `${e.role} ${e.label || ''} ${String(e.value ?? '').slice(0, 100)}`).join(' | ').slice(0, 6000)}` : '',
     ].join('\n');
     const start = performance.now();
     const response = await fetch(this.endpoint, {

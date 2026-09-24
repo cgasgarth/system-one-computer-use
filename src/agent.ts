@@ -1,4 +1,4 @@
-import { describeAction, validateActions, type Action, type Observation } from './contracts';
+import { describeAction, validateActions, type Action, type Observation, type TaskPlan } from './contracts';
 import type { Computer } from './cua';
 import type { DecisionModel } from './decision';
 import type { TextModel } from './text';
@@ -18,11 +18,47 @@ export type TaskResult = {
   steps: TaskStep[];
 };
 
+function candidates(task: string, plan: TaskPlan, observation: Observation, hasActed: boolean): Action[] {
+  const actions: Action[] = [];
+  if (!observation.window) {
+    if (plan.app && !observation.desktop.windows.some(window => window.app_name === plan.app)) {
+      actions.push({ kind: 'launch_app', name: plan.app, reason: 'Open the application named in the task' });
+    }
+    for (const window of observation.desktop.windows) {
+      actions.push({ kind: 'observe_window', pid: window.pid, window_id: window.window_id,
+                     reason: `Inspect ${window.app_name}: ${window.title}` });
+    }
+  } else {
+    const { pid, window_id } = observation.window;
+    for (const element of observation.window.elements) {
+      if ((element.actions || []).some(name => ['AXPress', 'AXPick', 'AXConfirm', 'AXOpen'].includes(name))) {
+        actions.push({ kind: 'click_element', pid, window_id,
+                       element_token: element.element_token,
+                       reason: `Activate ${element.label || element.role}` });
+      }
+      if (plan.textToEnter && (element.role.includes('Text') || (element.actions || []).includes('AXSetValue'))) {
+        actions.push({ kind: 'type_text', pid, window_id,
+                       element_token: element.element_token, text: plan.textToEnter,
+                       reason: `Enter requested text in ${element.label || element.role}` });
+      }
+    }
+    if (plan.textToEnter) {
+      actions.push({ kind: 'press_key', pid, window_id, key: 'return', modifiers: [],
+                     reason: 'Submit text if the field requires Return' });
+    }
+  }
+  const bounded = actions.slice(0, hasActed ? 63 : 64);
+  if (hasActed) bounded.push({ kind: 'finish', summary: task,
+                              reason: 'Select only when the observed state proves the task is complete' });
+  return validateActions(bounded, observation);
+}
+
 export async function runTask(task: string, computer: Computer, text: TextModel,
                               decision: DecisionModel, maxSteps = 16): Promise<TaskResult> {
   if (!task.trim()) throw new Error('A text task is required');
   if (!Number.isInteger(maxSteps) || maxSteps < 1) throw new Error('maxSteps must be positive');
   const started = performance.now();
+  const plan = await text.prepare(task);
   const steps: TaskStep[] = [];
   let target: { pid: number; windowId: number } | undefined;
   const history: string[] = [];
@@ -36,9 +72,8 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
       target = undefined;
     }
     const observation: Observation = { desktop, window };
-    const proposed = await text.propose(task, observation, history);
-    const actions = validateActions(proposed, observation);
-    if (!actions.length) throw new Error(`Text model proposed no action valid for the current Cua snapshot at step ${index + 1}`);
+    const actions = candidates(task, plan, observation, history.length > 0);
+    if (!actions.length) throw new Error(`No live Cua action is available for task step ${index + 1}`);
     const choice = await decision.choose(task, observation, actions);
     const action = choice.action;
     switch (action.kind) {

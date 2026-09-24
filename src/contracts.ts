@@ -38,7 +38,11 @@ export const actionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('finish'), summary: z.string().min(1), reason }),
 ]);
 export type Action = z.infer<typeof actionSchema>;
-export const proposalSchema = z.strictObject({ actions: z.array(actionSchema).min(1).max(8) });
+export const taskPlanSchema = z.strictObject({
+  app: z.string().min(1).optional(),
+  textToEnter: z.string().min(1).optional(),
+});
+export type TaskPlan = z.infer<typeof taskPlanSchema>;
 
 export function validateActions(actions: Action[], observation: Observation): Action[] {
   return actions.filter(action => {

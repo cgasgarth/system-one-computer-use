@@ -2,8 +2,9 @@
 
 A local computer use harness for models that return probability distributions
 over typed decisions. It accepts a text task, observes the desktop through Cua
-Driver, gets candidate actions from a small text model, and lets a System One
-decision model choose the next action. The harness checks each action against
+Driver, builds candidates from visible controls, and lets a System One decision
+model choose the next action. A small text model reads the request once to name
+an application or supply text to enter. The harness checks each action against
 the current Cua snapshot before it acts.
 
 The decision model, text generator, and computer driver are separate interfaces.
@@ -37,9 +38,9 @@ for every observation. These numbers do not measure a full task.
 
 ## Boundaries
 
-- The text model proposes candidate actions and optional text. It cannot send
-  an action directly to Cua.
-- The System One model chooses from those candidates and returns probabilities.
+- Cua supplies the available window controls. The small text model supplies
+  the requested application or text, and cannot send actions directly to Cua.
+- The System One model chooses from current controls and returns probabilities.
 - The harness accepts an element only when its one-use Cua token is present in
   the latest observation. A stale or invented token fails with a clear error.
 - Each action is followed by a new observation. The loop stops on a selected

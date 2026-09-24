@@ -1,29 +1,27 @@
 import { expect, test } from 'bun:test';
 import { ChatCompletionTextModel } from '../src/text';
 
-test('accepts structured candidate actions from a text provider', async () => {
+test('accepts a short task plan from a text provider', async () => {
   let request: any;
   const server = Bun.serve({ port: 0, async fetch(req) {
     request = await req.json();
-    return Response.json({ choices: [{ message: { content: JSON.stringify({ actions: [
-      { kind: 'launch_app', name: 'Settings', reason: 'The task asks for settings' },
-    ] }) } }] });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ app: 'Settings' }) } }] });
   } });
   try {
     const model = new ChatCompletionTextModel(`http://127.0.0.1:${server.port}/v1/chat/completions`, 'small-text');
-    const actions = await model.propose('Open Settings', { desktop: { apps: [], windows: [] } }, []);
+    const plan = await model.prepare('Open Settings');
     expect(request.model).toBe('small-text');
-    expect(actions).toEqual([{ kind: 'launch_app', name: 'Settings', reason: 'The task asks for settings' }]);
+    expect(plan).toEqual({ app: 'Settings' });
   } finally { server.stop(true); }
 });
 
-test('rejects prose in place of an action plan', async () => {
+test('rejects prose in place of a task plan', async () => {
   const server = Bun.serve({ port: 0, fetch: () => Response.json({
     choices: [{ message: { content: 'Open Settings now.' } }],
   }) });
   try {
     const model = new ChatCompletionTextModel(`http://127.0.0.1:${server.port}/v1/chat/completions`, 'small-text');
-    await expect(model.propose('Open Settings', { desktop: { apps: [], windows: [] } }, []))
+    await expect(model.prepare('Open Settings'))
       .rejects.toThrow('did not return JSON');
   } finally { server.stop(true); }
 });

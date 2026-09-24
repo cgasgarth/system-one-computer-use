@@ -32,27 +32,20 @@ test('text task drives observed action through the decision model', async () => 
   const clicked: string[] = [];
   const computer: Computer = {
     desktop: async () => desktop,
-    window: async () => window,
+    window: async () => clicked.length ? { ...window, elements: [] } : window,
     launchApp: async () => { throw new Error('unexpected launch'); },
     clickElement: async (_pid, _id, token) => { clicked.push(token); },
     typeText: async () => { throw new Error('unexpected text'); },
     pressKey: async () => { throw new Error('unexpected key'); },
   };
-  let turn = 0;
-  const text: TextModel = { propose: async () => {
-    turn++;
-    if (turn === 1) return [{ kind: 'observe_window', pid: 7, window_id: 9, reason: 'Inspect Settings' }];
-    if (turn === 2) return [
-      { kind: 'click_element', pid: 7, window_id: 9, element_token: 's00000000:1', reason: 'Stale' },
-      { kind: 'click_element', pid: 7, window_id: 9, element_token: 's00000001:1', reason: 'Open Bluetooth' },
-    ];
-    return [{ kind: 'finish', summary: 'Bluetooth settings are open', reason: 'The target was reached' }];
-  } };
+  let preparations = 0;
+  const text: TextModel = { prepare: async () => { preparations++; return { app: 'Settings' }; } };
   const decision: DecisionModel = { choose: async (_task, _observation, actions) => ({
     action: actions[0], probabilities: { A0: 1 }, latencyMs: 12,
   }) };
   const result = await runTask('Open Bluetooth settings', computer, text, decision);
   expect(clicked).toEqual(['s00000001:1']);
   expect(result.steps.map(s => s.action.kind)).toEqual(['observe_window', 'click_element', 'finish']);
+  expect(preparations).toBe(1);
   expect(result.requestsPerSecond).toBeGreaterThan(0);
 });

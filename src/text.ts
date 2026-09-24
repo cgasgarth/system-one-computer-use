@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { proposalSchema, type Action, type Observation } from './contracts';
+import { taskPlanSchema, type TaskPlan } from './contracts';
 
 export interface TextModel {
-  propose(task: string, observation: Observation, history: string[]): Promise<Action[]>;
+  prepare(task: string): Promise<TaskPlan>;
 }
 
 const completionSchema = z.object({
@@ -13,31 +13,22 @@ export class ChatCompletionTextModel implements TextModel {
   constructor(private readonly endpoint: string, private readonly modelId: string,
               private readonly apiKey?: string) {}
 
-  async propose(task: string, observation: Observation, history: string[]): Promise<Action[]> {
+  async prepare(task: string): Promise<TaskPlan> {
     const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
-      body: JSON.stringify({ model: this.modelId, temperature: 0, max_tokens: 700,
+      body: JSON.stringify({ model: this.modelId, temperature: 0, max_tokens: 180,
         messages: [
-          { role: 'system', content: `You propose next actions for a computer-use agent. Return one JSON object with an "actions" array of 1 to 8 candidate actions. No Markdown. Valid kinds: launch_app {name,reason}; observe_window {pid,window_id,reason}; click_element {pid,window_id,element_token,reason}; type_text {pid,window_id,element_token,text,reason}; press_key {pid,window_id,key,modifiers,reason}; finish {summary,reason}. Use only pid/window_id values in the observation. Use only element_token values in the current window. The harness will reject invented or stale values. Propose finish only when the observation proves the task is complete. Keep generated text exact and short.` },
-          { role: 'user', content: JSON.stringify({ task, observation: {
-            windows: observation.desktop.windows,
-            currentWindow: observation.window && {
-              pid: observation.window.pid, window_id: observation.window.window_id,
-              title: observation.window.window_title,
-              elements: observation.window.elements.filter(e => e.label || e.actions?.length || e.value !== undefined).slice(0, 100).map(e => ({
-                token: e.element_token, role: e.role, label: e.label, value: e.value, actions: e.actions,
-              })),
-            },
-          }, history: history.slice(-5) }) },
+          { role: 'system', content: 'Extract a computer task plan. Return only one JSON object with optional fields: "app" (the application display name to open) and "textToEnter" (the exact text the task asks to type or a short piece of text it asks you to write). Omit either field when the request does not need it. Do not choose UI actions. Do not invent dates, people, addresses, or content that the request does not supply.' },
+          { role: 'user', content: task },
         ],
       }),
     });
     if (!response.ok) throw new Error(`Text model HTTP ${response.status}: ${(await response.text()).slice(0, 600)}`);
     const content = completionSchema.parse(await response.json()).choices[0].message.content;
-    let proposal: unknown;
-    try { proposal = JSON.parse(content); }
+    let plan: unknown;
+    try { plan = JSON.parse(content); }
     catch { throw new Error(`Text model did not return JSON: ${content.slice(0, 350)}`); }
-    return proposalSchema.parse(proposal).actions;
+    return taskPlanSchema.parse(plan);
   }
 }
