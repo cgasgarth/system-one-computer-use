@@ -10,9 +10,8 @@ struct TaskEvent: Decodable {
     let status: Status
     let message: String
     let decisions: Int?
-    let totalSeconds: Double?
-    let requestsPerSecond: Double?
-    let modelMs: Double?
+    let modelActionsPerSecond: Double?
+    let medianDecisionMs: Double?
 }
 
 @MainActor

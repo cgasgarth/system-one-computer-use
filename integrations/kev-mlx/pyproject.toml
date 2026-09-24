@@ -1,0 +1,8 @@
+[project]
+name = "system-one-kev-mlx"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = ["kev[serve]", "mlx==0.32.2", "mlx-lm==0.31.3"]
+
+[tool.uv.sources]
+kev = { git = "https://github.com/jaredpalmer/kev", rev = "09ff745d52a0f23954e3b0f5a608bf4c7c6aebb4" }

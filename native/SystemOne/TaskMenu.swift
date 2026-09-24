@@ -40,14 +40,12 @@ final class TaskMenu: NSViewController {
     let editor = TranscriptView()
     let mode = NSPopUpButton()
     let status = NSTextField(wrappingLabelWithString: "Ready")
-    let run = NSButton(title: "Run task", target: nil, action: nil)
+    let run = NSButton(title: "Start", target: nil, action: nil)
     let voice = NSButton(title: "Dictate", target: nil, action: nil)
     let cancel = NSButton(title: "Stop", target: nil, action: nil)
     let settings = NSButton(title: "", target: nil, action: nil)
     let latency = NSTextField(labelWithString: "—")
     let rate = NSTextField(labelWithString: "—")
-    let elapsed = NSTextField(labelWithString: "—")
-    private let stateIcon = NSImageView()
     private var locked = false
     private var baseFrames: [(NSView, NSRect)] = []
     var onSizeChange: ((NSSize) -> Void)?
@@ -73,26 +71,22 @@ final class TaskMenu: NSViewController {
         target.textColor = .secondaryLabelColor
         target.frame = NSRect(x: 18, y: 258, width: 40, height: 18)
         view.addSubview(target)
-        mode.frame = NSRect(x: 218, y: 252, width: 126, height: 28)
+        mode.frame = NSRect(x: 258, y: 252, width: 84, height: 28)
         mode.addItems(withTitles: ["Any", "Chrome", "macOS"])
         mode.setAccessibilityLabel("Computer")
         mode.toolTip = "Any lets the model choose the computer for your task."
         view.addSubview(mode)
         addEditor()
-        voice.frame = NSRect(x: 14, y: 109, width: 103, height: 30)
-        voice.image = NSImage(systemSymbolName: "mic", accessibilityDescription: nil)
-        voice.imagePosition = .imageLeading
-        run.frame = NSRect(x: 235, y: 109, width: 111, height: 30)
+        voice.frame = NSRect(x: 18, y: 109, width: 82, height: 30)
+        run.frame = NSRect(x: 260, y: 109, width: 82, height: 30)
         run.bezelColor = .controlAccentColor
         run.keyEquivalent = "\r"
         run.keyEquivalentModifierMask = .command
-        run.toolTip = "Run task (⌘Return)"
-        cancel.frame = NSRect(x: 161, y: 109, width: 68, height: 30)
-        for button in [voice, run, cancel] { button.bezelStyle = .rounded; view.addSubview(button) }
+        run.toolTip = "Start task (⌘Return)"
+        cancel.frame = NSRect(x: 184, y: 109, width: 68, height: 30)
+        for button in [voice, run, cancel] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 13, weight: .medium); view.addSubview(button) }
         cancel.isHidden = true
-        stateIcon.frame = NSRect(x: 19, y: 75, width: 14, height: 14)
-        view.addSubview(stateIcon)
-        status.frame = NSRect(x: 40, y: 65, width: 301, height: 28)
+        status.frame = NSRect(x: 18, y: 65, width: 324, height: 28)
         status.font = .systemFont(ofSize: 11)
         status.maximumNumberOfLines = 0
         status.lineBreakMode = .byWordWrapping
@@ -100,15 +94,13 @@ final class TaskMenu: NSViewController {
         let line = NSBox(frame: NSRect(x: 18, y: 57, width: 324, height: 1))
         line.boxType = .separator
         view.addSubview(line)
-        metric(latency, title: "Model / ms", x: 18)
-        metric(rate, title: "Requests / s", x: 128)
-        metric(elapsed, title: "Task / s", x: 238)
-        latency.toolTip = "Mean System One HTTP request time in milliseconds."
-        rate.toolTip = "Completed decisions per second, including planning and computer operations."
-        elapsed.toolTip = "Total task time in seconds."
+        metric(latency, title: "Median latency · ms", x: 18)
+        metric(rate, title: "Actions / sec", x: 180)
+        latency.toolTip = "Median System One request latency for this task, in milliseconds."
+        rate.toolTip = "Completed model-selected actions per second since the first decision started. Includes tool execution and observations; excludes initial planning."
         editor.onChange = { [weak self] in self?.updateRunButton() }
         baseFrames = view.subviews.filter { $0.frame.minY >= 105 }.map { ($0, $0.frame) }
-        setStatus("Ready", symbol: "circle", color: .secondaryLabelColor)
+        setStatus("Ready", color: .secondaryLabelColor)
         updateRunButton()
     }
 
@@ -116,16 +108,25 @@ final class TaskMenu: NSViewController {
         let scroll = NSScrollView(frame: NSRect(x: 18, y: 150, width: 324, height: 91))
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .noBorder
+        scroll.wantsLayer = true
+        scroll.layer?.cornerRadius = 8
+        scroll.layer?.borderWidth = 0.5
+        scroll.layer?.borderColor = NSColor.separatorColor.cgColor
+        scroll.layer?.masksToBounds = true
         scroll.drawsBackground = true
-        scroll.backgroundColor = .textBackgroundColor
-        editor.frame = NSRect(x: 0, y: 0, width: 320, height: 89)
+        let fieldBackground = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.97, alpha: 1)
+        }
+        scroll.backgroundColor = fieldBackground
+        editor.frame = NSRect(x: 0, y: 0, width: 324, height: 91)
         editor.isRichText = false
         editor.isEditable = true
         editor.isSelectable = true
         editor.font = .systemFont(ofSize: 14)
         editor.textColor = .labelColor
-        editor.backgroundColor = .textBackgroundColor
+        editor.backgroundColor = fieldBackground
         editor.textContainerInset = NSSize(width: 8, height: 10)
         editor.autoresizingMask = [.width]
         editor.isVerticallyResizable = true
@@ -139,21 +140,22 @@ final class TaskMenu: NSViewController {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 10)
         label.textColor = .secondaryLabelColor
-        label.frame = NSRect(x: x, y: 33, width: 94, height: 14)
+        label.alignment = .center
+        value.alignment = .center
+        label.frame = NSRect(x: x, y: 33, width: 162, height: 14)
         value.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        value.frame = NSRect(x: x, y: 13, width: 90, height: 18)
+        value.frame = NSRect(x: x, y: 13, width: 162, height: 18)
         view.addSubview(label)
         view.addSubview(value)
     }
 
-    func setStatus(_ message: String, symbol: String, color: NSColor) {
+    func setStatus(_ message: String, color: NSColor) {
         let measured = (message as NSString).boundingRect(
-            with: NSSize(width: 301, height: 500), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            with: NSSize(width: 324, height: 500), options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: NSFont.systemFont(ofSize: 11)])
         let height = max(28, ceil(measured.height) + 16)
         let delta = height - 28
         for (child, frame) in baseFrames { child.frame = frame.offsetBy(dx: 0, dy: delta) }
-        stateIcon.frame.origin.y = 75 + delta
         status.frame.size.height = height
         let size = NSSize(width: Self.size.width, height: Self.size.height + height - 28)
         view.setFrameSize(size)
@@ -162,8 +164,6 @@ final class TaskMenu: NSViewController {
         status.stringValue = message
         status.textColor = color
         status.toolTip = message
-        stateIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        stateIcon.contentTintColor = color
     }
 
     func setLocked(_ value: Bool) {

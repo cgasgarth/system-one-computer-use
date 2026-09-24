@@ -1,3 +1,4 @@
+import { decisionMetrics } from "./decision-metrics.ts";
 import { createInterface } from "node:readline";
 import { runTask } from "../agent/loop.ts";
 import { describeAction } from "../agent/contracts.ts";
@@ -50,7 +51,6 @@ process.once("SIGINT", stop);
 async function execute(line: string): Promise<void> {
   const started = performance.now();
   const steps: TaskStep[] = [];
-  let modelMs = 0;
   let task: TaskInput | undefined = undefined;
   let plan: TaskPlan | undefined = undefined;
   try {
@@ -74,7 +74,6 @@ async function execute(line: string): Promise<void> {
       task: task.task,
       onStep(step) {
         steps.push(step);
-        modelMs += step.decisionMs;
         const totalSeconds = (performance.now() - started) / MS_PER_SECOND;
         console.log(
           JSON.stringify({
@@ -82,8 +81,7 @@ async function execute(line: string): Promise<void> {
             message: step.error ?? describeAction(step.action),
             decisions: step.index,
             totalSeconds,
-            requestsPerSecond: step.index / totalSeconds,
-            modelMs: modelMs / step.index,
+            ...decisionMetrics(steps),
           }),
         );
       },
@@ -100,9 +98,8 @@ async function execute(line: string): Promise<void> {
         status: "complete",
         message: result.summary,
         decisions: steps.length,
-        requestsPerSecond: steps.length / ((performance.now() - started) / MS_PER_SECOND),
+        ...decisionMetrics(steps),
         totalSeconds: (performance.now() - started) / MS_PER_SECOND,
-        modelMs: modelMs / steps.length,
       }),
     );
   } catch (error) {
@@ -112,8 +109,7 @@ async function execute(line: string): Promise<void> {
       message: error instanceof Error ? error.message : "Task failed",
       totalSeconds,
       decisions: steps.length,
-      requestsPerSecond: steps.length / totalSeconds,
-      modelMs: steps.length === 0 ? 0 : modelMs / steps.length,
+      ...decisionMetrics(steps),
     };
     const trace = `runs/failed-${new Date().toISOString().replaceAll(":", "-")}.json`;
     await Bun.write(trace, JSON.stringify({ ...failure, task: task?.task, plan, steps }), {

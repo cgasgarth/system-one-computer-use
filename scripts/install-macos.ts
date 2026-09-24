@@ -17,6 +17,8 @@ const sources = [
   "TaskRunner",
   "VoiceShortcut",
   "SettingsMenu",
+  "ModelTypes",
+  "LocalModels",
 ].map((name) => path.join(root, "native", "SystemOne", `${name}.swift`));
 const info = {
   CFBundleIdentifier: "com.cgasgarth.system-one-computer-use",
@@ -29,7 +31,7 @@ const info = {
   LSUIElement: true,
   NSHighResolutionCapable: true,
   AppDataPath: data,
-  BunPath: process.execPath,
+  BunPath: path.join(contents, "MacOS", "bun"),
   ToolSearchPath: Bun.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
 };
 
@@ -55,6 +57,7 @@ await command([
   runtime,
   path.join(root, "src/app/worker.ts"),
   path.join(root, "src/app/settings.ts"),
+  path.join(root, "src/app/models/daemon.ts"),
 ]);
 await Promise.all(
   ["@playwright/mcp", "playwright", "playwright-core"].map(async (name) =>
@@ -62,6 +65,32 @@ await Promise.all(
       recursive: true,
     }),
   ),
+);
+const uv = Bun.which("uv");
+if (uv === null) {
+  throw new Error("uv is required to package the managed MLX runtime");
+}
+await cp(process.execPath, path.join(contents, "MacOS", "bun"));
+await cp(uv, path.join(contents, "MacOS", "uv"));
+await Promise.all(
+  ["clm-mlx", "kev-mlx"].map(async (project) => {
+    const destination = path.join(contents, "Resources", "integrations", project);
+    await mkdir(destination, { recursive: true });
+    await Promise.all(
+      ["pyproject.toml", "uv.lock"].map(async (file) =>
+        cp(path.join(root, "integrations", project, file), path.join(destination, file)),
+      ),
+    );
+  }),
+);
+await cp(
+  path.join(root, "integrations/clm-mlx/src"),
+  path.join(contents, "Resources", "integrations/clm-mlx/src"),
+  { recursive: true },
+);
+await cp(
+  path.join(root, "integrations/kev-mlx/download.py"),
+  path.join(contents, "Resources", "integrations/kev-mlx/download.py"),
 );
 const environment = path.join(data, ".env");
 if (!(await Bun.file(environment).exists())) {

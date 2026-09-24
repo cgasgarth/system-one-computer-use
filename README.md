@@ -10,7 +10,7 @@ repository does not train a custom decision model.
 
 ## macOS app
 
-Install [Bun](https://bun.sh/), Xcode Command Line Tools, and
+To build the app, install [Bun](https://bun.sh/), [uv](https://docs.astral.sh/uv/), Xcode Command Line Tools, and
 [CUA Driver](https://github.com/trycua/cua). Native tasks use CUA's Accessibility
 and Screen Recording grants. Browser tasks use the
 [Playwright Chrome extension](https://github.com/microsoft/playwright/tree/main/packages/extension).
@@ -18,7 +18,7 @@ and Screen Recording grants. Browser tasks use the
 ```bash
 bun install --frozen-lockfile
 cp .env.example .env
-# Configure your decision and text model services, then start them.
+# The app downloads and runs local models. No serving terminal is needed.
 bun run app:install
 open "$HOME/Applications/System One Computer Use.app"
 ```
@@ -31,7 +31,7 @@ voice control, status, and timing. It has no web portal or detached task window.
 - **Command–Option–C** starts Handy dictation. Press it again to stop. Handy
   pastes its transcript into the task field, which starts the task.
 - **Settings** opens a separate page inside the dropdown. Change the voice
-  shortcut, default computer, decision endpoint/model, and text endpoint/model.
+  shortcut, default computer, local models, external endpoints, and idle memory policy.
 - **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit; they end on completion, execution failure, or Stop. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`
@@ -65,15 +65,18 @@ The browser adapter uses that release's `target` references for clicks and typin
 
 The task dropdown shows:
 
-| Metric       | Definition                                                      |
-| ------------ | --------------------------------------------------------------- |
-| Avg request  | Mean System One HTTP decision latency, in milliseconds          |
-| Requests / s | Completed System One decisions divided by total task time       |
-| Task time    | Time including model planning, driver operations, and decisions |
+| Metric              | Definition                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| Median latency · ms | Median System One HTTP decision latency                                                   |
+| Actions / sec       | Model-selected actions divided by active execution time, starting with the first decision |
 
-Planning calls use the text model and are included in task time. They are not
-counted as System One decisions. Observation and completion decisions do count.
-These are measured values; they are not a model-only theoretical throughput.
+Tool operations and observations are included in throughput. Initial planning is excluded. The menu stays open on submit and does not reopen itself after a task error.
+
+## Models in the app
+
+Select a model in Settings to download and load it. Presets include CLM 8B at 4-bit, 8-bit and BF16, and Kev 0.8B, 4B and 9B through the upstream MLX backend. Qwen 3.5 2B at 4-bit is available for text generation. External inference URLs are also supported.
+
+Choose whether to keep models loaded, unload after five idle minutes, or unload after each task. Quitting the app stops its model processes. See [model management](docs/models.md) for runtime requirements, endpoints, memory behavior and logs.
 
 ## Model services
 

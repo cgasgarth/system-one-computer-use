@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let settings = SettingsMenu()
     private let popover = NSPopover()
     private let runner = TaskRunner()
+    private let models = LocalModels()
     private let shortcut = VoiceShortcut()
     private var phase = Phase.ready
     private var statusItem: NSStatusItem?
@@ -44,6 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.settings.target = self
         content.settings.action = #selector(showSettings)
         settings.loadViewIfNeeded()
+        settings.onSizeChange = { [weak self] size in
+            guard let self, self.popover.contentViewController === self.settings else { return }
+            self.popover.contentSize = size
+        }
+        settings.onModelsChange = { [weak self] preferences in self?.runner.cancel(); self?.models.configure(preferences) }
         settings.back.target = self
         settings.back.action = #selector(showTasks)
         settings.save.target = self
@@ -62,8 +68,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.content.voice.toolTip = "Dictate with Handy: \(label)"
         }
         shortcut.onError = { [weak self] in self?.settings.status.stringValue = $0 }
+        models.onStatus = { [weak self] event in
+            guard let self else { return }
+            self.settings.updateModels(event)
+            if let loading = event.models?.first(where: { $0.state == .downloading || $0.state == .loading }) {
+                self.content.setStatus(loading.message, color: .secondaryLabelColor)
+            } else if self.phase == .ready, let decision = event.models?.first(where: { $0.role == .decision }) {
+                self.content.setStatus(decision.message, color: decision.state == .error ? .systemOrange : .secondaryLabelColor)
+            }
+        }
+        models.onError = { [weak self] message in
+            self?.settings.status.stringValue = message
+            self?.settings.status.textColor = .systemOrange
+            self?.fail(message)
+        }
+        models.start()
         shortcut.start()
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMenu(); return true }
 
     @objc private func toggleMenu() {
         if popover.isShown { popover.performClose(nil) } else { showMenu() }
@@ -98,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         cancelVoice()
         settings.load()
         popover.contentViewController = settings
-        popover.contentSize = NSSize(width: 380, height: 506)
+        popover.contentSize = settings.preferredContentSize
     }
 
     @objc private func showTasks() {
@@ -171,30 +194,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.setLocked(true)
         content.cancel.isEnabled = true
         content.cancel.isHidden = false
-        content.setStatus("Planning task…", symbol: "ellipsis.circle", color: .secondaryLabelColor)
+        content.setStatus("Planning task…", color: .secondaryLabelColor)
         content.latency.stringValue = "—"
         content.rate.stringValue = "—"
-        content.elapsed.stringValue = "—"
-        do {
-            let mode = ["auto", "browser", "desktop"][content.mode.indexOfSelectedItem]
-            try runner.start(task: task, mode: mode)
-            popover.performClose(nil)
-        } catch { fail(error.localizedDescription) }
+        let mode = ["auto", "browser", "desktop"][content.mode.indexOfSelectedItem]
+        models.prepare { [weak self] in
+            guard let self, self.phase == .running else { return }
+            do { try self.runner.start(task: task, mode: mode) }
+            catch { self.fail(error.localizedDescription) }
+        }
     }
 
     private func taskEvent(_ event: TaskEvent) {
-        content.setStatus(event.message, symbol: "ellipsis.circle", color: .secondaryLabelColor)
-        if let milliseconds = event.modelMs { content.latency.stringValue = String(format: "%.1f", milliseconds) }
-        if let rate = event.requestsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
-        if let seconds = event.totalSeconds { content.elapsed.stringValue = String(format: "%.1f", seconds) }
+        content.setStatus(event.message, color: .secondaryLabelColor)
+        if let milliseconds = event.medianDecisionMs { content.latency.stringValue = String(format: "%.1f", milliseconds) }
+        if let rate = event.modelActionsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
         statusItem?.button?.toolTip = event.message
         if event.status == .running { return }
+        models.release()
         ready()
         if event.status == .complete {
-            content.setStatus("Completed · \(event.decisions ?? 0) decisions", symbol: "checkmark.circle.fill", color: .systemGreen)
+            content.setStatus("Completed · \(event.decisions ?? 0) decisions", color: .systemGreen)
         } else {
-            content.setStatus(event.message, symbol: "exclamationmark.circle.fill", color: .systemOrange)
-            showMenu()
+            content.setStatus(event.message, color: .systemOrange)
         }
     }
 
@@ -211,8 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func fail(_ message: String) {
         transcriptionTimer?.invalidate()
         ready()
-        content.setStatus(message, symbol: "exclamationmark.circle.fill", color: .systemOrange)
-        showMenu()
+        content.setStatus(message, color: .systemOrange)
     }
 
     private func cancelVoice() {
@@ -223,8 +244,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func cancelTask() {
         cancelVoice()
         runner.cancel()
+        models.release()
         ready()
-        content.setStatus("Stopped", symbol: "stop.circle", color: .secondaryLabelColor)
+        content.setStatus("Stopped", color: .secondaryLabelColor)
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -239,5 +261,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func quit() { cancelTask(); NSApp.terminate(nil) }
-    func applicationWillTerminate(_ notification: Notification) { cancelTask(); shortcut.stop() }
+    func applicationWillTerminate(_ notification: Notification) { cancelTask(); models.stop(); shortcut.stop() }
 }
