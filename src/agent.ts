@@ -19,7 +19,8 @@ export type TaskResult = {
   steps: TaskStep[];
 };
 
-function candidates(task: string, plan: TaskPlan, observation: Observation, hasActed: boolean): Action[] {
+function candidates(task: string, plan: TaskPlan, observation: Observation, hasActed: boolean,
+                    canNavigate: boolean, hasNavigated: boolean): Action[] {
   const actions: Action[] = [];
   if (!observation.window) {
     if (plan.app && !observation.desktop.windows.some(window => window.app_name === plan.app)) {
@@ -31,6 +32,9 @@ function candidates(task: string, plan: TaskPlan, observation: Observation, hasA
     }
   } else {
     const { pid, window_id } = observation.window;
+    if (canNavigate && plan.url && !hasNavigated) {
+      actions.push({ kind: 'navigate', url: plan.url, reason: 'Open the URL in the task' });
+    }
     for (const element of observation.window.elements) {
       if ((element.actions || []).some(name => ['AXPress', 'AXPick', 'AXConfirm', 'AXOpen'].includes(name))) {
         actions.push({ kind: 'click_element', pid, window_id,
@@ -65,6 +69,7 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
   const steps: TaskStep[] = [];
   let target: { pid: number; windowId: number } | undefined;
   let hasEffectfulAction = false;
+  let hasNavigated = false;
   const history: string[] = [];
 
   for (let index = 0; index < maxSteps; index++) {
@@ -76,7 +81,8 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
       target = undefined;
     }
     const observation: Observation = { desktop, window };
-    const actions = candidates(task, plan, observation, hasEffectfulAction);
+    const actions = candidates(task, plan, observation, hasEffectfulAction,
+                               !!computer.navigate, hasNavigated);
     if (!actions.length) throw new Error(`No live Cua action is available for task step ${index + 1}`);
     const choice = await decision.choose(task, observation, actions);
     const action = choice.action;
@@ -99,6 +105,12 @@ export async function runTask(task: string, computer: Computer, text: TextModel,
         break;
       case 'press_key':
         await computer.pressKey(action.pid, action.window_id, action.key, action.modifiers);
+        hasEffectfulAction = true;
+        break;
+      case 'navigate':
+        if (!computer.navigate) throw new Error('Browser navigation is unavailable');
+        await computer.navigate(action.url);
+        hasNavigated = true;
         hasEffectfulAction = true;
         break;
       case 'finish': {

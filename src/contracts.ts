@@ -35,18 +35,21 @@ export const actionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('click_element'), ...target, element_token: z.string(), reason }),
   z.strictObject({ kind: z.literal('type_text'), ...target, element_token: z.string(), text: z.string(), reason }),
   z.strictObject({ kind: z.literal('press_key'), ...target, key: z.string().min(1), modifiers: z.array(z.enum(['cmd', 'shift', 'option', 'ctrl', 'fn'])).default([]), reason }),
+  z.strictObject({ kind: z.literal('navigate'), url: z.url(), reason }),
   z.strictObject({ kind: z.literal('finish'), summary: z.string().min(1), reason }),
 ]);
 export type Action = z.infer<typeof actionSchema>;
 export const taskPlanSchema = z.strictObject({
   app: z.string().min(1).optional(),
   textToEnter: z.string().min(1).optional(),
+  url: z.url().optional(),
 });
 export type TaskPlan = z.infer<typeof taskPlanSchema>;
 
 export function validateActions(actions: Action[], observation: Observation): Action[] {
   return actions.filter(action => {
     if (action.kind === 'launch_app' || action.kind === 'finish') return true;
+    if (action.kind === 'navigate') return !!observation.window && ['http:', 'https:', 'about:'].includes(new URL(action.url).protocol);
     const exists = observation.desktop.windows.some(
       w => w.pid === action.pid && w.window_id === action.window_id,
     );
@@ -70,6 +73,7 @@ export function describeAction(action: Action): string {
     case 'click_element': return `Click visible element ${action.element_token}. ${action.reason}`;
     case 'type_text': return `Type ${JSON.stringify(action.text)} into visible element ${action.element_token}. ${action.reason}`;
     case 'press_key': return `Press ${[...action.modifiers, action.key].join('+')} in window ${action.window_id}. ${action.reason}`;
+    case 'navigate': return `Open ${action.url} in the current browser tab. ${action.reason}`;
     case 'finish': return `The task is complete: ${action.summary}. ${action.reason}`;
   }
 }

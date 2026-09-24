@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runTask } from './agent';
+import { CuaBrowserComputer } from './browser';
 import { CuaMcpComputer } from './cua';
 import { SystemOneHttpDecisionModel } from './decision';
 import { ChatCompletionTextModel } from './text';
@@ -13,7 +14,9 @@ function required(name: string): string {
 
 const task = process.argv.slice(2).join(' ').trim();
 if (!task) throw new Error('Usage: bun run start "Describe the computer task"');
-const computer = new CuaMcpComputer(Bun.env.CUA_DRIVER_BIN || 'cua-driver');
+const computer = Bun.env.CUA_MODE === 'browser'
+  ? new CuaBrowserComputer(Bun.env.CUA_BROWSER_APP || 'Google Chrome', Bun.env.CUA_DRIVER_BIN || 'cua-driver')
+  : new CuaMcpComputer(Bun.env.CUA_DRIVER_BIN || 'cua-driver');
 const text = new ChatCompletionTextModel(
   required('TEXT_MODEL_URL'), required('TEXT_MODEL_ID'), Bun.env.TEXT_MODEL_API_KEY,
 );

@@ -20,7 +20,7 @@ export class ChatCompletionTextModel implements TextModel {
       headers: { 'content-type': 'application/json', ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
       body: JSON.stringify({ model: this.modelId, temperature: 0, max_tokens: 180,
         messages: [
-          { role: 'system', content: 'Extract a computer task plan. Return only one JSON object with optional fields: "app" (the application display name to open) and "textToEnter" (the exact text the task asks to type or a short piece of text it asks you to write). Omit either field when the request does not need it. Do not choose UI actions. Do not invent dates, people, addresses, or content that the request does not supply.' },
+          { role: 'system', content: 'Extract a computer task plan. Return only one JSON object with optional fields: "app" (application display name), "url" (an exact URL written in the task), and "textToEnter" (exact text to type or a short piece of text the task asks you to write). Omit fields the request does not need. Do not choose UI actions. Do not invent dates, people, addresses, URLs, or content.' },
           { role: 'user', content: task },
         ],
       }),

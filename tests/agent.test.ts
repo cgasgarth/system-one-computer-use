@@ -49,3 +49,23 @@ test('text task drives observed action through the decision model', async () => 
   expect(preparations).toBe(1);
   expect(result.requestsPerSecond).toBeGreaterThan(0);
 });
+
+test('a browser task navigates through a live isolated tab once', async () => {
+  const navigated: string[] = [];
+  const browser: Computer = {
+    desktop: async () => desktop,
+    window: async () => ({ ...window, window_title: navigated.length ? 'Example Domain' : 'about:blank', elements: [] }),
+    navigate: async url => { navigated.push(url); },
+    launchApp: async () => { throw new Error('unexpected launch'); },
+    clickElement: async () => { throw new Error('unexpected click'); },
+    typeText: async () => { throw new Error('unexpected text'); },
+    pressKey: async () => { throw new Error('unexpected key'); },
+  };
+  const text: TextModel = { prepare: async () => ({ url: 'https://example.com' }) };
+  const decision: DecisionModel = { choose: async (_task, _observation, actions) => ({
+    action: actions[0], probabilities: { A0: 1 }, latencyMs: 1,
+  }) };
+  const result = await runTask('Open https://example.com', browser, text, decision);
+  expect(navigated).toEqual(['https://example.com']);
+  expect(result.steps.map(step => step.action.kind)).toEqual(['observe_window', 'navigate', 'finish']);
+});

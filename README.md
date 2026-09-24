@@ -21,15 +21,29 @@ then start `CuaDriver.app` and grant its required macOS permissions.
 ```bash
 bun install
 export SYSTEM_ONE_URL=http://127.0.0.1:8009/v1/systemone
-export SYSTEM_ONE_MODEL=nerqova
+export SYSTEM_ONE_MODEL=your-system-one-model
 export TEXT_MODEL_URL=http://127.0.0.1:8080/v1/chat/completions
 export TEXT_MODEL_ID=your-local-instruct-model
 bun run start "Open System Settings and find Bluetooth settings"
 ```
 
-The first iteration supports macOS windows with accessible controls. A screen
-that exposes only pixels needs a separate visual grounding provider before the
-harness can act on it. Browser tabs and Handy transcription are later adapters.
+For browser tasks, start Chrome once, then use Cua's isolated Chrome profile:
+
+```bash
+export CUA_MODE=browser
+export CUA_BROWSER_APP='Google Chrome'
+bun run start "Open https://example.com and inspect the page"
+```
+
+The browser adapter binds the exact isolated tab, reads semantic page controls,
+and uses short-lived action refs from each new snapshot. It does not attach to
+or change the user's Chrome profile. The current task plan can open an exact URL
+given in the request, click visible controls, and type into visible fields.
+Browser clicks use Cua's explicit DOM event route because trusted background
+input is refused on this setup; each click needs a fresh page observation to
+confirm its effect. Sites that require trusted input may not respond.
+Screens with only pixels still need visual grounding. Handy transcription will
+feed the same task entry point after live tasks are verified.
 
 The CLI prints a compact JSON trace. It does not record screenshots or voice.
 The persistent Cua connection measured about 3 ms median for read-only desktop
@@ -38,7 +52,7 @@ for every observation. These numbers do not measure a full task.
 
 ## Boundaries
 
-- Cua supplies the available window controls. The small text model supplies
+- Cua supplies native window or browser page controls. The small text model supplies
   the requested application or text, and cannot send actions directly to Cua.
 - The System One model chooses from current controls and returns probabilities.
 - The harness accepts an element only when its one-use Cua token is present in

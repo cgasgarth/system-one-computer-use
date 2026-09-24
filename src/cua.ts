@@ -9,6 +9,7 @@ export interface Computer {
   clickElement(pid: number, windowId: number, elementToken: string): Promise<void>;
   typeText(pid: number, windowId: number, elementToken: string, text: string): Promise<void>;
   pressKey(pid: number, windowId: number, key: string, modifiers: string[]): Promise<void>;
+  navigate?(url: string): Promise<void>;
 }
 
 export class CuaMcpComputer implements Computer {
