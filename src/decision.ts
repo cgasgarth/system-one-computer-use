@@ -41,15 +41,16 @@ export class SystemOneHttpDecisionModel implements DecisionModel {
         } },
       }),
     });
-    const latencyMs = performance.now() - start;
     if (!response.ok) throw new Error(`System One HTTP ${response.status}: ${(await response.text()).slice(0, 600)}`);
     const answer = answerSchema.parse(await response.json()).answers.next_action;
+    const latencyMs = performance.now() - start;
     const index = Number(answer.choice.slice(1));
     if (!/^A\d+$/.test(answer.choice) || !Number.isInteger(index) || !actions[index]) {
       throw new Error(`System One selected unknown action ${JSON.stringify(answer.choice)}`);
     }
     const probabilitySum = Object.values(answer.probabilities).reduce((sum, value) => sum + value, 0);
-    if (Math.abs(probabilitySum - 1) > 0.02 || Object.keys(answer.probabilities).length !== actions.length) {
+    if (Math.abs(probabilitySum - 1) > 0.02 || Object.keys(answer.probabilities).length !== actions.length
+        || Object.keys(criteria).some(key => !(key in answer.probabilities))) {
       throw new Error('System One returned an invalid action probability distribution');
     }
     return { action: actions[index], probabilities: answer.probabilities, latencyMs };
