@@ -168,3 +168,22 @@ integrations/
 
 Keep recordings and experiments under ignored `runs/`. Demo videos use real app
 footage and remain local. No GitHub Actions or YouTube uploads.
+
+### Driver overhead
+
+The app disables CUA's decorative agent cursor for its own session. Native
+accessibility and input checks still run. Chrome uses Playwright directly with
+`--timeout-settle 0`; it retains Playwright's actionability checks. If no next
+control is available after an action, the loop re-observes for up to 1.5 seconds
+instead of waiting after every successful action.
+
+A local button test on the development Mac used 12 clicks per configuration:
+median Playwright click latency was 547 ms with its 500 ms settle window and
+28 ms with zero settle. All 24 resulting counts were verified. This isolates
+driver overhead and is not a model or full-task throughput benchmark. A delayed
+page update was checked separately to verify the bounded observation retry.
+
+Task traces separate `observationMs`, `decisionMs`, and `actionMs`. Request
+latency varies with screen size and cache state; a large Calendar observation
+can take much longer than a small page. The menu shows the measured mean for
+the current task.

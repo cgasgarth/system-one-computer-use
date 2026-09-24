@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureEditingCommands()
         popover.contentViewController = content
-        popover.contentSize = NSSize(width: 380, height: 412)
+        popover.contentSize = TaskMenu.size
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
@@ -46,8 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         settings.save.action = #selector(saveSettings)
         settings.shortcut.target = self
         settings.shortcut.action = #selector(recordShortcut)
-        content.quit.target = self
-        content.quit.action = #selector(quit)
+        settings.quit.target = self
+        settings.quit.action = #selector(quit)
         content.mode.selectItem(at: UserDefaults.standard.integer(forKey: "targetMode"))
         content.editor.onPaste = { [weak self] in self?.transcriptArrived() }
         runner.onEvent = { [weak self] in self?.taskEvent($0) }
@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func showTasks() {
         shortcut.stopRecording()
         popover.contentViewController = content
-        popover.contentSize = NSSize(width: 380, height: 412)
+        popover.contentSize = TaskMenu.size
         content.focus()
     }
 
@@ -164,10 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         phase = .running
         content.run.isEnabled = false
         content.voice.isEnabled = false
-        content.editor.isEditable = false
+        content.setLocked(true)
         content.cancel.isEnabled = true
         content.cancel.isHidden = false
-        content.status.stringValue = "Starting task…"
+        content.setStatus("Planning task…", symbol: "ellipsis.circle", color: .secondaryLabelColor)
         content.latency.stringValue = "—"
         content.rate.stringValue = "—"
         content.elapsed.stringValue = "—"
@@ -179,16 +179,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func taskEvent(_ event: TaskEvent) {
-        content.status.stringValue = event.message
-        if let milliseconds = event.modelMs { content.latency.stringValue = String(format: "%.1f ms", milliseconds) }
+        content.setStatus(event.message, symbol: "ellipsis.circle", color: .secondaryLabelColor)
+        if let milliseconds = event.modelMs { content.latency.stringValue = String(format: "%.1f", milliseconds) }
         if let rate = event.requestsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
-        if let seconds = event.totalSeconds { content.elapsed.stringValue = String(format: "%.1f s", seconds) }
+        if let seconds = event.totalSeconds { content.elapsed.stringValue = String(format: "%.1f", seconds) }
         statusItem?.button?.toolTip = event.message
         if event.status == .running { return }
         ready()
         if event.status == .complete {
-            content.status.stringValue = String(format: "Complete · %.2f s · %d decisions · %.2f requests/s\n%@",
-                event.totalSeconds ?? 0, event.decisions ?? 0, event.requestsPerSecond ?? 0, event.message)
+            content.setStatus("Completed · \(event.decisions ?? 0) decisions", symbol: "checkmark.circle.fill", color: .systemGreen)
+        } else {
+            content.setStatus(event.message, symbol: "exclamationmark.circle.fill", color: .systemOrange)
+            showMenu()
         }
     }
 
@@ -197,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.run.isEnabled = true
         content.voice.isEnabled = true
         content.voice.title = "Dictate"
-        content.editor.isEditable = true
+        content.setLocked(false)
         content.cancel.isEnabled = false
         content.cancel.isHidden = true
     }
@@ -205,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func fail(_ message: String) {
         transcriptionTimer?.invalidate()
         ready()
-        content.status.stringValue = message
+        content.setStatus(message, symbol: "exclamationmark.circle.fill", color: .systemOrange)
         showMenu()
     }
 
@@ -218,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         cancelVoice()
         runner.cancel()
         ready()
-        content.status.stringValue = "Canceled."
+        content.setStatus("Stopped", symbol: "stop.circle", color: .secondaryLabelColor)
     }
 
     func popoverDidClose(_ notification: Notification) {

@@ -7,6 +7,8 @@ import type { Action, TaskPlan } from "./contracts.ts";
 interface TaskStep {
   readonly action: Action;
   readonly decisionMs: number;
+  readonly observationMs: number;
+  readonly actionMs: number;
   readonly elapsedMs: number;
   readonly error?: string;
   readonly index: number;

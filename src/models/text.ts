@@ -6,6 +6,7 @@ import { textResponseSchema } from "./text-schema.ts";
 import type { TextRequest } from "./text-schema.ts";
 import { computerModeSchema } from "../computer/types.ts";
 import type { ComputerMode } from "../computer/types.ts";
+import { PlanValidationError } from "./errors.ts";
 
 interface TextModel {
   readonly prepare: (task: string) => Promise<TaskPlan>;
@@ -13,28 +14,26 @@ interface TextModel {
 }
 
 const TIMEOUT_MS = 15_000;
-const MAX_TOKENS = 120;
+const MAX_TOKENS = 256;
 const ERROR_DETAIL_LIMIT = 350;
 const FENCE_LENGTH = 3;
 const entryGoalSchema = z.enum(["open_url", "open_app", "enter_text", "task"]);
 const entryGoalPrompt = `Classify the task. Reply with one word: open_url, open_app, enter_text, or task. Choose enter_text when the user asks to type into a field, including after navigation.`;
-const planPrompt = `Extract only values that occur in the user's task. Return one JSON object, with no Markdown.
-Always include goal. Use open_url only if opening or inspecting the URL completes the whole request.
-Use open_app only if opening the named app completes the whole request. Otherwise use task.
-Use enter_text when entering text in a field is the whole request. Use task if further actions such as submitting are requested.
-Navigation before entering text is still enter_text. Opening the URL is preparation, not an extra goal.
-Use app only when the task names an application. Use url only when the task contains that exact full URL.
-Use textToEnter only for text the task explicitly asks to type, write, or find in a search field.
-Use targetLabel for the named setting, page control, or result that must be reached. Omit unused fields.
+const planPrompt = `Convert the request to one complete JSON task plan. Return JSON only.
+Required goal: open_app, open_url, enter_text, or task.
+For open_app, app is REQUIRED. For open_url, url is REQUIRED. For enter_text, textToEnter is REQUIRED.
+Optional fields: app, url, textToEnter, targetLabel. Omit unused fields.
+Use open_app when opening an app completes the request. Possessives such as "my calendar" refer to the Calendar application.
+Use open_url when visiting a URL completes the request. Use enter_text when the request ends with entering supplied text, even after navigation.
+Use task for other workflows, including submission after typing.
+Copy URLs and requested text exactly. App names can use normal capitalization. Do not invent a URL, text, or app.
 Examples:
-Open Calculator -> {"goal":"open_app","app":"Calculator"}
-Open System Settings and find Bluetooth settings -> {"goal":"task","app":"System Settings","textToEnter":"Bluetooth","targetLabel":"Bluetooth"}
-Open https://example.com and inspect the page -> {"goal":"open_url","url":"https://example.com"}
-Open https://example.com and click Learn more -> {"goal":"task","url":"https://example.com","targetLabel":"Learn more"}
-Type ORD to JFK into the route field -> {"goal":"enter_text","textToEnter":"ORD to JFK"}
-Open https://example.org and type hello into Message -> {"goal":"enter_text","url":"https://example.org","textToEnter":"hello","targetLabel":"Message"}
-Reach the 256 tile in 2048 -> {"goal":"task","targetLabel":"256"}
-Return JSON only. Never invent a URL, app, or text.`;
+"open my calendar" -> {"goal":"open_app","app":"Calendar"}
+"open my notes" -> {"goal":"open_app","app":"Notes"}
+"visit https://example.com" -> {"goal":"open_url","url":"https://example.com"}
+"Open https://example.com and click Learn more" -> {"goal":"task","url":"https://example.com","targetLabel":"Learn more"}
+"Type hello into Message" -> {"goal":"enter_text","textToEnter":"hello","targetLabel":"Message"}
+Return the full object, never just goal.`;
 
 function acceptedText(task: string, value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -55,9 +54,9 @@ function parsePlan(content: string): TaskPlan {
   try {
     return taskPlanSchema.parse(JSON.parse(json));
   } catch (error) {
-    throw new Error(
-      `Text model did not return valid task-plan JSON: ${content.slice(0, ERROR_DETAIL_LIMIT)}`,
-      { cause: error },
+    const reason = error instanceof Error ? error.message : "Invalid JSON";
+    throw new PlanValidationError(
+      `${reason}\nPrevious output: ${content.slice(0, ERROR_DETAIL_LIMIT)}`,
     );
   }
 }
@@ -152,14 +151,20 @@ class ChatCompletionTextModel implements TextModel {
     return entryGoalSchema.parse(response.choices[0].message.content.trim());
   }
 
-  public async prepare(task: string): Promise<TaskPlan> {
+  private async requestPlan(task: string, correction?: string): Promise<TaskPlan> {
     const body: TextRequest = {
       model: this.modelId,
       temperature: 0,
       max_tokens: MAX_TOKENS,
       messages: [
-        { role: "system", content: planPrompt },
-        { role: "user", content: task },
+        {
+          role: "system",
+          content:
+            correction === undefined
+              ? planPrompt
+              : `${planPrompt}\nRepair the previous invalid result. Validation error: ${correction}`,
+        },
+        { role: "user", content: `Task: ${JSON.stringify(task)}\nComplete JSON plan:` },
       ],
     };
     const response = await requestJson({
@@ -170,7 +175,22 @@ class ChatCompletionTextModel implements TextModel {
       schema: textResponseSchema,
       timeoutMs: TIMEOUT_MS,
     });
-    const plan = groundedPlan(task, parsePlan(response.choices[0].message.content));
+    return groundedPlan(task, parsePlan(response.choices[0].message.content));
+  }
+
+  private async validatedPlan(task: string): Promise<TaskPlan> {
+    try {
+      return await this.requestPlan(task);
+    } catch (error) {
+      if (!(error instanceof PlanValidationError)) {
+        throw error;
+      }
+      return this.requestPlan(task, error.detail);
+    }
+  }
+
+  public async prepare(task: string): Promise<TaskPlan> {
+    const plan = await this.validatedPlan(task);
     if (plan.textToEnter !== undefined && plan.goal !== "enter_text") {
       const goal = (await this.entryGoal(task)) === "enter_text" ? "enter_text" : "task";
       return { ...plan, goal, textToEnter: plan.textToEnter };

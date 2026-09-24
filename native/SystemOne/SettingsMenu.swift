@@ -10,6 +10,7 @@ struct ModelSettings: Codable {
 @MainActor
 final class SettingsMenu: NSViewController {
     let back = NSButton(title: "Back", target: nil, action: nil)
+    let quit = NSButton(title: "Quit System One", target: nil, action: nil)
     let shortcut = NSButton(title: "Record shortcut", target: nil, action: nil)
     let mode = NSPopUpButton()
     let decisionUrl = NSTextField()
@@ -52,6 +53,9 @@ final class SettingsMenu: NSViewController {
         save.bezelStyle = .rounded
         save.bezelColor = .controlAccentColor
         view.addSubview(save)
+        quit.frame = NSRect(x: 16, y: 21, width: 130, height: 28)
+        quit.bezelStyle = .inline
+        view.addSubview(quit)
     }
 
     private func label(_ text: String, x: CGFloat, y: CGFloat, size: CGFloat, weight: NSFont.Weight) {

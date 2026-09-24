@@ -4,6 +4,8 @@ import { textRequestSchema } from "../src/models/text-schema.ts";
 import type { TextRequest } from "../src/models/text-schema.ts";
 import { expectFailure } from "./fixtures.ts";
 
+const REPAIR_CALLS = 2;
+
 test("accepts a task plan from a text provider", async () => {
   const captured = Promise.withResolvers<TextRequest>();
   const server = Bun.serve({
@@ -35,7 +37,30 @@ test("rejects prose in place of a task plan", async () => {
   });
   try {
     const model = new ChatCompletionTextModel(server.url.href, "small-text");
-    await expectFailure(model.prepare("Open Settings"), "valid task-plan JSON");
+    await expectFailure(model.prepare("Open Settings"), "Could not plan this task");
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("repairs a missing app field before returning a trusted plan", async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    async fetch(request) {
+      const body = textRequestSchema.parse(await request.json());
+      calls += 1;
+      if (calls > 1) {
+        expect(body.messages[0]?.content).toContain("Validation error");
+      }
+      const content = calls === 1 ? '{"goal":"open_app"}' : '{"goal":"open_app","app":"Calendar"}';
+      return Response.json({ choices: [{ message: { content } }] });
+    },
+    port: 0,
+  });
+  try {
+    const model = new ChatCompletionTextModel(server.url.href, "small-text");
+    expect(await model.prepare("open my calendar")).toEqual({ goal: "open_app", app: "Calendar" });
+    expect(calls).toBe(REPAIR_CALLS);
   } finally {
     await server.stop(true);
   }

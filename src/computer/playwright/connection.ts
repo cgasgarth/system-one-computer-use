@@ -22,7 +22,16 @@ class PlaywrightConnection {
     await this.client.connect(
       new StdioClientTransport({
         command: process.execPath,
-        args: [CLI, "--extension", "--browser", "chrome", "--output-dir", "runs/playwright"],
+        args: [
+          CLI,
+          "--extension",
+          "--browser",
+          "chrome",
+          "--timeout-settle",
+          "0",
+          "--output-dir",
+          "runs/playwright",
+        ],
         env: { ...Bun.env, PLAYWRIGHT_MCP_EXTENSION_TOKEN: token },
         stderr: "pipe",
       }),

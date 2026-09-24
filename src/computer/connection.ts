@@ -30,11 +30,16 @@ const unavailableWindowSchema = z.object({
 const observedWindowSchema = z.union([windowSchema, unavailableWindowSchema]);
 const WINDOW_ATTEMPTS = 15;
 const WINDOW_SETTLE_MS = 100;
+const cursorDisabledSchema = z.object({ enabled: z.literal(false), session: z.string() });
+const sessionSchema = z.object({ active: z.literal(true), session: z.string() });
 
 class CuaConnection {
   private readonly binary: string;
   private readonly client = new Client({ name: "system-one-computer-use", version: "0.1.0" });
   private connected: Promise<void> | undefined = undefined;
+  private readonly session = `system-one-${crypto.randomUUID()}`;
+  private cursorReady: Promise<void> | undefined = undefined;
+  private activeWindow: string | undefined = undefined;
 
   public constructor(binary = "cua-driver") {
     this.binary = binary;
@@ -69,6 +74,17 @@ class CuaConnection {
     }
   }
 
+  private async prepareCursor(): Promise<void> {
+    await this.invoke(
+      { name: "start_session", arguments: { session: this.session } },
+      sessionSchema,
+    );
+    await this.invoke(
+      { name: "set_agent_cursor_enabled", arguments: { session: this.session, enabled: false } },
+      cursorDisabledSchema,
+    );
+  }
+
   public async desktop(): Promise<Desktop> {
     const [desktop, all] = await Promise.all([
       this.invoke({ name: "get_accessibility_tree" }, desktopSchema),
@@ -81,10 +97,16 @@ class CuaConnection {
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {
-    await this.invoke(
-      { name: "bring_to_front", arguments: { pid, window_id: windowId } },
-      resultStatus,
-    );
+    this.cursorReady ??= this.prepareCursor();
+    await this.cursorReady;
+    const target = `${pid}:${windowId}`;
+    if (target !== this.activeWindow) {
+      await this.invoke(
+        { name: "bring_to_front", arguments: { pid, window_id: windowId } },
+        resultStatus,
+      );
+      this.activeWindow = target;
+    }
     return this.readWindow(pid, windowId, WINDOW_ATTEMPTS);
   }
 
@@ -97,6 +119,7 @@ class CuaConnection {
           max_elements: MAX_ELEMENTS,
           pid,
           window_id: windowId,
+          session: this.session,
         },
       },
       observedWindowSchema,
@@ -106,6 +129,12 @@ class CuaConnection {
     }
     if (!state.degraded_reason.startsWith("ax_window_unresolved") || attempts <= 1) {
       throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
+    }
+    if (attempts === WINDOW_ATTEMPTS) {
+      await this.invoke(
+        { name: "bring_to_front", arguments: { pid, window_id: windowId } },
+        resultStatus,
+      );
     }
     await Bun.sleep(WINDOW_SETTLE_MS);
     return this.readWindow(pid, windowId, attempts - 1);
@@ -119,7 +148,7 @@ class CuaConnection {
   public async click(action: ClickAction): Promise<void> {
     const { element_token, pid, window_id } = action;
     await this.invoke(
-      { arguments: { element_token, pid, window_id }, name: "click" },
+      { arguments: { element_token, pid, window_id, session: this.session }, name: "click" },
       resultStatus,
     );
   }
@@ -127,7 +156,10 @@ class CuaConnection {
   public async typeText(action: TypeAction): Promise<void> {
     const { element_token, pid, text, window_id } = action;
     await this.invoke(
-      { arguments: { element_token, pid, text, window_id }, name: "type_text" },
+      {
+        arguments: { element_token, pid, text, window_id, session: this.session },
+        name: "type_text",
+      },
       resultStatus,
     );
   }
@@ -135,7 +167,7 @@ class CuaConnection {
   public async pressKey(action: KeyAction): Promise<void> {
     const { key, modifiers, pid, window_id } = action;
     await this.invoke(
-      { arguments: { key, modifiers, pid, window_id }, name: "press_key" },
+      { arguments: { key, modifiers, pid, window_id, session: this.session }, name: "press_key" },
       resultStatus,
     );
   }

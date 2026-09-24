@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { taskLooksComplete } from "../src/agent/completion.ts";
 import { validateActions } from "../src/agent/contracts.ts";
-import type { Action, ActionChoices } from "../src/agent/contracts.ts";
+import type { Action, ActionChoices, Window } from "../src/agent/contracts.ts";
 import { runTask } from "../src/agent/loop.ts";
 import { initialProgress } from "../src/agent/progress.ts";
 import {
@@ -14,6 +14,7 @@ import {
 } from "./fixtures.ts";
 
 const SHORT_TASK_STEPS = 3;
+const DELAYED_OBSERVATIONS = 3;
 
 test("grounds an action in the current snapshot", () => {
   const actions: ActionChoices = [
@@ -87,6 +88,38 @@ test("lets the decision model choose live computer actions", async () => {
   expect(result.requestsPerSecond).toBeGreaterThan(0);
 });
 
+test("waits for a delayed UI result without repeating the click", async () => {
+  const fixture = computerFixture("settings");
+  let pendingReads = 0;
+  const computer = {
+    ...fixture.computer,
+    async window(): Promise<Window> {
+      if (fixture.clicked.length === 0) {
+        return windowFixture();
+      }
+      pendingReads += 1;
+      return {
+        ...windowFixture(),
+        elements: [],
+        window_title: pendingReads < DELAYED_OBSERVATIONS ? "Loading" : "Bluetooth",
+      };
+    },
+  };
+  const result = await runTask({
+    computer,
+    decision: decisionFixture(),
+    task: "Open Bluetooth settings",
+    text: textFixture({ app: "Settings", goal: "task", targetLabel: "Bluetooth" }),
+  });
+  expect(fixture.clicked).toHaveLength(1);
+  expect(result.steps.map((step) => step.action.kind)).toEqual([
+    "observe_window",
+    "click_element",
+    "finish",
+  ]);
+  expect(pendingReads).toBe(DELAYED_OBSERVATIONS);
+});
+
 test("navigates the selected browser tab once", async () => {
   const fixture = computerFixture("browser");
   const result = await runTask({
@@ -113,7 +146,7 @@ test("requires an observed result after a setting click", async () => {
       task: "Open Bluetooth settings",
       text: textFixture({ app: "Settings", goal: "task", targetLabel: "Bluetooth" }),
     }),
-    "No live Cua action",
+    "No usable control",
   );
 });
 
@@ -127,7 +160,7 @@ test("keeps a pending browser task open after navigation", async () => {
       task: "Open https://example.com",
       text: textFixture({ goal: "task", url: "https://example.com" }),
     }),
-    "No live Cua action",
+    "No usable control",
   );
 });
 

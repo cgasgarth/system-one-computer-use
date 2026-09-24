@@ -1,4 +1,5 @@
 import { taskLooksComplete } from "./completion.ts";
+import { NoActionsError } from "./errors.ts";
 import { validateActions } from "./contracts.ts";
 import type { Action, ActionChoices, Observation, TaskPlan, Window } from "./contracts.ts";
 import { attemptKey } from "./progress.ts";
@@ -128,7 +129,7 @@ function candidates(context: CandidateContext): ActionChoices {
   );
   const [first, ...rest] = grounded;
   if (first === undefined) {
-    throw new Error("No live Cua action is available for this task step");
+    throw new NoActionsError();
   }
   return [first, ...rest];
 }
