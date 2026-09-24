@@ -23,9 +23,24 @@ bun install
 export SYSTEM_ONE_URL=http://127.0.0.1:8009/v1/systemone
 export SYSTEM_ONE_MODEL=your-system-one-model
 export TEXT_MODEL_URL=http://127.0.0.1:8080/v1/chat/completions
-export TEXT_MODEL_ID=your-local-instruct-model
+export TEXT_MODEL_ID=mlx-community/Qwen3.5-2B-4bit
 bun run start "Open System Settings and find Bluetooth settings"
 ```
+
+The tested text service is [Qwen3.5-2B 4-bit for MLX](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit),
+at revision `674aaa7240b91e8012fcad5d791b7dfe5ba90207`. Start an
+OpenAI-compatible service for it on port 8080, for example with `mlx-lm`:
+
+```bash
+uv tool install mlx-lm
+mlx_lm.server --model mlx-community/Qwen3.5-2B-4bit \
+  --chat-template-args '{"enable_thinking":false}'
+```
+
+The text model extracts task fields once. The harness accepts only application
+names, URLs, and exact text found in the task, so an invented URL cannot drive
+browser navigation. Its output is validated before the System One model sees
+the current controls.
 
 For browser tasks, start Chrome once, then use Cua's isolated Chrome profile:
 

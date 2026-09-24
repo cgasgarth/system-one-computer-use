@@ -25,3 +25,13 @@ test('rejects prose in place of a task plan', async () => {
       .rejects.toThrow('did not return JSON');
   } finally { server.stop(true); }
 });
+
+test('accepts fenced JSON but removes invented plan fields', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({
+    choices: [{ message: { content: '```json\n{"app":"Flight Search","url":"https://example.com","textToEnter":"ORD to JFK"}\n```' } }],
+  }) });
+  try {
+    const model = new ChatCompletionTextModel(`http://127.0.0.1:${server.port}/v1/chat/completions`, 'small-text');
+    expect(await model.prepare('Type ORD to JFK into the route field')).toEqual({ textToEnter: 'ORD to JFK' });
+  } finally { server.stop(true); }
+});
