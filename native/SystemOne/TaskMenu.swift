@@ -66,15 +66,15 @@ final class TaskMenu: NSViewController {
         settings.toolTip = "Settings"
         settings.setAccessibilityLabel("Settings")
         view.addSubview(settings)
-        let target = NSTextField(labelWithString: "Use")
+        let target = NSTextField(labelWithString: "Control surface")
         target.font = .systemFont(ofSize: 12)
         target.textColor = .secondaryLabelColor
-        target.frame = NSRect(x: 18, y: 258, width: 40, height: 18)
+        target.frame = NSRect(x: 18, y: 258, width: 120, height: 18)
         view.addSubview(target)
         mode.frame = NSRect(x: 258, y: 252, width: 84, height: 28)
-        mode.addItems(withTitles: ["Any", "Chrome", "macOS"])
-        mode.setAccessibilityLabel("Computer")
-        mode.toolTip = "Any lets the model choose the computer for your task."
+        mode.addItems(withTitles: ["Auto", "Chrome", "Desktop"])
+        mode.setAccessibilityLabel("Control surface")
+        mode.toolTip = "Choose automatically, use Chrome, or use the macOS desktop."
         view.addSubview(mode)
         addEditor()
         voice.frame = NSRect(x: 18, y: 109, width: 82, height: 30)

@@ -26,12 +26,12 @@ open "$HOME/Applications/System One Computer Use.app"
 Click the **cursor icon** in the menu bar. The dropdown contains task input,
 voice control, status, and timing. It has no web portal or detached task window.
 
-- **Any** is the default. Model planning selects Chrome or a native application.
-  Chrome and macOS remain explicit overrides.
+- **Control surface** offers **Auto**, **Chrome**, and **Desktop**. Auto is the default. Model planning selects Chrome or a native application.
+  Chrome and Desktop remain explicit overrides.
 - **Command–Option–C** starts Handy dictation. Press it again to stop. Handy
   pastes its transcript into the task field, which starts the task.
 - **Settings** opens a separate page inside the dropdown. Change the voice
-  shortcut, default computer, local models, external endpoints, and idle memory policy.
+  shortcut, control surface, local models, external endpoints, and idle memory policy.
 - **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit; they end on completion, execution failure, or Stop. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`

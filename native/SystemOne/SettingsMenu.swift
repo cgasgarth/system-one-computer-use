@@ -37,9 +37,11 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
         shortcut.bezelStyle = .rounded
         shortcut.widthAnchor.constraint(equalToConstant:170).isActive = true
         add(row([label("Voice shortcut"),spacer(),shortcut]))
-        mode.addItems(withTitles:["Any","Chrome","macOS"])
+        mode.addItems(withTitles:["Auto","Chrome","Desktop"])
+        mode.setAccessibilityLabel("Control surface")
+        mode.toolTip = "Choose automatically, use Chrome, or use the macOS desktop."
         mode.widthAnchor.constraint(equalToConstant:94).isActive = true
-        add(row([label("Default computer"),spacer(),mode]))
+        add(row([label("Control surface"),spacer(),mode]))
         separator()
         add(modelGroup(title:"Decision model",picker:decision,detail:decisionStatus))
         endpoints(decisionEndpoint,url:decisionUrl,name:decisionName)
