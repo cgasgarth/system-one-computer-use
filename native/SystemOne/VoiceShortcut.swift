@@ -14,24 +14,34 @@ final class VoiceShortcut {
     private var handler: EventHandlerRef?
     private var monitor: Any?
     private(set) var value = ShortcutValue.standard
+    private var pressed = false
     var onPress: (() -> Void)?
+    var onRelease: (() -> Void)?
     var onChange: ((String) -> Void)?
     var onError: ((String) -> Void)?
 
     func start() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let callback: EventHandlerUPP = { _, _, context in
-            guard let context else { return noErr }
+        var specs = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)), EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
+        let callback: EventHandlerUPP = { _, event, context in
+            guard let context, let event else { return noErr }
             MainActor.assumeIsolated {
-                Unmanaged<VoiceShortcut>.fromOpaque(context).takeUnretainedValue().onPress?()
+                Unmanaged<VoiceShortcut>.fromOpaque(context).takeUnretainedValue().edge(GetEventKind(event))
             }
             return noErr
         }
-        InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec,
+        InstallEventHandler(GetApplicationEventTarget(), callback, specs.count, &specs,
                             Unmanaged.passUnretained(self).toOpaque(), &handler)
         if let data = UserDefaults.standard.data(forKey: "voiceShortcut"),
            let saved = try? JSONDecoder().decode(ShortcutValue.self, from: data) { value = saved }
         register(value)
+    }
+
+    private func edge(_ kind: UInt32) {
+        if kind == UInt32(kEventHotKeyPressed) {
+            guard !pressed else { return }; pressed = true; onPress?()
+        } else if kind == UInt32(kEventHotKeyReleased) {
+            guard pressed else { return }; pressed = false; onRelease?()
+        }
     }
 
     private func register(_ candidate: ShortcutValue) {

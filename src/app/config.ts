@@ -8,7 +8,6 @@ import type { DecisionModel } from "../models/system-one.ts";
 import { ChatCompletionTextModel } from "../models/text.ts";
 import type { TextModel } from "../models/text.ts";
 import { driverModeSchema } from "./task-schema.ts";
-import type { TaskPlan } from "../agent/contracts.ts";
 
 const endpointSchema = z.url({ protocol: /^https?$/u });
 const optionalKey = z.string().min(1).optional();
@@ -30,13 +29,6 @@ interface Models {
   readonly decision: DecisionModel;
   readonly text: TextModel;
 }
-interface RoutingContext {
-  readonly mode: DriverMode;
-  readonly task: string;
-  readonly model: TextModel;
-  readonly plan: TaskPlan;
-}
-
 function loadConfig(): Config {
   return configSchema.parse(Bun.env);
 }
@@ -63,22 +55,6 @@ function createComputer(config: Config, mode: ComputerMode): ManagedComputer {
   return new CuaMcpComputer(config.CUA_DRIVER_BIN);
 }
 
-async function resolveMode({ mode, task, model, plan }: RoutingContext): Promise<ComputerMode> {
-  if (mode !== "auto") {
-    return mode;
-  }
-  // A model-selected URL requires the browser driver's navigation capability.
-  if (plan.url !== undefined) {
-    return "browser";
-  }
-  const selected = await model.route(task);
-  if (selected === "desktop" && plan.app === undefined) {
-    throw new Error(
-      "The model could not identify the native app. Include the app name in your task.",
-    );
-  }
-  return selected;
-}
-
-export { createComputer, createModels, loadConfig, resolveMode };
+export { createComputer, createModels, loadConfig };
+export { installedApplications } from "../computer/applications.ts";
 export type { Config, DriverMode };

@@ -1,3 +1,4 @@
+import type { Surface } from "../app/sessions/schema.ts";
 import type { Action, Desktop, Window } from "../agent/contracts.ts";
 import { z } from "zod";
 
@@ -19,6 +20,8 @@ interface Computer {
 }
 
 interface ManagedComputer extends Computer {
+  readonly bookmark?: () => Promise<Extract<Surface, { kind: "browser" }>>;
+  readonly restore?: (surface: Extract<Surface, { kind: "browser" }>) => Promise<void>;
   readonly close: () => Promise<void>;
 }
 

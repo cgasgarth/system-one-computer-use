@@ -1,7 +1,12 @@
 import type { Desktop } from "../agent/contracts.ts";
 
 const INTERNAL_BUNDLES = new Set(["com.trycua.driver", "com.cgasgarth.system-one-computer-use"]);
-const INTERNAL_NAMES = new Set(["Cua Driver", "CuaDriver", "System One Computer Use"]);
+const INTERNAL_NAMES = new Set([
+  "Cua Driver",
+  "CuaDriver",
+  "System One Computer Use",
+  "ChatGPT Computer Use",
+]);
 
 function taskDesktop(desktop: Desktop): Desktop {
   const blocked = new Set(
@@ -17,4 +22,4 @@ function taskDesktop(desktop: Desktop): Desktop {
   };
 }
 
-export { taskDesktop };
+export { taskDesktop, INTERNAL_NAMES };

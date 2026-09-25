@@ -3,15 +3,18 @@ import AppKit
 struct TaskInput: Encodable {
     let task: String
     let mode: String
+    let session: SessionSelection
+    let submittedAt: Int64
 }
 
 struct TaskEvent: Decodable {
-    enum Status: String, Decodable { case running, complete, error }
+    enum Status: String, Decodable { case running, complete, blocked, error }
     let status: Status
     let message: String
     let decisions: Int?
     let modelActionsPerSecond: Double?
     let medianDecisionMs: Double?
+    let sessionId: String?
 }
 
 @MainActor
@@ -24,10 +27,10 @@ final class TaskRunner {
     var onEvent: ((TaskEvent) -> Void)?
     var onError: ((String) -> Void)?
 
-    func start(task: String, mode: String) throws {
+    func start(_ request: TaskInput) throws {
         if process != nil {
             ended = false
-            try send(task: task, mode: mode)
+            try send(request)
             return
         }
         let current = UUID()
@@ -71,11 +74,11 @@ final class TaskRunner {
         try child.run()
         process = child
         input = stdin.fileHandleForWriting
-        try send(task: task, mode: mode)
+        try send(request)
     }
 
-    private func send(task: String, mode: String) throws {
-        var data = try JSONEncoder().encode(TaskInput(task: task, mode: mode))
+    private func send(_ request: TaskInput) throws {
+        var data = try JSONEncoder().encode(request)
         data.append(10)
         try input?.write(contentsOf: data)
     }

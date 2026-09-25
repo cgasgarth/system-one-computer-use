@@ -36,8 +36,10 @@ final class TranscriptView: NSTextView {
 
 @MainActor
 final class TaskMenu: NSViewController {
-    static let size = NSSize(width: 360, height: 334)
+    static let size = NSSize(width: 360, height: 370)
     let editor = TranscriptView()
+    let sessions = SessionMenu()
+    var onActivity: (() -> Void)?
     let mode = NSPopUpButton()
     let status = NSTextField(wrappingLabelWithString: "Ready")
     let run = NSButton(title: "Start", target: nil, action: nil)
@@ -57,9 +59,9 @@ final class TaskMenu: NSViewController {
         preferredContentSize = Self.size
         let heading = NSTextField(labelWithString: "System One")
         heading.font = .systemFont(ofSize: 15, weight: .semibold)
-        heading.frame = NSRect(x: 18, y: 295, width: 200, height: 22)
+        heading.frame = NSRect(x: 18, y: 331, width: 200, height: 22)
         view.addSubview(heading)
-        settings.frame = NSRect(x: 306, y: 292, width: 36, height: 28)
+        settings.frame = NSRect(x: 306, y: 328, width: 36, height: 28)
         settings.bezelStyle = .accessoryBarAction
         settings.isBordered = false
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
@@ -69,13 +71,19 @@ final class TaskMenu: NSViewController {
         let target = NSTextField(labelWithString: "Control surface")
         target.font = .systemFont(ofSize: 12)
         target.textColor = .secondaryLabelColor
-        target.frame = NSRect(x: 18, y: 258, width: 120, height: 18)
+        target.frame = NSRect(x: 18, y: 294, width: 120, height: 18)
         view.addSubview(target)
-        mode.frame = NSRect(x: 258, y: 252, width: 84, height: 28)
+        mode.frame = NSRect(x: 258, y: 288, width: 84, height: 28)
         mode.addItems(withTitles: ["Auto", "Chrome", "Desktop"])
         mode.setAccessibilityLabel("Control surface")
         mode.toolTip = "Choose automatically, use Chrome, or use the macOS desktop."
         view.addSubview(mode)
+        let sessionLabel = NSTextField(labelWithString: "Session")
+        sessionLabel.font = .systemFont(ofSize: 12); sessionLabel.textColor = .secondaryLabelColor
+        sessionLabel.frame = NSRect(x: 18, y: 258, width: 90, height: 18)
+        view.addSubview(sessionLabel)
+        sessions.picker.frame = NSRect(x: 138, y: 252, width: 204, height: 28)
+        view.addSubview(sessions.picker)
         addEditor()
         voice.frame = NSRect(x: 18, y: 109, width: 82, height: 30)
         run.frame = NSRect(x: 260, y: 109, width: 82, height: 30)
@@ -98,7 +106,10 @@ final class TaskMenu: NSViewController {
         metric(rate, title: "Actions / sec", x: 180)
         latency.toolTip = "Median System One request latency for this task, in milliseconds."
         rate.toolTip = "Completed model-selected actions per second since the first decision started. Includes tool execution and observations; excludes initial planning."
-        editor.onChange = { [weak self] in self?.updateRunButton() }
+        editor.onChange = { [weak self] in
+            guard let self else { return }; self.updateRunButton()
+            if !self.locked && !self.editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self.onActivity?() }
+        }
         baseFrames = view.subviews.filter { $0.frame.minY >= 105 }.map { ($0, $0.frame) }
         setStatus("Ready", color: .secondaryLabelColor)
         updateRunButton()
@@ -170,6 +181,7 @@ final class TaskMenu: NSViewController {
         locked = value
         editor.isEditable = !value
         mode.isEnabled = !value
+        sessions.picker.isEnabled = !value
         settings.isEnabled = !value
         updateRunButton()
     }

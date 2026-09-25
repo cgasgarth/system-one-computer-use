@@ -23,6 +23,8 @@ CLM downloads its pinned full encoder once, then quantizes it during loading whe
 
 Files remain on disk. These options control residency in memory. The model runtime's own request and embedding caches are available while its process remains loaded.
 
+Typing in the task field or starting Handy dictation requests warm-up of both models. Draft warm-up has a five-minute idle grace period, even with the unload-after-task policy. Once an actual task ends, that policy unloads immediately. Repeated edits share the current model load.
+
 ## External endpoints
 
 Choose **Use an endpoint…** for either model role, enter the full inference URL and model ID, then save. Decision endpoints use the System One protocol; text endpoints use Chat Completions. Existing `SYSTEM_ONE_API_KEY` and `TEXT_MODEL_API_KEY` environment settings are forwarded as bearer credentials by the harness.

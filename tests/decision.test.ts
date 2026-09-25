@@ -30,11 +30,11 @@ test.each(["clm-latest", "jev-latest", "another-system-one-model"])(
         { kind: "launch_app", name: "Settings", reason: "Open it" },
         { kind: "finish", reason: "Already complete", summary: "Done" },
       ];
-      const result = await model.choose(
-        "Open Settings",
-        { desktop: { apps: [], windows: [] } },
+      const result = await model.choose({
+        task: "Open Settings",
+        observation: { desktop: { apps: [], windows: [] } },
         actions,
-      );
+      });
       const request = await captured.promise;
       expect(request.model).toBe(modelId);
       expect(Object.keys(request.questions.next_action.criteria)).toEqual(["A0", "A1"]);
@@ -61,9 +61,11 @@ test("rejects an invalid external probability distribution", async () => {
   try {
     const model = new SystemOneHttpDecisionModel(server.url.href, "any-model");
     await expectFailure(
-      model.choose("Open Settings", { desktop: { apps: [], windows: [] } }, [
-        { kind: "launch_app", name: "Settings", reason: "Open it" },
-      ]),
+      model.choose({
+        task: "Open Settings",
+        observation: { desktop: { apps: [], windows: [] } },
+        actions: [{ kind: "launch_app", name: "Settings", reason: "Open it" }],
+      }),
       "Too small",
     );
   } finally {

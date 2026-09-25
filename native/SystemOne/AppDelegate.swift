@@ -10,9 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let models = LocalModels()
     private let shortcut = VoiceShortcut()
     private var phase = Phase.ready
+    private var voiceActivation = VoiceActivation()
     private var statusItem: NSStatusItem?
     private var transcriptionTimer: Timer?
-    private var handy: Process?
+    private let handy = HandyCommands()
     private var initialized = false
 
     func start() {
@@ -59,10 +60,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         settings.quit.target = self
         settings.quit.action = #selector(quit)
         content.mode.selectItem(at: UserDefaults.standard.integer(forKey: "targetMode"))
+        content.onActivity = { [weak self] in self?.models.warm() }
+        handy.onError = { [weak self] in self?.fail($0) }
         content.editor.onPaste = { [weak self] in self?.transcriptArrived() }
         runner.onEvent = { [weak self] in self?.taskEvent($0) }
         runner.onError = { [weak self] in self?.fail($0) }
-        shortcut.onPress = { [weak self] in self?.toggleVoice() }
+        shortcut.onPress = { [weak self] in self?.voiceKey(pressed: true) }
+        shortcut.onRelease = { [weak self] in self?.voiceKey(pressed: false) }
         shortcut.onChange = { [weak self] label in
             self?.settings.shortcut.title = label
             self?.content.voice.toolTip = "Dictate with Handy: \(label)"
@@ -108,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showMenu() {
+        content.sessions.refresh()
         guard let button = statusItem?.button else { return }
         NSApp.activate(ignoringOtherApps: true)
         if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
@@ -137,39 +142,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.mode.selectItem(at: settings.mode.indexOfSelectedItem)
     }
 
+    private func voiceKey(pressed: Bool) {
+        guard phase == .ready || phase == .recording else { return }
+        do {
+            let behavior = try HandyBehavior.read()
+            let effect = pressed ? voiceActivation.press(behavior, at: ProcessInfo.processInfo.systemUptime) : voiceActivation.release(behavior, at: ProcessInfo.processInfo.systemUptime)
+            switch effect {
+            case .start: beginVoice(behavior: behavior.label)
+            case .stop: endVoice()
+            case .none: break
+            }
+        } catch { cancelVoice(); fail("Could not read Handy's shortcut setting. Open Handy and check its settings.") }
+    }
+
     @objc func toggleVoice() {
-        guard phase != .running, phase != .transcribing else { showMenu(); return }
-        showTasks()
-        showMenu()
-        content.cancel.isEnabled = true
-        content.cancel.isHidden = false
-        if phase == .recording {
-            phase = .transcribing
-            content.status.stringValue = "Handy is transcribing. The task will run when the text arrives."
-            content.voice.title = "Transcribing…"
-            invokeHandy("--toggle-transcription")
-            let timer = Timer(timeInterval: 60, target: self,
-                selector: #selector(transcriptionTimedOut), userInfo: nil, repeats: false)
-            transcriptionTimer = timer
-            RunLoop.main.add(timer, forMode: .common)
-        } else {
-            content.editor.string = ""
-            content.editor.needsDisplay = true
-            phase = .recording
-            content.voice.title = "Stop and run"
-            content.status.stringValue = "Listening with Handy. Press \(shortcut.value.label) again to stop and run."
-            invokeHandy("--toggle-transcription")
-        }
+        voiceActivation.reset()
+        if phase == .recording { endVoice() }
+        else if phase == .ready { beginVoice(behavior: "Toggle") }
+        else { showMenu() }
+    }
+
+    private func beginVoice(behavior: String) {
+        models.warm()
+        showTasks(); showMenu()
+        content.editor.string = ""; content.editor.needsDisplay = true
+        phase = .recording
+        content.cancel.isEnabled = true; content.cancel.isHidden = false
+        content.voice.title = "Stop and run"
+        content.setStatus("Listening with Handy · \(behavior)", color: .secondaryLabelColor)
+        invokeHandy("--toggle-transcription")
+    }
+
+    private func endVoice() {
+        guard phase == .recording else { return }
+        voiceActivation.reset()
+        showMenu(); content.focus()
+        phase = .transcribing
+        content.setStatus("Handy is transcribing…", color: .secondaryLabelColor)
+        content.voice.title = "Transcribing…"
+        invokeHandy("--toggle-transcription")
+        let timer = Timer(timeInterval: 60, target: self, selector: #selector(transcriptionTimedOut), userInfo: nil, repeats: false)
+        transcriptionTimer = timer; RunLoop.main.add(timer, forMode: .common)
     }
 
     private func invokeHandy(_ flag: String) {
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: "/Applications/Handy.app/Contents/MacOS/handy")
-        child.arguments = [flag]
-        child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
-        do { try child.run(); handy = child }
-        catch { fail("Could not start Handy: \(error.localizedDescription)") }
+        handy.send(flag)
     }
 
     private func transcriptArrived() {
@@ -194,18 +211,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.setLocked(true)
         content.cancel.isEnabled = true
         content.cancel.isHidden = false
-        content.setStatus("Planning task…", color: .secondaryLabelColor)
+        content.setStatus("Preparing models…", color: .secondaryLabelColor)
         content.latency.stringValue = "—"
         content.rate.stringValue = "—"
         let mode = ["auto", "browser", "desktop"][content.mode.indexOfSelectedItem]
+        let request = TaskInput(task: task, mode: mode, session: content.sessions.selection, submittedAt: Int64(Date().timeIntervalSince1970 * 1000))
         models.prepare { [weak self] in
             guard let self, self.phase == .running else { return }
-            do { try self.runner.start(task: task, mode: mode) }
+            do { try self.runner.start(request) }
             catch { self.fail(error.localizedDescription) }
         }
     }
 
     private func taskEvent(_ event: TaskEvent) {
+        if event.sessionId != nil { content.sessions.resetSelection(); content.sessions.refresh() }
         content.setStatus(event.message, color: .secondaryLabelColor)
         if let milliseconds = event.medianDecisionMs { content.latency.stringValue = String(format: "%.1f", milliseconds) }
         if let rate = event.modelActionsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
@@ -221,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func ready() {
+        voiceActivation.reset()
         phase = .ready
         content.run.isEnabled = true
         content.voice.isEnabled = true
@@ -237,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func cancelVoice() {
+        voiceActivation.reset()
         if phase == .recording || phase == .transcribing { invokeHandy("--cancel"); ready() }
         transcriptionTimer?.invalidate()
     }
@@ -251,7 +272,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         shortcut.stopRecording()
-        cancelVoice()
     }
 
     func popoverDidShow(_ notification: Notification) {

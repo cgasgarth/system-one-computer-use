@@ -1,51 +1,59 @@
 import { runTask } from "../agent/loop.ts";
-import type { TaskResult, TaskStep } from "../agent/types.ts";
-import { createComputer, createModels, loadConfig, resolveMode } from "./config.ts";
+import { createComputer, createModels, loadConfig } from "./config.ts";
+import { installedApplications } from "../computer/applications.ts";
+import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import { taskTextSchema } from "./task-schema.ts";
+import { SessionStore } from "./sessions/store.ts";
+import { sessionContext } from "./sessions/context.ts";
+import { describeAction } from "../agent/contracts.ts";
 
 const ARGUMENT_OFFSET = 2;
-const JSON_INDENT = 2;
-const MS_PER_SECOND = 1000;
 const config = loadConfig();
 const models = createModels(config);
+const sessions = new SessionStore("runs/sessions");
 const task = taskTextSchema.parse(Bun.argv.slice(ARGUMENT_OFFSET).join(" "));
-const started = performance.now();
-const plan = await models.text.prepare(task);
-const computer = createComputer(
-  config,
-  await resolveMode({ mode: config.CUA_MODE, task, model: models.text, plan }),
-);
-
-function trace(step: TaskStep): void {
-  if (config.SYSTEM_ONE_TRACE === "1") {
-    console.error(JSON.stringify(step));
+const { handle, session } = await sessions.begin(task);
+const computers = new Map<ComputerMode, ManagedComputer>();
+function computer(mode: ComputerMode): ManagedComputer {
+  const existing = computers.get(mode);
+  if (existing !== undefined) {
+    return existing;
   }
+  const created = createComputer(config, mode);
+  computers.set(mode, created);
+  return created;
 }
-
-async function executeTask(): Promise<TaskResult> {
-  try {
-    return await runTask({
-      ...models,
-      plan,
-      preparationMs: performance.now() - started,
-      computer,
-      onStep: trace,
-      task,
-    });
-  } finally {
-    await computer.close();
-  }
+try {
+  const result = await runTask({
+    ...models,
+    computer,
+    task,
+    context: sessionContext(session),
+    applications: await installedApplications(),
+    ...(config.CUA_MODE === "auto" ? {} : { preferredSurface: config.CUA_MODE }),
+    ...(session.surface === undefined ? {} : { previousSurface: session.surface }),
+    async onStep(step) {
+      await sessions.update(handle, {
+        action: describeAction(step.action),
+        observation: step.observation,
+      });
+      if (config.SYSTEM_ONE_TRACE === "1") {
+        console.error(JSON.stringify(step));
+      }
+    },
+  });
+  await sessions.update(handle, {
+    status: result.status,
+    message: result.summary,
+    ...(result.surface === undefined ? {} : { surface: result.surface }),
+  });
+  console.log(JSON.stringify(result));
+} catch (error) {
+  await sessions.update(handle, {
+    status: "error",
+    message: error instanceof Error ? error.message : "Task failed",
+  });
+  throw error;
+} finally {
+  await Promise.all([...computers.values()].map(async (driver) => driver.close()));
 }
-
-const result = await executeTask();
-const tracePath = `runs/task-${new Date().toISOString().replaceAll(":", "-")}.json`;
-await Bun.write(tracePath, JSON.stringify(result, undefined, JSON_INDENT), { createPath: true });
-console.log(
-  JSON.stringify({
-    decisions: result.steps.length,
-    requestsPerSecond: result.requestsPerSecond,
-    summary: result.summary,
-    totalSeconds: result.totalMs / MS_PER_SECOND,
-    trace: tracePath,
-  }),
-);

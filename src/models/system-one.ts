@@ -13,6 +13,7 @@ const TIMEOUT_MS = 10_000;
 const MAX_CONTROLS = 100;
 const MAX_FIELD_CHARS = 100;
 const MAX_STATE_CHARS = 6000;
+const MIN_STATE_CHARS = 1200;
 const PROBABILITY_TOLERANCE = 0.02;
 
 interface Decision {
@@ -21,12 +22,15 @@ interface Decision {
   readonly probabilities: ActionProbabilities;
 }
 
+interface DecisionInput {
+  readonly task: string;
+  readonly observation: Observation;
+  readonly actions: ActionChoices;
+  readonly context?: string;
+  readonly mode?: "browser" | "desktop" | undefined;
+}
 interface DecisionModel {
-  readonly choose: (
-    task: string,
-    observation: Observation,
-    actions: ActionChoices,
-  ) => Promise<Decision>;
+  readonly choose: (input: DecisionInput) => Promise<Decision>;
 }
 
 function describeControl(element: Window["elements"][number]): string {
@@ -37,7 +41,7 @@ function describeControl(element: Window["elements"][number]): string {
   return `${element.role} ${element.label ?? ""} ${value.slice(0, MAX_FIELD_CHARS)}`;
 }
 
-function describeObservation(observation: Observation): string {
+function describeObservation(observation: Observation, contextLength: number): string {
   const windows = observation.desktop.windows
     .map((window) => `${window.app_name}: ${window.title}`)
     .join(" | ");
@@ -52,9 +56,28 @@ function describeObservation(observation: Observation): string {
     .join(" | ");
   lines.push(
     `Current window: ${current.app_name}: ${current.window_title}`,
-    `Visible controls and values: ${controls.slice(0, MAX_STATE_CHARS)}`,
+    `Visible controls and values: ${controls.slice(0, Math.max(MIN_STATE_CHARS, MAX_STATE_CHARS - contextLength))}`,
   );
   return lines.join("\n");
+}
+
+function decisionState(input: DecisionInput): string {
+  const state = [`User request: ${input.task}`];
+  if (input.context !== undefined && input.context.length > 0) {
+    state.push(input.context);
+  }
+  if (input.mode === undefined) {
+    state.push(
+      "No tool set selected yet. Both Chrome and Mac desktop tools are available.",
+      `Running applications: ${input.observation.desktop.apps.map((app) => app.name).join(", ")}.`,
+    );
+  } else {
+    state.push(
+      `Selected tool set: ${input.mode}. You can switch to the other tool set.`,
+      describeObservation(input.observation, input.context?.length ?? 0),
+    );
+  }
+  return state.join("\n");
 }
 
 function actionCriteria(actions: readonly Action[]): ActionCriteria {
@@ -96,21 +119,18 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     this.apiKey = apiKey;
   }
 
-  public async choose(
-    task: string,
-    observation: Observation,
-    actions: ActionChoices,
-  ): Promise<Decision> {
+  public async choose(input: DecisionInput): Promise<Decision> {
+    const { actions } = input;
     const request: DecisionRequest = {
       model: this.modelId,
       questions: {
         next_action: {
           criteria: actionCriteria(actions),
-          instructions: `Choose one next computer action. Choose finish only when the observed state proves completion.\nTask: ${task}`,
+          instructions: "Which tool call should the computer agent make next?",
           type: "choice",
         },
       },
-      state: describeObservation(observation),
+      state: decisionState(input),
     };
     const start = performance.now();
     const payload = await requestJson({
@@ -126,4 +146,4 @@ class SystemOneHttpDecisionModel implements DecisionModel {
 }
 
 export { SystemOneHttpDecisionModel };
-export type { Decision, DecisionModel };
+export type { Decision, DecisionInput, DecisionModel };

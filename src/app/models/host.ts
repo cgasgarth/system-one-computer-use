@@ -17,6 +17,7 @@ class ModelHost {
   private preferences: ModelPreferences;
   private timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private held = false;
+  private prewarming = false;
   private closed = false;
   private activeRequests = 0;
   public constructor(options: HostOptions) {
@@ -79,8 +80,17 @@ class ModelHost {
     await slot.unload();
     slot.select(selection);
   }
+  public async warm(): Promise<void> {
+    clearTimeout(this.timer);
+    this.prewarming = true;
+    await this.decision.ensure();
+    await this.text.ensure();
+    console.log(JSON.stringify({ event: "warmed" }));
+    this.schedule();
+  }
   public async prepare(requestId: string): Promise<void> {
     this.held = true;
+    this.prewarming = false;
     clearTimeout(this.timer);
     await this.decision.ensure();
     await this.text.ensure();
@@ -104,7 +114,7 @@ class ModelHost {
       () => {
         void this.unloadIdle();
       },
-      this.preferences.retention === "cold" ? 0 : IDLE_MS,
+      this.preferences.retention === "cold" && !this.prewarming ? 0 : IDLE_MS,
     );
   }
   private async unloadIdle(): Promise<void> {

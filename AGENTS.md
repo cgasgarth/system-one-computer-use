@@ -10,7 +10,7 @@
   directories. Separate UI assets from server logic. Maximum source-file length: 600 lines.
 - Use Bun for the TypeScript runtime and scripts. Use uv for the optional Python
   serving integration. No custom model training belongs in this repository.
-- Run `bun run check` and `bun test` after changes. Use `bun run format` for formatting.
+- Run `bun run check` and `bun run test` after changes. Use `bun run format` for formatting.
   Keep strict typing and safety lint rules enabled; document compatibility exceptions.
 - Generated traces, screenshots, recordings, model assets, and research clones
   belong under ignored `runs/`. Never commit credentials or local `.env` files.

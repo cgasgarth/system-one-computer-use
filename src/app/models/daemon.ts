@@ -66,6 +66,10 @@ async function execute(line: string): Promise<void> {
     }
     const command = parsed.data;
     switch (command.operation) {
+      case "warm": {
+        await host.warm();
+        break;
+      }
       case "configure": {
         await host.configure(command.preferences);
         break;

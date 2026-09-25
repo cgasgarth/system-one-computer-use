@@ -37,7 +37,7 @@ struct ModelStatus: Decodable {
     let message: String
 }
 struct ModelEvent: Decodable {
-    enum Kind: String, Decodable { case status, prepared, error }
+    enum Kind: String, Decodable { case status, prepared, warmed, error }
     let event: Kind
     let preferences: ModelPreferences?
     let catalog: [ModelPreset]?
@@ -46,7 +46,7 @@ struct ModelEvent: Decodable {
     let requestId: String?
 }
 struct ModelCommand: Encodable {
-    enum Operation: String, Encodable { case configure, prepare, release, status, shutdown }
+    enum Operation: String, Encodable { case configure, prepare, warm, release, status, shutdown }
     let operation: Operation
     var preferences: ModelPreferences? = nil
     var requestId: String? = nil

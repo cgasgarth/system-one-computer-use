@@ -1,3 +1,5 @@
+import type { Surface } from "../../app/sessions/schema.ts";
+import { browserBookmark, restoreBrowser } from "./bookmark.ts";
 import type { Desktop, Window } from "../../agent/contracts.ts";
 import type { ClickAction, KeyAction, ManagedComputer, TypeAction } from "../types.ts";
 import { PlaywrightConnection } from "./connection.ts";
@@ -37,6 +39,16 @@ class PlaywrightComputer implements ManagedComputer {
     }
     this.title = window.window_title;
     return window;
+  }
+
+  public async bookmark(): Promise<Extract<Surface, { kind: "browser" }>> {
+    await this.desktop();
+    return browserBookmark(this.connection);
+  }
+
+  public async restore(surface: Extract<Surface, { kind: "browser" }>): Promise<void> {
+    await this.desktop();
+    await restoreBrowser(this.connection, surface);
   }
 
   public async launchApp(): Promise<void> {

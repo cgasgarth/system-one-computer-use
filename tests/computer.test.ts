@@ -1,13 +1,8 @@
 import { expect, test } from "bun:test";
-import type { TaskPlan } from "../src/agent/contracts.ts";
 import { taskDesktop } from "../src/computer/targets.ts";
 import { parseSnapshot, snapshotElements } from "../src/computer/playwright/snapshot.ts";
-import { candidates } from "../src/agent/candidates.ts";
-import { initialProgress } from "../src/agent/progress.ts";
 import { settingsSchema } from "../src/app/settings-schema.ts";
 import { isConnectionPage, parseTabs } from "../src/computer/playwright/tabs.ts";
-import { resolveMode } from "../src/app/config.ts";
-import { textFixture } from "./fixtures.ts";
 
 test("exposes only user application windows to the task loop", () => {
   const desktop = taskDesktop({
@@ -22,22 +17,6 @@ test("exposes only user application windows to the task loop", () => {
   });
   expect(desktop.windows.map((window) => window.app_name)).toEqual(["Calculator"]);
   expect(desktop.apps.map((app) => app.name)).toEqual(["Calculator"]);
-});
-
-test("keeps named-app tasks inside the requested application", () => {
-  const actions = candidates({
-    canNavigate: false,
-    observation: {
-      desktop: {
-        apps: [],
-        windows: [{ app_name: "Handy", pid: 1, window_id: 1, title: "Handy" }],
-      },
-    },
-    plan: { goal: "open_app", app: "Calculator" },
-    progress: initialProgress(),
-    task: "Open Calculator",
-  });
-  expect(actions.map((action) => action.kind)).toEqual(["launch_app"]);
 });
 
 test("maps Playwright references, editable values, and disabled controls", () => {
@@ -121,18 +100,4 @@ test("identifies the Playwright connection tab without matching other pages", ()
   expect(isConnectionPage("chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html")).toBe(
     false,
   );
-});
-
-test("routes a model-selected URL through a driver that can navigate", async () => {
-  const plan = {
-    goal: "open_url",
-    url: "http://127.0.0.1:8792",
-  } satisfies TaskPlan;
-  const mode = await resolveMode({
-    mode: "auto",
-    task: "Open the URL",
-    model: textFixture(plan),
-    plan,
-  });
-  expect(mode).toBe("browser");
 });

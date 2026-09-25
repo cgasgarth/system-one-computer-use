@@ -47,6 +47,16 @@ const MAX_REASON_LENGTH = 280;
 const reason = z.string().min(1).max(MAX_REASON_LENGTH);
 const target = { pid: z.number().int().nonnegative(), window_id: z.number().int().nonnegative() };
 const actionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("select_surface"),
+    surface: z.enum(["browser", "desktop"]),
+    reason,
+  }),
+  z.strictObject({ kind: z.literal("request_url"), reason }),
+  z.strictObject({ kind: z.literal("request_app"), reason }),
+  z.strictObject({ kind: z.literal("refresh"), reason }),
+  z.strictObject({ kind: z.literal("blocked"), reason }),
+  z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),
   z.strictObject({ kind: z.literal("launch_app"), name: z.string().min(1), reason }),
   z.strictObject({ kind: z.literal("observe_window"), ...target, reason }),
   z.strictObject({
@@ -74,48 +84,56 @@ const actionSchema = z.discriminatedUnion("kind", [
 ]);
 type Action = ReadonlyDeep<z.infer<typeof actionSchema>>;
 type ActionChoices = readonly [Action, ...Action[]];
-const planFields = {
-  app: z.string().min(1).optional(),
-  targetLabel: z.string().min(1).optional(),
-  textToEnter: z.string().min(1).optional(),
-  url: z.url().optional(),
-};
-const openUrlPlan = z.strictObject({ ...planFields, goal: z.literal("open_url"), url: z.url() });
-const openWebsitePlan = z.strictObject({
-  ...planFields,
-  goal: z.literal("open_website"),
-  website: z.string().trim().min(1),
-});
-const openAppPlan = z.strictObject({
-  ...planFields,
-  app: z.string().min(1),
-  goal: z.literal("open_app"),
-});
-const generalPlan = z.strictObject({ ...planFields, goal: z.literal("task") });
-const enterTextPlan = z.strictObject({
-  ...planFields,
-  goal: z.literal("enter_text"),
-  textToEnter: z.string().min(1),
-});
-const taskPlanSchema = z.discriminatedUnion("goal", [
-  openUrlPlan,
-  openWebsitePlan,
-  openAppPlan,
-  enterTextPlan,
-  generalPlan,
-]);
-type TaskPlan = ReadonlyDeep<z.infer<typeof taskPlanSchema>>;
+type ElementAction = Extract<Action, { kind: "click_element" | "compose_text" | "type_text" }>;
+function validElement(action: ElementAction, window: Window): boolean {
+  const element = window.elements.find(
+    (candidate) => candidate.element_token === action.element_token,
+  );
+  if (element === undefined) {
+    return false;
+  }
+  if (action.kind === "click_element") {
+    return (element.actions ?? []).some((name) =>
+      ["AXPress", "AXPick", "AXConfirm", "AXOpen"].includes(name),
+    );
+  }
+  return (
+    ["AXTextField", "AXTextArea", "textbox", "searchbox", "combobox"].includes(element.role) ||
+    (element.actions ?? []).includes("AXSetValue")
+  );
+}
+function validNavigation(url: string, observation: Observation): boolean {
+  return (
+    Boolean(observation.window) && ["http:", "https:", "about:"].includes(new URL(url).protocol)
+  );
+}
+function matchesWindow(action: Extract<Action, { pid: number }>, window: Window): boolean {
+  return window.pid === action.pid && window.window_id === action.window_id;
+}
 
 function validateActions(actions: readonly Action[], observation: Observation): Action[] {
   return actions.filter((action) => {
-    if (action.kind === "launch_app" || action.kind === "finish") {
-      return true;
+    switch (action.kind) {
+      case "launch_app":
+      case "finish":
+      case "blocked":
+      case "select_surface":
+      case "request_url":
+      case "request_app":
+      case "refresh": {
+        return true;
+      }
+      case "click_element":
+      case "compose_text":
+      case "navigate":
+      case "observe_window":
+      case "press_key":
+      case "type_text": {
+        break;
+      }
     }
     if (action.kind === "navigate") {
-      return (
-        Boolean(observation.window) &&
-        ["http:", "https:", "about:"].includes(new URL(action.url).protocol)
-      );
+      return validNavigation(action.url, observation);
     }
     const exists = observation.desktop.windows.some(
       (window) => window.pid === action.pid && window.window_id === action.window_id,
@@ -126,36 +144,36 @@ function validateActions(actions: readonly Action[], observation: Observation): 
     if (action.kind === "observe_window") {
       return true;
     }
-    if (
-      !observation.window ||
-      observation.window.pid !== action.pid ||
-      observation.window.window_id !== action.window_id
-    ) {
+    if (!observation.window || !matchesWindow(action, observation.window)) {
       return false;
     }
     if (action.kind === "press_key") {
       return true;
     }
-    const element = observation.window.elements.find(
-      (candidate) => candidate.element_token === action.element_token,
-    );
-    if (!element) {
-      return false;
-    }
-    if (action.kind === "click_element") {
-      return (element.actions ?? []).some((name) =>
-        ["AXPress", "AXPick", "AXConfirm", "AXOpen"].includes(name),
-      );
-    }
-    return (
-      ["AXTextField", "AXTextArea", "textbox", "searchbox", "combobox"].includes(element.role) ||
-      (element.actions ?? []).includes("AXSetValue")
-    );
+    return validElement(action, observation.window);
   });
 }
 
 function describeAction(action: Action): string {
   switch (action.kind) {
+    case "select_surface": {
+      return action.reason;
+    }
+    case "request_url": {
+      return action.reason;
+    }
+    case "request_app": {
+      return action.reason;
+    }
+    case "compose_text": {
+      return action.reason;
+    }
+    case "refresh": {
+      return action.reason;
+    }
+    case "blocked": {
+      return action.reason;
+    }
     case "launch_app": {
       return `Open application ${action.name}. ${action.reason}`;
     }
@@ -175,7 +193,7 @@ function describeAction(action: Action): string {
       return `Open ${action.url} in the current browser tab. ${action.reason}`;
     }
     case "finish": {
-      return `The task is complete: ${action.summary}. ${action.reason}`;
+      return action.reason;
     }
     default: {
       throw new Error("Unexpected action");
@@ -183,12 +201,5 @@ function describeAction(action: Action): string {
   }
 }
 
-export {
-  actionSchema,
-  describeAction,
-  desktopSchema,
-  taskPlanSchema,
-  validateActions,
-  windowSchema,
-};
-export type { Action, ActionChoices, Desktop, Observation, TaskPlan, Window };
+export { actionSchema, describeAction, desktopSchema, validateActions, windowSchema };
+export type { Action, ActionChoices, Desktop, Observation, Window };

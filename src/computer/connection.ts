@@ -142,7 +142,17 @@ class CuaConnection {
 
   public async launchApp(name: string): Promise<void> {
     const app = await this.invoke({ arguments: { name }, name: "launch_app" }, launchedSchema);
-    await this.invoke({ name: "bring_to_front", arguments: { pid: app.pid } }, resultStatus);
+    const windows = await this.invoke({ name: "list_windows" }, nativeWindowsSchema);
+    const eligible = windows.windows.filter(
+      (window) => window.pid === app.pid && window.layer === 0,
+    );
+    const [window] = eligible;
+    if (eligible.length === 1 && window !== undefined) {
+      await this.invoke(
+        { name: "bring_to_front", arguments: { pid: app.pid, window_id: window.window_id } },
+        resultStatus,
+      );
+    }
   }
 
   public async click(action: ClickAction): Promise<void> {

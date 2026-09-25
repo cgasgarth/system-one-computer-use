@@ -26,13 +26,13 @@ open "$HOME/Applications/System One Computer Use.app"
 Click the **cursor icon** in the menu bar. The dropdown contains task input,
 voice control, status, and timing. It has no web portal or detached task window.
 
-- **Control surface** offers **Auto**, **Chrome**, and **Desktop**. Auto is the default. Model planning selects Chrome or a native application.
-  Chrome and Desktop remain explicit overrides.
-- **Command–Option–C** starts Handy dictation. Press it again to stop. Handy
+- **Control surface** offers **Auto**, **Chrome**, and **Desktop**. Auto lets the decision model choose its first tool set. It can switch tool sets on every turn.
+- **Session** defaults to Automatic. Follow-ups reuse the active session for up to one hour of inactivity. Choose New session or one of the last three sessions explicitly.
+- **Command–Option–C** starts Handy dictation and follows Handy's Hold, Auto, or Toggle setting. Handy
   pastes its transcript into the task field, which starts the task.
 - **Settings** opens a separate page inside the dropdown. Change the voice
   shortcut, control surface, local models, external endpoints, and idle memory policy.
-- **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit; they end on completion, execution failure, or Stop. Click outside to dismiss the dropdown.
+- **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit. The decision model can mark a task Complete or Blocked. Tool errors go back to the model with switching options; model-service or storage failures stop execution. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`
 with its microphone access and a transcription model configured. Use Handy's
@@ -58,6 +58,8 @@ The app keeps one connection across tasks. Drag an existing tab into the
 tab closes after a usable tab is attached. Other clients' tabs remain outside
 this connection.
 
+Session context is saved on disk. Browser continuation restores a unique saved URL within the connected tab group and verifies it before use. After a worker restart, the extension creates a new group: move the saved tab into that group to continue. Duplicate URLs require a new session or removing the ambiguity. Native window handles are checked against a fresh desktop listing.
+
 Playwright MCP is installed from npm's latest release and locked in `bun.lock`.
 The browser adapter uses that release's `target` references for clicks and typing.
 
@@ -70,13 +72,15 @@ The task dropdown shows:
 | Median latency · ms | Median System One HTTP decision latency                                                   |
 | Actions / sec       | Model-selected actions divided by active execution time, starting with the first decision |
 
-Tool operations and observations are included in throughput. Initial planning is excluded. The menu stays open on submit and does not reopen itself after a task error.
+Tool operations and observations are included in throughput. Initial model loading is excluded. The menu stays open on submit and does not reopen itself after a task error.
 
 ## Models in the app
 
 Select a model in Settings to download and load it. Presets include CLM 8B at 4-bit, 8-bit and BF16, and Kev 0.8B, 4B and 9B through the upstream MLX backend. Qwen 3.5 2B at 4-bit is available for text generation. External inference URLs are also supported.
 
 Choose whether to keep models loaded, unload after five idle minutes, or unload after each task. Quitting the app stops its model processes. See [model management](docs/models.md) for runtime requirements, endpoints, memory behavior and logs.
+
+Editing the task field or starting dictation starts model loading before submission. Draft warm-up holds models for five idle minutes, including under the unload-after-task policy. It does not start computer actions.
 
 ## Model services
 
@@ -128,28 +132,21 @@ External configuration, HTTP responses, model output, and driver data are
 validated with Zod. Swift validates its IPC messages with Codable. Internal
 TypeScript uses schema-derived types and concrete driver methods.
 
-Actions use current references. Native tasks stay inside a named application's
-windows. CUA's own authorization windows and the harness UI are excluded.
-Temporary native window activation failures receive a bounded retry. Driver
-refusals remain failures.
+Actions use current references. CUA's own authorization windows and the harness UI are excluded. Tool failures are included in the next decision; they do not remove access to the other tool set.
 
-The planner supports explicit URLs, named websites, opening named apps, clicking named
-controls, and entering supplied text. Named websites are found through visible search
-results; the model selects an observed destination link instead of inventing a domain.
-Typing completes only after a text-entry action and a matching value in the same editable field. A verified simple goal stops further
-actions. General tasks must provide observable completion evidence.
+The decision model selects tools and termination. The text helper supplies string arguments only when selected: field text, a URL, or an installed application name for the open-application tool. Application names are checked against the installed-app list. Field handles are refreshed after text generation. There is no text-model task planner.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.
 A System One model ranks supplied choices; it does not independently generate
 arbitrary text, coordinates, or a complete workflow. Small text models can also
-misclassify tasks. Failed validation stops the task and displays an error.
+return incorrect arguments. Models can repeat actions or mark completion incorrectly; a model's Complete decision is not independent proof of task success. Use Stop to interrupt a loop.
 
 ## Development
 
 ```bash
 bun run check
-bun test
+bun run test
 bun run format
 bun run app:install
 ```
@@ -160,7 +157,7 @@ have a hard 600-line limit. See [engineering rules](docs/engineering.md).
 
 ```text
 src/
-  agent/       candidates, completion, execution, task loop
+  agent/       tool options, turn execution, surface state and task loop
   app/         CLI, native worker, settings and configuration boundaries
   computer/    CUA and Playwright adapters
   models/      decision and text model adapters

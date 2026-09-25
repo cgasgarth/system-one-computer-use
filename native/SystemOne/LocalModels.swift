@@ -7,6 +7,8 @@ final class LocalModels {
     private var buffer = Data()
     private var pending: (id: String, action: () -> Void)?
     private var startupRequest: String?
+    private var warming = false
+    private var lastWarm: TimeInterval = 0
     var onStatus: ((ModelEvent) -> Void)?
     var onError: ((String) -> Void)?
 
@@ -53,6 +55,13 @@ final class LocalModels {
         } catch { onError?(error.localizedDescription) }
     }
 
+    func warm() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !warming, now - lastWarm >= 1 else { return }
+        warming = true; lastWarm = now
+        do { try send(ModelCommand(operation: .warm)) }
+        catch { warming = false; onError?(error.localizedDescription) }
+    }
     func configure(_ preferences: ModelPreferences) {
         do { try send(ModelCommand(operation: .configure, preferences: preferences)) }
         catch { onError?(error.localizedDescription) }
@@ -80,8 +89,9 @@ final class LocalModels {
             do {
                 let event = try JSONDecoder().decode(ModelEvent.self, from: line)
                 switch event.event {
+                case .warmed: warming = false
                 case .status: onStatus?(event)
-                case .error: pending = nil; startupRequest = nil; try? send(ModelCommand(operation: .release)); onError?(event.message ?? "Model operation failed.")
+                case .error: warming = false; pending = nil; startupRequest = nil; try? send(ModelCommand(operation: .release)); onError?(event.message ?? "Model operation failed.")
                 case .prepared:
                     guard let id = event.requestId else { onError?("Model readiness response is missing its request ID."); continue }
                     if id == startupRequest { startupRequest = nil; if pending == nil { release() }; continue }
