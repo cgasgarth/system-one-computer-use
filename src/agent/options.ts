@@ -8,6 +8,9 @@ interface OptionContext {
   readonly mode: "browser" | "desktop" | undefined;
   readonly observation: Observation;
   readonly applications: readonly string[];
+  readonly choosingWindow?: boolean;
+  readonly canOpenDocument?: boolean;
+  readonly observationFailed?: boolean;
 }
 function switches(mode: OptionContext["mode"]): Action[] {
   const actions: Action[] = [];
@@ -29,7 +32,7 @@ function switches(mode: OptionContext["mode"]): Action[] {
   return actions;
 }
 function desktopTargets(context: OptionContext): Action[] {
-  if (context.mode !== "desktop" || context.observation.window !== undefined) {
+  if (context.mode !== "desktop" || context.choosingWindow !== true) {
     return [];
   }
   return context.observation.desktop.windows.map((target): Action => ({
@@ -39,25 +42,46 @@ function desktopTargets(context: OptionContext): Action[] {
     reason: `Inspect ${target.app_name}: ${target.title}`.slice(0, MAX_REASON),
   }));
 }
+function controlName(element: Window["elements"][number]): string | undefined {
+  const label = element.label?.trim();
+  if (label !== undefined && label.length > 0 && label !== element.role) {
+    return label;
+  }
+  if (typeof element.value !== "string" && typeof element.value !== "number") {
+    return undefined;
+  }
+  const value = String(element.value).trim();
+  return value.length > 0 ? value : undefined;
+}
 function windowInputs(window: Window): Action[] {
   const actions: Action[] = [];
   for (const element of window.elements) {
+    const name = controlName(element);
     const target = {
       pid: window.pid,
       window_id: window.window_id,
       element_token: element.element_token,
     };
-    if (EDITABLE.has(element.role)) {
+    const capabilities = element.actions ?? [];
+    if (
+      capabilities.includes("AXSetValue") ||
+      (EDITABLE.has(element.role) && !capabilities.includes("AXOpen"))
+    ) {
       actions.push({
         ...target,
         kind: "compose_text",
-        reason: `Request and enter text for ${element.label ?? element.role}`.slice(0, MAX_REASON),
+        reason:
+          `Fill the ${JSON.stringify(name ?? element.role)} text box with the text requested by the user.`.slice(
+            0,
+            MAX_REASON,
+          ),
       });
-    } else if ((element.actions ?? []).some((name) => CLICKABLE.has(name))) {
+    }
+    if (name !== undefined && capabilities.some((action) => CLICKABLE.has(action))) {
       actions.push({
         ...target,
         kind: "click_element",
-        reason: `Activate ${element.label ?? element.role}`.slice(0, MAX_REASON),
+        reason: `Activate ${name}`.slice(0, MAX_REASON),
       });
     }
   }
@@ -73,27 +97,49 @@ function windowInputs(window: Window): Action[] {
   }
   return actions;
 }
-function options(context: OptionContext): ActionChoices {
-  const actions = [...switches(context.mode), ...desktopTargets(context)];
+function surfaceOptions(context: OptionContext): Action[] {
+  if (context.observationFailed === true) {
+    return [];
+  }
+  const actions = desktopTargets(context);
   if (context.mode === "desktop") {
+    if (context.canOpenDocument === true && context.observation.application !== undefined) {
+      const { name, pid } = context.observation.application;
+      actions.push({
+        kind: "open_document",
+        name,
+        pid,
+        reason: `Use ${name}'s Open command (Command+O) to choose a file.`.slice(0, MAX_REASON),
+      });
+    }
+    if (context.choosingWindow !== true) {
+      actions.push({
+        kind: "request_window",
+        reason: "Select an existing application window to inspect or control.",
+      });
+    }
     actions.push({
       kind: "request_app",
       reason:
         context.observation.window === undefined
-          ? "Open an application on this Mac. Request the application name as a text argument from the text helper."
-          : "Switch to another installed Mac application. Request its name as a text argument from the text helper.",
+          ? "Open an installed application on this Mac."
+          : "Switch to another installed Mac application.",
     });
   }
   if (context.mode === "browser") {
     actions.push({
       kind: "request_url",
-      reason: "Navigate to a website or search URL; request the URL text from the text model",
+      reason: "Open a URL in Chrome.",
     });
   }
+  if (context.mode !== undefined && context.observation.window !== undefined) {
+    actions.push(...windowInputs(context.observation.window));
+  }
+  return actions;
+}
+function options(context: OptionContext): ActionChoices {
+  const actions = [...switches(context.mode), ...surfaceOptions(context)];
   if (context.mode !== undefined) {
-    if (context.observation.window !== undefined) {
-      actions.push(...windowInputs(context.observation.window));
-    }
     actions.push({
       kind: "refresh",
       reason: "Observe again to check for updated controls or results",

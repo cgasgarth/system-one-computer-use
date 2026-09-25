@@ -19,9 +19,10 @@ const acceptedStatus = z
   .optional();
 const resultStatus = z.object({ effect: acceptedStatus, status: acceptedStatus });
 const nativeWindowsSchema = z.object({
-  windows: z.array(desktopSchema.shape.windows.element.extend({ layer: z.number() })),
+  windows: z.array(
+    desktopSchema.shape.windows.element.extend({ layer: z.number(), is_on_screen: z.boolean() }),
+  ),
 });
-const launchedSchema = z.object({ pid: z.number().int().positive() });
 const unavailableWindowSchema = z.object({
   degraded_reason: z.string(),
   pid: z.number().int(),
@@ -33,6 +34,9 @@ const WINDOW_SETTLE_MS = 100;
 const cursorDisabledSchema = z.object({ enabled: z.literal(false), session: z.string() });
 const sessionSchema = z.object({ active: z.literal(true), session: z.string() });
 const endedSessionSchema = z.object({ active: z.literal(false), session: z.string() });
+const applicationStateSchema = z.object({
+  apps: z.array(z.object({ pid: z.number().int(), active: z.boolean(), running: z.boolean() })),
+});
 type CuaClient = Readonly<Pick<Client, "connect" | "callTool" | "close">>;
 
 class CuaConnection {
@@ -43,7 +47,6 @@ class CuaConnection {
   private implicitStarted = false;
   private started = false;
   private closed = false;
-  private activeWindow: string | undefined = undefined;
 
   public constructor(
     binary = "cua-driver",
@@ -131,26 +134,49 @@ class CuaConnection {
   }
 
   public async desktop(): Promise<Desktop> {
-    const [desktop, all] = await Promise.all([
+    const [desktop, listed] = await Promise.all([
       this.invoke({ name: "get_accessibility_tree" }, desktopSchema),
       this.invoke({ name: "list_windows" }, nativeWindowsSchema),
     ]);
     return {
       ...desktop,
-      windows: all.windows.filter((window) => window.layer === 0 && window.title.length > 0),
+      windows: listed.windows.filter(
+        (window) =>
+          window.layer === 0 &&
+          window.title.trim().length > 0 &&
+          (window.is_on_screen ||
+            desktop.windows.some(
+              (accessible) =>
+                accessible.pid === window.pid && accessible.window_id === window.window_id,
+            )),
+      ),
     };
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {
-    const target = `${pid}:${windowId}`;
-    if (target !== this.activeWindow) {
-      await this.invoke(
-        { name: "bring_to_front", arguments: { pid, window_id: windowId } },
-        resultStatus,
-      );
-      this.activeWindow = target;
-    }
     return this.readWindow(pid, windowId, WINDOW_ATTEMPTS);
+  }
+  public async focusWindow(pid: number, windowId: number): Promise<void> {
+    await this.invoke(
+      { name: "bring_to_front", arguments: { pid, window_id: windowId } },
+      resultStatus,
+    );
+  }
+  public async openDocument(pid: number): Promise<void> {
+    if (!(await this.isActive(pid))) {
+      throw new CuaError("The selected app is not in front. Its Open command was not sent.");
+    }
+    await this.invoke(
+      {
+        name: "hotkey",
+        arguments: { scope: "desktop", keys: ["cmd", "o"], session: this.session },
+      },
+      resultStatus,
+    );
+  }
+  public async isActive(pid: number): Promise<boolean> {
+    const state = await this.invoke({ name: "list_apps" }, applicationStateSchema);
+    return state.apps.some((app) => app.pid === pid && app.active && app.running);
   }
 
   private async readWindow(pid: number, windowId: number, attempts: number): Promise<Window> {
@@ -173,29 +199,8 @@ class CuaConnection {
     if (!state.degraded_reason.startsWith("ax_window_unresolved") || attempts <= 1) {
       throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
     }
-    if (attempts === WINDOW_ATTEMPTS) {
-      await this.invoke(
-        { name: "bring_to_front", arguments: { pid, window_id: windowId } },
-        resultStatus,
-      );
-    }
     await Bun.sleep(WINDOW_SETTLE_MS);
     return this.readWindow(pid, windowId, attempts - 1);
-  }
-
-  public async launchApp(name: string): Promise<void> {
-    const app = await this.invoke({ arguments: { name }, name: "launch_app" }, launchedSchema);
-    const windows = await this.invoke({ name: "list_windows" }, nativeWindowsSchema);
-    const eligible = windows.windows.filter(
-      (window) => window.pid === app.pid && window.layer === 0,
-    );
-    const [window] = eligible;
-    if (eligible.length === 1 && window !== undefined) {
-      await this.invoke(
-        { name: "bring_to_front", arguments: { pid: app.pid, window_id: window.window_id } },
-        resultStatus,
-      );
-    }
   }
 
   public async click(action: ClickAction): Promise<void> {
@@ -220,7 +225,12 @@ class CuaConnection {
   public async pressKey(action: KeyAction): Promise<void> {
     const { key, modifiers, pid, window_id } = action;
     await this.invoke(
-      { arguments: { key, modifiers, pid, window_id, session: this.session }, name: "press_key" },
+      modifiers.length === 0
+        ? { arguments: { key, pid, window_id, session: this.session }, name: "press_key" }
+        : {
+            arguments: { keys: [...modifiers, key], pid, window_id, session: this.session },
+            name: "hotkey",
+          },
       resultStatus,
     );
   }

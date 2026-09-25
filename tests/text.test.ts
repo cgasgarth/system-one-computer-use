@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ChatCompletionTextModel } from "../src/models/text.ts";
-import { textRequestSchema } from "../src/models/text-schema.ts";
+import { textRequestSchema, textResponseSchema } from "../src/models/text-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
 test("asks the text provider for field content with the task and session context", async () => {
@@ -11,7 +11,7 @@ test("asks the text provider for field content with the task and session context
       expect(body.model).toBe("writer");
       expect(body.messages.at(-1)?.content).toContain("previous request");
       expect(body.messages.at(-1)?.content).toContain("Search");
-      return Response.json({ choices: [{ message: { content: "Alex" } }] });
+      return Response.json({ choices: [{ message: { content: "Alex" }, finish_reason: "stop" }] });
     },
   });
   try {
@@ -28,4 +28,12 @@ test("asks the text provider for field content with the task and session context
   } finally {
     await server.stop(true);
   }
+});
+
+test("rejects truncated text before it can become input", () => {
+  expect(() =>
+    textResponseSchema.parse({
+      choices: [{ message: { content: "unfinished" }, finish_reason: "length" }],
+    }),
+  ).toThrow("Text model response was incomplete");
 });

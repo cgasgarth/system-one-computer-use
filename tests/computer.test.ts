@@ -51,6 +51,22 @@ test("reads quoted YAML links and frame-qualified Playwright references", () => 
   expect(elements.at(-1)).toMatchObject({ value: "Ada Lovelace", actions: ["AXSetValue"] });
 });
 
+test("keeps state flags that appear before the Playwright reference", () => {
+  const elements = snapshotElements(
+    [
+      '- textbox "Message" [active] [ref=e1]: Hello',
+      '- button "Submit" [disabled] [ref=e2]',
+      '- checkbox "Updates" [checked] [ref=e3]',
+      '- tab "Details" [selected] [ref=e4]',
+    ].join("\n"),
+  );
+  expect(elements[0]?.focused).toBe(true);
+  expect(elements[1]?.enabled).toBe(false);
+  expect(elements[1]?.actions).toEqual([]);
+  expect(elements[2]?.value).toBe(true);
+  expect(elements[3]?.selected).toBe(true);
+});
+
 test("reads nested input values without treating select menus as text fields", () => {
   const elements = snapshotElements(
     [

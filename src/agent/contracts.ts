@@ -27,6 +27,9 @@ const windowSchema = z.object({
       href: z.url().optional(),
       value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
       actions: z.array(z.string()).optional(),
+      enabled: z.boolean().optional(),
+      selected: z.boolean().optional(),
+      focused: z.boolean().optional(),
       frame: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
     }),
   ),
@@ -40,6 +43,7 @@ type Desktop = ReadonlyDeep<z.infer<typeof desktopSchema>>;
 type Window = ReadonlyDeep<z.infer<typeof windowSchema>>;
 interface Observation {
   readonly desktop: Desktop;
+  readonly application?: Desktop["apps"][number];
   readonly window?: Window;
 }
 
@@ -54,10 +58,16 @@ const actionSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("request_url"), reason }),
   z.strictObject({ kind: z.literal("request_app"), reason }),
+  z.strictObject({ kind: z.literal("request_window"), reason }),
+  z.strictObject({
+    kind: z.literal("open_document"),
+    pid: z.number().int().positive(),
+    name: z.string().min(1),
+    reason,
+  }),
   z.strictObject({ kind: z.literal("refresh"), reason }),
   z.strictObject({ kind: z.literal("blocked"), reason }),
   z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),
-  z.strictObject({ kind: z.literal("launch_app"), name: z.string().min(1), reason }),
   z.strictObject({ kind: z.literal("observe_window"), ...target, reason }),
   z.strictObject({
     kind: z.literal("click_element"),
@@ -89,7 +99,7 @@ function validElement(action: ElementAction, window: Window): boolean {
   const element = window.elements.find(
     (candidate) => candidate.element_token === action.element_token,
   );
-  if (element === undefined) {
+  if (element === undefined || element.enabled === false) {
     return false;
   }
   if (action.kind === "click_element") {
@@ -107,33 +117,22 @@ function validNavigation(url: string, observation: Observation): boolean {
     Boolean(observation.window) && ["http:", "https:", "about:"].includes(new URL(url).protocol)
   );
 }
-function matchesWindow(action: Extract<Action, { pid: number }>, window: Window): boolean {
+function matchesWindow(action: Extract<Action, { window_id: number }>, window: Window): boolean {
   return window.pid === action.pid && window.window_id === action.window_id;
 }
 
 function validateActions(actions: readonly Action[], observation: Observation): Action[] {
   return actions.filter((action) => {
-    switch (action.kind) {
-      case "launch_app":
-      case "finish":
-      case "blocked":
-      case "select_surface":
-      case "request_url":
-      case "request_app":
-      case "refresh": {
-        return true;
-      }
-      case "click_element":
-      case "compose_text":
-      case "navigate":
-      case "observe_window":
-      case "press_key":
-      case "type_text": {
-        break;
-      }
+    if (action.kind === "open_document") {
+      return observation.desktop.apps.some(
+        (app) => app.pid === action.pid && app.name === action.name,
+      );
     }
     if (action.kind === "navigate") {
       return validNavigation(action.url, observation);
+    }
+    if (!("pid" in action)) {
+      return true;
     }
     const exists = observation.desktop.windows.some(
       (window) => window.pid === action.pid && window.window_id === action.window_id,
@@ -156,6 +155,9 @@ function validateActions(actions: readonly Action[], observation: Observation): 
 
 function describeAction(action: Action): string {
   switch (action.kind) {
+    case "open_document": {
+      return action.reason;
+    }
     case "select_surface": {
       return action.reason;
     }
@@ -163,6 +165,9 @@ function describeAction(action: Action): string {
       return action.reason;
     }
     case "request_app": {
+      return action.reason;
+    }
+    case "request_window": {
       return action.reason;
     }
     case "compose_text": {
@@ -173,9 +178,6 @@ function describeAction(action: Action): string {
     }
     case "blocked": {
       return action.reason;
-    }
-    case "launch_app": {
-      return `Open application ${action.name}. ${action.reason}`;
     }
     case "observe_window": {
       return action.reason;

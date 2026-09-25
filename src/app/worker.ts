@@ -95,7 +95,8 @@ async function executeTask(line: string, execution: Readonly<Execution>): Promis
       console.log(
         JSON.stringify({
           status: "running",
-          message: step.error ?? step.output ?? describeAction(step.action),
+          message:
+            step.error ?? step.observationError ?? step.output ?? describeAction(step.action),
           decisions: step.index,
           ...decisionMetrics(execution.steps),
         }),

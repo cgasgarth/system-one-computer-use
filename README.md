@@ -137,6 +137,10 @@ Actions use current references. CUA's own authorization windows and the harness 
 
 The decision model selects tools and termination. The text helper supplies string arguments only when selected: field text, a URL, or an installed application name for the open-application tool. Application names are checked against the installed-app list. Field handles are refreshed after text generation. There is no text-model task planner.
 
+The loop remembers recent state/action pairs. Repeated controls in the same state become unavailable, including focus cycles that return to an earlier state. Refresh retries are bounded when the screen does not change or the same observation error persists. Other tools and terminal choices remain available. There is no total action limit.
+
+Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. A separate decision-model completion check uses the current task and observed values; its 0.6 threshold is a policy setting, not a calibrated measure of task accuracy.
+
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.
 A System One model ranks supplied choices; it does not independently generate

@@ -10,6 +10,7 @@ const lineSchema = z.object({
   suffix: z.string(),
 });
 const EDITABLE = new Set(["textbox", "searchbox", "combobox", "spinbutton"]);
+const CHECKABLE = new Set(["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"]);
 const CLICKABLE = new Set([
   "button",
   "link",
@@ -30,6 +31,38 @@ interface ControlOptions {
   readonly href?: string;
   readonly nested: boolean;
 }
+function controlState(
+  control: Readonly<z.infer<typeof lineSchema>>,
+  value: z.infer<typeof scalarValue>,
+): Required<Pick<Window["elements"][number], "value" | "enabled" | "selected" | "focused">> {
+  let content = value;
+  if (CHECKABLE.has(control.role)) {
+    content = control.suffix.includes("[checked=mixed]")
+      ? "mixed"
+      : control.suffix.includes("[checked]");
+  }
+  return {
+    value: content,
+    enabled: !control.suffix.includes("[disabled]"),
+    selected: control.suffix.includes("[selected]"),
+    focused: control.suffix.includes("[active]"),
+  };
+}
+
+function parseControl(descriptor: string): z.infer<typeof lineSchema> | undefined {
+  const match =
+    /^(?<role>\w+)(?: "(?<name>.*?)")?(?<beforeRef>[^\n]*?)\[ref=(?<ref>(?:f\d+)?e\d+)\](?<suffix>.*)$/u.exec(
+      descriptor,
+    );
+  if (match === null) {
+    return undefined;
+  }
+  return lineSchema.parse({
+    ...match.groups,
+    name: match.groups?.["name"] ?? "",
+    suffix: `${match.groups?.["beforeRef"] ?? ""}${match.groups?.["suffix"] ?? ""}`,
+  });
+}
 
 function snapshotElements(snapshot: string, baseUrl?: string): Window["elements"] {
   const document = parseDocument(snapshot);
@@ -42,14 +75,10 @@ function snapshotElements(snapshot: string, baseUrl?: string): Window["elements"
     value: z.infer<typeof scalarValue>,
     options: ControlOptions,
   ): void {
-    const match =
-      /^(?<role>\w+)(?: "(?<name>.*?)")?[^\n]*?\[ref=(?<ref>(?:f\d+)?e\d+)\](?<suffix>.*)$/u.exec(
-        descriptor,
-      );
-    if (match === null) {
+    const control = parseControl(descriptor);
+    if (control === undefined) {
       return;
     }
-    const control = lineSchema.parse({ ...match.groups, name: match.groups?.["name"] ?? "" });
     const disabled = control.suffix.includes("[disabled]");
     const actions: string[] = [];
     if (!disabled && CLICKABLE.has(control.role)) {
@@ -68,7 +97,7 @@ function snapshotElements(snapshot: string, baseUrl?: string): Window["elements"
       element_token: control.ref,
       label: control.name || control.role,
       role: control.role,
-      value,
+      ...controlState(control, value),
       ...(options.href === undefined ? {} : { href: options.href }),
     });
   }

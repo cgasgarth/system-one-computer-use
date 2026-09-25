@@ -27,7 +27,7 @@ test.each(["clm-latest", "jev-latest", "another-system-one-model"])(
         "test-token",
       );
       const actions: ActionChoices = [
-        { kind: "launch_app", name: "Settings", reason: "Open it" },
+        { kind: "request_app", reason: "Open an application" },
         { kind: "finish", reason: "Already complete", summary: "Done" },
       ];
       const result = await model.choose({
@@ -64,7 +64,7 @@ test("rejects an invalid external probability distribution", async () => {
       model.choose({
         task: "Open Settings",
         observation: { desktop: { apps: [], windows: [] } },
-        actions: [{ kind: "launch_app", name: "Settings", reason: "Open it" }],
+        actions: [{ kind: "request_app", reason: "Open an application" }],
       }),
       "Too small",
     );

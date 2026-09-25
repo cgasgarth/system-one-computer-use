@@ -39,7 +39,7 @@ test("uses completed activity as the idle clock and restores context after proce
     REUSE_MS + 1,
   );
   expect(second.session.id).toBe(first.session.id);
-  expect(sessionContext(second.session)).toContain("Document open");
+  expect(second.session.turns[0]?.observation).toBe("Document open");
   expect(sessionContext(second.session)).toContain("Open a document");
 });
 test("supports explicit new and manual resume, keeping only the last three sessions", async () => {

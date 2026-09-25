@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/client";
 import { z } from "zod";
 import { CuaConnection } from "../src/computer/connection.ts";
+import type { Desktop } from "../src/agent/contracts.ts";
 import { desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
 
 type CuaClient = Readonly<Pick<Client, "connect" | "callTool" | "close">>;
@@ -12,7 +13,30 @@ interface Fixture {
 }
 const sessionArgument = z.object({ session: z.string().optional() });
 const SESSION_COUNT = 2;
-function fixture(): Fixture {
+function nativeWindows(): readonly (Desktop["windows"][number] & {
+  readonly layer: number;
+  readonly is_on_screen: boolean;
+})[] {
+  return [
+    {
+      app_name: "Messages",
+      pid: 7,
+      window_id: 9,
+      title: "Messages",
+      layer: 0,
+      is_on_screen: true,
+    },
+    {
+      app_name: "Messages",
+      pid: 7,
+      window_id: 10,
+      title: "Closed dialog",
+      layer: 0,
+      is_on_screen: false,
+    },
+  ];
+}
+function fixture(foreground = true): Fixture {
   const calls: string[] = [];
   const active = new Set<string>();
   const client: CuaClient = {
@@ -37,6 +61,23 @@ function fixture(): Fixture {
         return { isError: true, content: [{ type: "text", text: "The CUA session has ended" }] };
       }
       switch (request.name) {
+        case "list_apps": {
+          return {
+            content: [],
+            structuredContent: {
+              apps: desktopFixture().apps.map((app) => ({
+                name: app.name,
+                pid: app.pid,
+                running: true,
+                active: foreground,
+              })),
+            },
+          };
+        }
+        case "hotkey": {
+          expect(request.arguments).toMatchObject({ scope: "desktop", keys: ["cmd", "o"] });
+          return { content: [], structuredContent: { effect: "unverifiable" } };
+        }
         case "set_agent_cursor_enabled": {
           return { content: [], structuredContent: { session, enabled: false } };
         }
@@ -47,9 +88,7 @@ function fixture(): Fixture {
           return {
             content: [],
             structuredContent: {
-              windows: [
-                { app_name: "Messages", pid: 7, window_id: 9, title: "Messages", layer: 0 },
-              ],
+              windows: nativeWindows(),
             },
           };
         }
@@ -80,6 +119,9 @@ test("starts discovery and input sessions once before concurrent reads", async (
   try {
     const reads = await Promise.all([connection.desktop(), connection.desktop()]);
     expect(reads.map((read) => read.apps)).toEqual([desktopFixture().apps, desktopFixture().apps]);
+    expect(reads[0].windows.map((window) => window.window_id)).toEqual(
+      desktopFixture().windows.map((window) => window.window_id),
+    );
     expect(state.calls.slice(0, SESSION_COUNT + SESSION_COUNT)).toEqual([
       "connect",
       "start_session",
@@ -113,4 +155,23 @@ test("does not revive a stopped run and starts a fresh connection for the next t
     await second.close();
   }
   expect(next.calls.filter((name) => name === "start_session")).toHaveLength(SESSION_COUNT);
+});
+
+test("uses a desktop chord only after checking the selected app is in front", async () => {
+  const foreground = fixture();
+  const connection = new CuaConnection("unused-test-driver", foreground.client);
+  try {
+    await connection.openDocument(windowFixture().pid);
+  } finally {
+    await connection.close();
+  }
+  expect(foreground.calls).toContain("hotkey");
+  const background = fixture(false);
+  const refused = new CuaConnection("unused-test-driver", background.client);
+  try {
+    await expectFailure(refused.openDocument(windowFixture().pid), "not in front");
+  } finally {
+    await refused.close();
+  }
+  expect(background.calls).not.toContain("hotkey");
 });

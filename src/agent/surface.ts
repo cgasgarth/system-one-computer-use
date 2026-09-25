@@ -1,5 +1,5 @@
 import type { Computer, ManagedComputer } from "../computer/types.ts";
-import type { Action, Observation } from "./contracts.ts";
+import type { Action, Desktop, Observation } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import { restoreSurface } from "../app/sessions/targets.ts";
 
@@ -10,13 +10,43 @@ interface Target {
 class SurfaceSession {
   public mode: "browser" | "desktop" | undefined;
   public target: Target | undefined = undefined;
+  public choosingWindow = false;
+  private application: Desktop["apps"][number] | undefined;
   private desktopTarget: Target | undefined;
   private readonly restored = new Set<string>();
+  private documentWindow: { readonly applicationPid: number; readonly target: Target } | undefined;
+  public rememberDocumentWindow(applicationPid: number, window: Desktop["windows"][number]): void {
+    this.documentWindow = {
+      applicationPid,
+      target: { pid: window.pid, windowId: window.window_id },
+    };
+    this.setTarget(this.documentWindow.target);
+  }
+  public documentTarget(applicationPid: number, observation: Observation): Target | undefined {
+    const saved = this.documentWindow;
+    return saved?.applicationPid === applicationPid &&
+      observation.desktop.windows.some(
+        (window) => window.pid === saved.target.pid && window.window_id === saved.target.windowId,
+      )
+      ? saved.target
+      : undefined;
+  }
   public setTarget(target: Target | undefined): void {
     this.target = target;
+    if (target !== undefined) {
+      this.choosingWindow = false;
+    }
     if (this.mode === "desktop") {
       this.desktopTarget = target;
     }
+  }
+  public chooseWindow(): void {
+    this.target = undefined;
+    this.choosingWindow = true;
+  }
+  public selectApplication(application: Desktop["apps"][number] | undefined): void {
+    this.application = application;
+    this.choosingWindow = false;
   }
   public async observe(
     getComputer: (mode: "browser" | "desktop") => ManagedComputer,
@@ -26,6 +56,26 @@ class SurfaceSession {
     if (this.mode === "browser") {
       return { desktop, window: await computer.window(0, 0) };
     }
+    const application = desktop.apps.find(
+      (app) => app.pid === (this.application?.pid ?? this.target?.pid),
+    );
+    const windows = desktop.windows.filter((window) => window.pid === application?.pid);
+    if (
+      this.target !== undefined &&
+      !desktop.windows.some(
+        (window) => window.pid === this.target?.pid && window.window_id === this.target.windowId,
+      )
+    ) {
+      this.setTarget(undefined);
+    }
+    if (
+      !this.choosingWindow &&
+      this.target === undefined &&
+      windows.length === 1 &&
+      windows[0] !== undefined
+    ) {
+      this.setTarget({ pid: windows[0].pid, windowId: windows[0].window_id });
+    }
     const { target } = this;
     if (
       target !== undefined &&
@@ -33,10 +83,14 @@ class SurfaceSession {
         (window) => window.pid === target.pid && window.window_id === target.windowId,
       )
     ) {
-      return { desktop, window: await computer.window(target.pid, target.windowId) };
+      return {
+        desktop,
+        ...(application === undefined ? {} : { application }),
+        window: await computer.window(target.pid, target.windowId),
+      };
     }
     this.setTarget(undefined);
-    return { desktop };
+    return { desktop, ...(application === undefined ? {} : { application }) };
   }
   public async select(
     mode: "browser" | "desktop",
@@ -44,6 +98,7 @@ class SurfaceSession {
     saved: Surface | undefined,
   ): Promise<void> {
     this.mode = mode;
+    this.choosingWindow = false;
     this.target = mode === "desktop" ? this.desktopTarget : undefined;
     if (saved?.kind === mode && !this.restored.has(mode)) {
       try {
@@ -77,10 +132,6 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
       await computer.navigate(action.url);
       break;
     }
-    case "launch_app": {
-      await computer.launchApp(action.name);
-      break;
-    }
     case "blocked":
     case "compose_text":
     case "finish":
@@ -88,6 +139,8 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
     case "refresh":
     case "request_url":
     case "request_app":
+    case "request_window":
+    case "open_document":
     case "select_surface": {
       break;
     }

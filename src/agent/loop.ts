@@ -3,6 +3,7 @@ import type { TaskOptions, TaskResult, TaskStep } from "./types.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import { SurfaceSession } from "./surface.ts";
 import { performTurn } from "./turn.ts";
+import { Progress } from "./progress.ts";
 
 const MS_PER_SECOND = 1000;
 async function bookmark(
@@ -33,6 +34,15 @@ interface FinishContext {
   readonly lastError: string;
   readonly complete: boolean;
 }
+function blockedSummary(context: FinishContext): string {
+  if (context.lastError.length > 0) {
+    return context.lastError;
+  }
+  if (context.observation.application !== undefined && context.observation.window === undefined) {
+    return `${context.observation.application.name} is running but has no controllable window. Open a document or window in that app, then continue this session.`;
+  }
+  return "The model marked this task as blocked.";
+}
 async function finish(context: FinishContext): Promise<TaskResult> {
   const totalMs = performance.now() - context.started;
   let surface: Surface | undefined = undefined;
@@ -44,9 +54,7 @@ async function finish(context: FinishContext): Promise<TaskResult> {
   return {
     status: context.complete ? "complete" : "blocked",
     task: context.options.task,
-    summary: context.complete
-      ? "Task marked complete"
-      : context.lastError || "The model marked this task as blocked.",
+    summary: context.complete ? "Task marked complete" : blockedSummary(context),
     steps: context.steps,
     totalMs,
     requestsPerSecond: context.steps.length / (totalMs / MS_PER_SECOND),
@@ -57,6 +65,7 @@ async function runTask(options: TaskOptions): Promise<TaskResult> {
   const started = performance.now();
   const steps: TaskStep[] = [];
   const surfaces = new SurfaceSession();
+  const progress = new Progress();
   let lastError = "";
   if (options.preferredSurface !== undefined) {
     try {
@@ -70,7 +79,14 @@ async function runTask(options: TaskOptions): Promise<TaskResult> {
     }
   }
   for (;;) {
-    const result = await performTurn({ options, surfaces, history: steps, lastError, started });
+    const result = await performTurn({
+      options,
+      surfaces,
+      progress,
+      history: steps,
+      lastError,
+      started,
+    });
     ({ lastError } = result);
     steps.push(result.step);
     await options.onStep?.(result.step);

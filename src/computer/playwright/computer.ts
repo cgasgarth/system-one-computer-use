@@ -8,6 +8,29 @@ import { closeConnectionPage, isConnectionPage } from "./tabs.ts";
 
 const MODIFIERS = { cmd: "Meta", ctrl: "Control", option: "Alt", shift: "Shift", fn: "Fn" };
 
+function browserKey(key: string): string {
+  switch (key) {
+    case "return": {
+      return "Enter";
+    }
+    case "escape": {
+      return "Escape";
+    }
+    case "tab": {
+      return "Tab";
+    }
+    case "down": {
+      return "ArrowDown";
+    }
+    case "up": {
+      return "ArrowUp";
+    }
+    default: {
+      return key;
+    }
+  }
+}
+
 class PlaywrightComputer implements ManagedComputer {
   private readonly connection: PlaywrightConnection;
   private title = "Current Chrome tab";
@@ -74,7 +97,7 @@ class PlaywrightComputer implements ManagedComputer {
   }
 
   public async pressKey(action: KeyAction): Promise<void> {
-    const key = action.key === "return" ? "Enter" : action.key;
+    const key = browserKey(action.key);
     await this.connection.call({
       name: "browser_press_key",
       arguments: {
@@ -84,4 +107,4 @@ class PlaywrightComputer implements ManagedComputer {
   }
 }
 
-export { PlaywrightComputer };
+export { PlaywrightComputer, browserKey };

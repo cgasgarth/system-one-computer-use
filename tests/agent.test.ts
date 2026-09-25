@@ -74,8 +74,11 @@ test("lets the decision model select desktop and invokes the writer only for an 
     decision: {
       async choose(input) {
         if (!input.observation.window) {
-          return input.actions.some((action) => action.kind === "observe_window")
-            ? pick(input, "observe_window")
+          if (input.actions.some((action) => action.kind === "observe_window")) {
+            return pick(input, "observe_window");
+          }
+          return input.actions.some((action) => action.kind === "request_window")
+            ? pick(input, "request_window")
             : pick(input, "select_surface", "desktop");
         }
         return typed.length === 0 ? pick(input, "compose_text") : pick(input, "finish");
@@ -130,6 +133,41 @@ test("validates element targets against the fresh snapshot", () => {
   expect(validateActions([action], { desktop: desktopFixture(), window: windowFixture() })).toEqual(
     [],
   );
+});
+
+test("offers file controls for activation and editable controls for both typing and clicking", () => {
+  const window = windowFixture();
+  const observation = {
+    desktop: desktopFixture(),
+    window: {
+      ...window,
+      elements: [
+        ...window.elements,
+        {
+          element_index: 2,
+          element_token: "s1:2",
+          role: "AXTextField",
+          value: "photo.png",
+          actions: ["AXOpen", "AXConfirm"],
+        },
+      ],
+    },
+  };
+  const actions = options({ mode: "desktop", observation, applications: [] });
+  expect(
+    actions.some((action) => action.kind === "click_element" && action.element_token === "s1:2"),
+  ).toBe(true);
+  expect(
+    actions.some((action) => action.kind === "compose_text" && action.element_token === "s1:2"),
+  ).toBe(false);
+  for (const kind of ["click_element", "compose_text"]) {
+    expect(
+      actions.some(
+        (action) =>
+          action.kind === kind && "element_token" in action && action.element_token === "s1:1",
+      ),
+    ).toBe(true);
+  }
 });
 
 test("lets the model change tools when saved browser restoration fails", async () => {
