@@ -32,27 +32,42 @@ const WINDOW_ATTEMPTS = 15;
 const WINDOW_SETTLE_MS = 100;
 const cursorDisabledSchema = z.object({ enabled: z.literal(false), session: z.string() });
 const sessionSchema = z.object({ active: z.literal(true), session: z.string() });
+const endedSessionSchema = z.object({ active: z.literal(false), session: z.string() });
+type CuaClient = Readonly<Pick<Client, "connect" | "callTool" | "close">>;
 
 class CuaConnection {
   private readonly binary: string;
-  private readonly client = new Client({ name: "system-one-computer-use", version: "0.1.0" });
-  private connected: Promise<void> | undefined = undefined;
+  private readonly client: CuaClient;
+  private ready: Promise<void> | undefined = undefined;
   private readonly session = `system-one-${crypto.randomUUID()}`;
-  private cursorReady: Promise<void> | undefined = undefined;
+  private implicitStarted = false;
+  private started = false;
+  private closed = false;
   private activeWindow: string | undefined = undefined;
 
-  public constructor(binary = "cua-driver") {
+  public constructor(
+    binary = "cua-driver",
+    client: CuaClient = new Client({ name: "system-one-computer-use", version: "0.1.0" }),
+  ) {
     this.binary = binary;
+    this.client = client;
   }
 
   private async invoke<Result>(
     request: ReadonlyDeep<CallToolRequestParams>,
     schema: z.ZodType<Result>,
   ): Promise<Result> {
-    this.connected ??= this.client.connect(
-      new StdioClientTransport({ args: ["mcp"], command: this.binary }),
-    );
-    await this.connected;
+    this.assertOpen();
+    this.ready ??= this.initialize();
+    await this.ready;
+    this.assertOpen();
+    return this.call(request, schema);
+  }
+
+  private async call<Result>(
+    request: ReadonlyDeep<CallToolRequestParams>,
+    schema: z.ZodType<Result>,
+  ): Promise<Result> {
     const result = await this.client.callTool(request);
     if (result.isError === true) {
       const detail = result.content
@@ -69,17 +84,47 @@ class CuaConnection {
   }
 
   public async close(): Promise<void> {
-    if (this.connected !== undefined) {
-      await this.client.close();
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    if (this.ready !== undefined) {
+      try {
+        if (this.started) {
+          await this.call(
+            { name: "end_session", arguments: { session: this.session } },
+            endedSessionSchema,
+          );
+        }
+      } finally {
+        try {
+          if (this.implicitStarted) {
+            await this.call({ name: "end_session", arguments: {} }, endedSessionSchema);
+          }
+        } finally {
+          await this.client.close();
+        }
+      }
     }
   }
 
-  private async prepareCursor(): Promise<void> {
-    await this.invoke(
-      { name: "start_session", arguments: { session: this.session } },
-      sessionSchema,
-    );
-    await this.invoke(
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new CuaError("The native task has stopped. Start a new task to reconnect.");
+    }
+  }
+
+  private async initialize(): Promise<void> {
+    await this.client.connect(new StdioClientTransport({ args: ["mcp"], command: this.binary }));
+    this.assertOpen();
+    // Discovery tools have no session argument; they use the transport's implicit session.
+    await this.call({ name: "start_session", arguments: {} }, sessionSchema);
+    this.implicitStarted = true;
+    this.assertOpen();
+    await this.call({ name: "start_session", arguments: { session: this.session } }, sessionSchema);
+    this.started = true;
+    this.assertOpen();
+    await this.call(
       { name: "set_agent_cursor_enabled", arguments: { session: this.session, enabled: false } },
       cursorDisabledSchema,
     );
@@ -97,8 +142,6 @@ class CuaConnection {
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {
-    this.cursorReady ??= this.prepareCursor();
-    await this.cursorReady;
     const target = `${pid}:${windowId}`;
     if (target !== this.activeWindow) {
       await this.invoke(

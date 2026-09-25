@@ -31,6 +31,11 @@ async function closeComputers(): Promise<void> {
   computers.clear();
   await Promise.all(current.map(async (computer) => computer.close()));
 }
+async function closeNativeTask(): Promise<void> {
+  const native = computers.get("desktop");
+  computers.delete("desktop");
+  await native?.close();
+}
 function stop(): void {
   shutdown.abort(new Error("Stopped by user"));
   input.close();
@@ -142,6 +147,8 @@ async function execute(line: string): Promise<void> {
       { createPath: true },
     );
     console.log(JSON.stringify(failure));
+  } finally {
+    await closeNativeTask();
   }
 }
 try {
