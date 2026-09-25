@@ -30,6 +30,7 @@ voice control, status, and timing. It has no web portal or detached task window.
 - **Session** defaults to Automatic. Follow-ups reuse the active session for up to one hour of inactivity. Choose New session or one of the last three sessions explicitly.
 - **Command–Option–C** starts Handy dictation and follows Handy's Hold, Auto, or Toggle setting. Handy
   pastes its transcript into the task field, which starts the task.
+  Using the shortcut while a task runs or a transcript is pending stops that work and starts a new recording. The Dictate button stays available too.
 - **Settings** opens a separate page inside the dropdown. Change the voice
   shortcut, control surface, local models, external endpoints, and idle memory policy.
 - **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit. The decision model can mark a task Complete or Blocked. Tool errors go back to the model with switching options; model-service or storage failures stop execution. Click outside to dismiss the dropdown.

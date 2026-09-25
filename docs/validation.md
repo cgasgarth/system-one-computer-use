@@ -10,6 +10,7 @@
 - Loop tests cover switching after observation failure, switching after saved-tab restoration failure, terminal choices on both surfaces, and Stop before a pending decision starts its action.
 - Warm-up tests cover draft retention under the cold policy and unloading after an actual task releases the models.
 - The Handy state machine passes Hold, Auto threshold, Toggle, repeat-edge, and cancellation checks. The installed Handy setting was Hold. Physical dictation and final transcript delivery still need an end-to-end check.
+- Dictate was tested during a running task and again after cancellation. Handy logs confirmed microphone samples on both starts and return to idle on both cancellations. App-targeted injected keys did not activate the global Carbon shortcut; a physical repeat-shortcut check remains separate.
 
 ## Live model and driver results
 

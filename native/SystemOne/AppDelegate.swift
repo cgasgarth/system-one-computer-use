@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         models.onStatus = { [weak self] event in
             guard let self else { return }
             self.settings.updateModels(event)
-            if let loading = event.models?.first(where: { $0.state == .downloading || $0.state == .loading }) {
+            if let loading = event.models?.first(where: { $0.state == .downloading || $0.state == .loading }), self.phase == .ready || self.phase == .running {
                 self.content.setStatus(loading.message, color: .secondaryLabelColor)
             } else if self.phase == .ready, let decision = event.models?.first(where: { $0.role == .decision }) {
                 self.content.setStatus(decision.message, color: decision.state == .error ? .systemOrange : .secondaryLabelColor)
@@ -143,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func voiceKey(pressed: Bool) {
+        if pressed { prepareNewDictation() }
         guard phase == .ready || phase == .recording else { return }
         do {
             let behavior = try HandyBehavior.read()
@@ -158,14 +159,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc func toggleVoice() {
         voiceActivation.reset()
         if phase == .recording { endVoice() }
-        else if phase == .ready { beginVoice(behavior: "Toggle") }
-        else { showMenu() }
+        else { prepareNewDictation(); beginVoice(behavior: "Toggle") }
+    }
+
+    private func prepareNewDictation() {
+        switch phase {
+        case .running: cancelTask()
+        case .transcribing: cancelVoice()
+        case .ready, .recording: break
+        }
     }
 
     private func beginVoice(behavior: String) {
         models.warm()
         showTasks(); showMenu()
         content.editor.string = ""; content.editor.needsDisplay = true
+        content.updateRunButton()
         phase = .recording
         content.cancel.isEnabled = true; content.cancel.isHidden = false
         content.voice.title = "Stop and run"
@@ -179,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         showMenu(); content.focus()
         phase = .transcribing
         content.setStatus("Handy is transcribing…", color: .secondaryLabelColor)
-        content.voice.title = "Transcribing…"
+        content.voice.title = "Dictate"
         invokeHandy("--toggle-transcription")
         let timer = Timer(timeInterval: 60, target: self, selector: #selector(transcriptionTimedOut), userInfo: nil, repeats: false)
         transcriptionTimer = timer; RunLoop.main.add(timer, forMode: .common)
@@ -192,7 +201,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func transcriptArrived() {
         guard phase == .transcribing else { return }
         transcriptionTimer?.invalidate()
-        phase = .ready
+        transcriptionTimer = nil
+        ready()
         runTask()
     }
 
@@ -207,7 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard !task.isEmpty else { content.status.stringValue = "Enter a task first."; return }
         phase = .running
         content.run.isEnabled = false
-        content.voice.isEnabled = false
+        content.voice.isEnabled = true
+        content.voice.title = "Dictate"
         content.setLocked(true)
         content.cancel.isEnabled = true
         content.cancel.isHidden = false
@@ -251,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func fail(_ message: String) {
+        if phase == .recording || phase == .transcribing { invokeHandy("--cancel") }
         transcriptionTimer?.invalidate()
         ready()
         content.setStatus(message, color: .systemOrange)
