@@ -223,3 +223,21 @@ test("Stop prevents a completed decision from starting its tool call", async () 
   await expectFailure(task, "Stopped");
   expect(accessed).toEqual(["desktop"]);
 });
+
+test("explains a stop before any tool action without claiming a permission failure", async () => {
+  const { computer } = computerFixture();
+  const result = await runTask({
+    task: "Unclear request",
+    applications: ["Messages"],
+    computer: () => computer,
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        return pick(input, "blocked");
+      },
+    },
+  });
+  expect(result.summary).toBe(
+    "Stopped before taking an action. Review the task text or dictate it again, then select Start.",
+  );
+});

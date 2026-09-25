@@ -2,7 +2,7 @@
 
 ## Checks for the decision-owned loop (2026-09-25)
 
-- 52 automated tests pass, with strict type-aware lint and the 600-line source limit.
+- 53 automated tests pass, with strict type-aware lint and the 600-line source limit.
 - Swift 6 release compilation passes. The task and Settings views were rendered and inspected. Rendered views do not prove physical keyboard or speech behavior.
 - The installed dropdown accepted typed text, enabled Start, selected desktop tools, showed live metrics, and accepted Stop. The stopped session was saved with status `stopped`.
 - CUA lifecycle checks reproduce rejection after an ended transport session. The fix starts both the implicit discovery session and the named input session before reading state, then closes both with the task. Three fresh live connections each passed repeated desktop reads. Installed Start → Stop → Start checks passed live observation on both runs; both turns were saved as stopped. This check does not establish task-completion accuracy.

@@ -38,10 +38,16 @@ function blockedSummary(context: FinishContext): string {
   if (context.lastError.length > 0) {
     return context.lastError;
   }
+  if (context.steps.every((step) => step.action.kind === "blocked")) {
+    return "Stopped before taking an action. Review the task text or dictate it again, then select Start.";
+  }
   if (context.observation.application !== undefined && context.observation.window === undefined) {
     return `${context.observation.application.name} is running but has no controllable window. Open a document or window in that app, then continue this session.`;
   }
-  return "The model marked this task as blocked.";
+  const app = context.observation.window?.app_name;
+  return app === undefined
+    ? "Stopped because the model could not choose a next step. Add the app and result you want, then continue."
+    : `Stopped in ${app} because the model could not choose a next step. Add what it should do next, then continue.`;
 }
 async function finish(context: FinishContext): Promise<TaskResult> {
   const totalMs = performance.now() - context.started;
