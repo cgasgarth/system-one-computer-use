@@ -1,11 +1,13 @@
 import { describeAction } from "../agent/contracts.ts";
 import type { Action, ActionChoices, Observation, Window } from "../agent/contracts.ts";
 import { requestJson } from "./request.ts";
-import { completionAnswerSchema, decisionResponseSchema } from "./system-one-schema.ts";
+import { verificationRequest } from "./decision-verification.ts";
+import type { ActionCheck } from "./decision-verification.ts";
+import { binaryAnswerSchema, decisionResponseSchema } from "./system-one-schema.ts";
 import type {
   ActionCriteria,
   ActionProbabilities,
-  CompletionAnswer,
+  BinaryAnswer,
   DecisionAnswer,
   DecisionRequest,
   DecisionResponse,
@@ -19,12 +21,21 @@ const MIN_STATE_CHARS = 1200;
 const PROBABILITY_TOLERANCE = 0.02;
 const COMPLETION_CLASSES = 2;
 const COMPLETION_THRESHOLD = 0.6;
+const TEXT_CONTENT = new Set([
+  "AXStaticText",
+  "AXTextArea",
+  "text",
+  "paragraph",
+  "heading",
+  "listitem",
+]);
 
 interface Decision {
   readonly action: Action;
   readonly latencyMs: number;
   readonly probabilities: ActionProbabilities;
-  readonly completion?: CompletionAnswer;
+  readonly completion?: BinaryAnswer;
+  readonly checks?: readonly ActionCheck[];
 }
 
 interface DecisionInput {
@@ -127,6 +138,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
   private readonly apiKey: string | undefined;
   private readonly endpoint: string;
   private readonly modelId: string;
+  private displayRequest: { readonly task: string; readonly value: boolean } | undefined;
 
   public constructor(endpoint: string, modelId: string, apiKey?: string) {
     this.endpoint = endpoint;
@@ -168,31 +180,78 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         },
       },
     });
+    const selected = await this.selectAction(input, {
+      actions,
+      answer: payload.answers.next_action,
+      started: start,
+    });
     return {
-      ...decision(payload.answers.next_action, actions, performance.now() - start),
+      ...selected,
       ...(completion === undefined ? {} : { completion }),
     };
   }
 
-  private async checkCompletion(input: DecisionInput): Promise<CompletionAnswer> {
+  private async selectAction(
+    input: DecisionInput,
+    selection: {
+      readonly actions: readonly Action[];
+      readonly answer: DecisionAnswer;
+      readonly started: number;
+    },
+  ): Promise<Decision> {
+    const { actions, answer, started } = selection;
+    const initial = decision(answer, actions, performance.now() - started);
+    const ranked = actions
+      .map((action, index) => ({ action, probability: answer.probabilities[`A${index}`] ?? 0 }))
+      .toSorted((left, right) => right.probability - left.probability);
+    const candidates = [
+      initial.action,
+      ...ranked.filter((entry) => entry.action !== initial.action).map((entry) => entry.action),
+    ];
+    const checks: ActionCheck[] = [];
+    for (const action of candidates) {
+      const request = verificationRequest(action, input, this.modelId);
+      if (request === undefined) {
+        return { ...initial, action, checks, latencyMs: performance.now() - started };
+      }
+      // Each check depends on the result of the previous candidate check.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await this.request(request);
+      const check = binaryAnswerSchema.parse(response.answers.next_action);
+      if (!validProbabilities(check.probabilities, COMPLETION_CLASSES)) {
+        throw new Error("System One returned an invalid action verification");
+      }
+      checks.push({ action, answer: check });
+      if (check.choice === "A0") {
+        return { ...initial, action, checks, latencyMs: performance.now() - started };
+      }
+    }
+    throw new Error(
+      "The model rejected every available action. Update the request or select another surface.",
+    );
+  }
+
+  private async checkCompletion(input: DecisionInput): Promise<BinaryAnswer> {
     const { window } = input.observation;
+    const displayOnly = await this.isDisplayRequest(input.task);
     const values =
       window?.elements
         .filter(
           (element) =>
             (element.value !== undefined && element.value !== null && element.value !== "") ||
-            element.selected === true,
+            element.selected === true ||
+            TEXT_CONTENT.has(element.role),
         )
         .map((element) => describeControl(element))
         .join(" | ") ?? "";
     const state = [
       `User request: ${input.task}`,
-      `Observed result: ${window?.app_name ?? input.observation.application?.name} is the selected application.`,
+      `Observed result: ${window?.app_name ?? input.observation.application?.name} is open.`,
       window === undefined
         ? "No controllable window is available."
         : `Window title: ${window.window_title}.`,
       ...(window?.url === undefined ? [] : [`Current URL: ${window.url}`]),
-      `Control values: ${values.slice(0, MAX_STATE_CHARS)}`,
+      ...(displayOnly ? [] : [`Control values: ${values.slice(0, MAX_STATE_CHARS)}`]),
     ].join("\n");
     const response = await this.request({
       model: this.modelId,
@@ -208,11 +267,39 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         },
       },
     });
-    const answer = completionAnswerSchema.parse(response.answers.next_action);
+    const answer = binaryAnswerSchema.parse(response.answers.next_action);
     if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
       throw new Error("System One returned an invalid completion decision");
     }
     return answer;
+  }
+
+  private async isDisplayRequest(task: string): Promise<boolean> {
+    if (this.displayRequest?.task === task) {
+      return this.displayRequest.value;
+    }
+    const response = await this.request({
+      model: this.modelId,
+      state: `User request: ${task}`,
+      questions: {
+        next_action: {
+          type: "choice",
+          instructions:
+            "Does this request only ask to open or display something that already exists?",
+          criteria: {
+            A0: "true: Opening or displaying the requested item satisfies the request.",
+            A1: "false: The request requires further work beyond opening or displaying an item.",
+          },
+        },
+      },
+    });
+    const answer = binaryAnswerSchema.parse(response.answers.next_action);
+    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
+      throw new Error("System One returned an invalid task classification");
+    }
+    const value = answer.choice === "A0";
+    this.displayRequest = { task, value };
+    return value;
   }
 
   private async request(body: DecisionRequest): Promise<DecisionResponse> {

@@ -62,7 +62,13 @@ test.each(cases)(
 test("rejects an invalid completion probability distribution", async () => {
   const server = Bun.serve({
     port: 0,
-    fetch() {
+    async fetch(request) {
+      const body = decisionRequestSchema.parse(await request.json());
+      if (body.questions.next_action.instructions.startsWith("Does this request")) {
+        return Response.json({
+          answers: { next_action: { choice: "A1", probabilities: { A0: 0, A1: 1 } } },
+        });
+      }
       return Response.json({
         answers: { next_action: { choice: "A0", probabilities: { A0: 0.2, A1: 0 } } },
       });

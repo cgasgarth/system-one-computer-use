@@ -10,6 +10,8 @@ import { CuaError } from "./errors.ts";
 
 const ERROR_DETAIL_LIMIT = 800;
 const MAX_ELEMENTS = 150;
+const MIN_WINDOW_WIDTH = 120;
+const MIN_WINDOW_HEIGHT = 60;
 const acceptedStatus = z
   .string()
   .refine(
@@ -20,7 +22,11 @@ const acceptedStatus = z
 const resultStatus = z.object({ effect: acceptedStatus, status: acceptedStatus });
 const nativeWindowsSchema = z.object({
   windows: z.array(
-    desktopSchema.shape.windows.element.extend({ layer: z.number(), is_on_screen: z.boolean() }),
+    desktopSchema.shape.windows.element.extend({
+      layer: z.number(),
+      is_on_screen: z.boolean(),
+      bounds: z.object({ width: z.number(), height: z.number() }),
+    }),
   ),
 });
 const unavailableWindowSchema = z.object({
@@ -144,6 +150,8 @@ class CuaConnection {
         (window) =>
           window.layer === 0 &&
           window.title.trim().length > 0 &&
+          window.bounds.width >= MIN_WINDOW_WIDTH &&
+          window.bounds.height >= MIN_WINDOW_HEIGHT &&
           (window.is_on_screen ||
             desktop.windows.some(
               (accessible) =>

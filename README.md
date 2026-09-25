@@ -139,7 +139,11 @@ The decision model selects tools and termination. The text helper supplies strin
 
 The loop remembers recent state/action pairs. Repeated controls in the same state become unavailable, including focus cycles that return to an earlier state. Refresh retries are bounded when the screen does not change or the same observation error persists. Other tools and terminal choices remain available. There is no total action limit.
 
-Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. A separate decision-model completion check uses the current task and observed values; its 0.6 threshold is a policy setting, not a calibrated measure of task accuracy.
+Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. Native text areas need an explicit writable capability before they become typing targets; some native editors need more driver support. Browser text areas expose that capability through Playwright.
+
+The same decision model checks proposed window selections and blocked stops. If it rejects a candidate, the harness checks the next ranked action. Previous requests remain available for follow-ups; old failure messages are not presented as current failures.
+
+The completion check first classifies whether the task only asks to open or show an existing item. Those tasks use the observed app, window title, and URL; other tasks also include visible text and field values. The 0.6 completion threshold is a policy setting, not a calibrated measure of task accuracy.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.

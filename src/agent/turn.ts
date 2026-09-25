@@ -228,6 +228,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     index: history.length + 1,
     probabilities: decision.probabilities,
     ...(decision.completion === undefined ? {} : { completion: decision.completion }),
+    ...(decision.checks === undefined ? {} : { checks: decision.checks }),
     observation: summarizeObservation(observation),
     ...(observationError === undefined ? {} : { observationError }),
     ...result,

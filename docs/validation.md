@@ -2,7 +2,7 @@
 
 ## Checks for the decision-owned loop (2026-09-25)
 
-- 53 automated tests pass, with strict type-aware lint and the 600-line source limit.
+- 56 automated tests pass, with strict type-aware lint and the 600-line source limit.
 - Swift 6 release compilation passes. The task and Settings views were rendered and inspected. Rendered views do not prove physical keyboard or speech behavior.
 - The installed dropdown accepted typed text, enabled Start, selected desktop tools, showed live metrics, and accepted Stop. The stopped session was saved with status `stopped`.
 - CUA lifecycle checks reproduce rejection after an ended transport session. The fix starts both the implicit discovery session and the named input session before reading state, then closes both with the task. Three fresh live connections each passed repeated desktop reads. Installed Start → Stop → Start checks passed live observation on both runs; both turns were saved as stopped. This check does not establish task-completion accuracy.
@@ -17,6 +17,10 @@
 CLM selected the expected initial surface for six prompts against a captured desktop listing: Messages, Calendar, and Finder selected desktop; OpenTable, Wikipedia, and Google search selected Chrome. This is a small routing check, not a general task-success benchmark.
 
 A supervised live run opened Messages. It did not complete the requested conversation lookup: CLM repeated application-opening choices. Earlier app-selection tests opened unrelated apps; those tests were stopped and their apps closed. The current loop must not be described as reliable for arbitrary native workflows.
+
+A later supervised Messages run used the user's exact request and completed in four model decisions. The model rejected an unrelated window, opened Messages, and stopped. A separate native accessibility read confirmed that the requested conversation was selected, its latest outgoing message was visible, and the composer was empty. No message was sent. Six local completion replays also distinguished the requested conversation from a different one, empty from filled input, an open app, and an unfinished file chooser. These checks cover those cases only.
+
+The installed menu-bar app also completed that exact request in four decisions. This UI check first caught a small tooltip being offered as a window; transient windows smaller than 120 × 60 points are now excluded. The final menu showed Completed, with 277.1 ms median decision latency for that run. The conversation remained visible after the task menu closed. This run does not establish accuracy for other contacts or tasks.
 
 The earlier installed-menu Calculator test needed Stop. The updated source completed a live “Open Calculator on this Mac” run in three decisions, with a fresh native window listing confirming Calculator. A browser navigation run reached example.com and stopped. A local Chrome form run filled the Message input with Hello and stopped in six decisions; both the driver snapshot and native Chrome accessibility view confirmed the value. The packaged worker was then tested from an isolated session directory: it selected desktop tools, selected the Calculator window, and completed in four decisions. The updated menu opened, accepted text, and retained the restored user draft. These are small supervised checks, not a general success-rate benchmark.
 

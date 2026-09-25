@@ -1,7 +1,6 @@
 import type { Action, ActionChoices, Observation, Window } from "./contracts.ts";
-import { validateActions } from "./contracts.ts";
+import { isEditableElement, validateActions } from "./contracts.ts";
 
-const EDITABLE = new Set(["AXTextField", "AXTextArea", "textbox", "searchbox"]);
 const CLICKABLE = new Set(["AXPress", "AXPick", "AXConfirm", "AXOpen"]);
 const MAX_REASON = 280;
 interface OptionContext {
@@ -63,10 +62,7 @@ function windowInputs(window: Window): Action[] {
       element_token: element.element_token,
     };
     const capabilities = element.actions ?? [];
-    if (
-      capabilities.includes("AXSetValue") ||
-      (EDITABLE.has(element.role) && !capabilities.includes("AXOpen"))
-    ) {
+    if (isEditableElement(element)) {
       actions.push({
         ...target,
         kind: "compose_text",
@@ -151,7 +147,10 @@ function options(context: OptionContext): ActionChoices {
       summary: "Task marked complete",
       reason: "Finish: the requested task has already been completed.",
     },
-    { kind: "blocked", reason: "Stop: the task cannot proceed without help from the user." },
+    {
+      kind: "blocked",
+      reason: "Stop because a required permission, input, or control is unavailable.",
+    },
   );
   const [first, ...rest] = validateActions(actions, context.observation);
   if (first === undefined) {

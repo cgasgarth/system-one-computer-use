@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Action } from "../src/agent/contracts.ts";
-import { validateActions } from "../src/agent/contracts.ts";
+import { isEditableElement, validateActions } from "../src/agent/contracts.ts";
 import { runTask } from "../src/agent/loop.ts";
 import type { Decision, DecisionInput } from "../src/models/system-one.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
@@ -133,6 +133,19 @@ test("validates element targets against the fresh snapshot", () => {
   expect(validateActions([action], { desktop: desktopFixture(), window: windowFixture() })).toEqual(
     [],
   );
+});
+
+test("requires writable capability for native text areas", () => {
+  const area = {
+    element_index: 1,
+    element_token: "s1:1",
+    role: "AXTextArea",
+    label: "Displayed message",
+    actions: ["AXPress", "AXShowMenu"],
+  };
+  expect(isEditableElement(area)).toBe(false);
+  expect(isEditableElement({ ...area, actions: ["AXSetValue"] })).toBe(true);
+  expect(isEditableElement({ ...area, role: "AXTextField", label: "Search" })).toBe(true);
 });
 
 test("offers file controls for activation and editable controls for both typing and clicking", () => {

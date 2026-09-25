@@ -95,6 +95,15 @@ const actionSchema = z.discriminatedUnion("kind", [
 type Action = ReadonlyDeep<z.infer<typeof actionSchema>>;
 type ActionChoices = readonly [Action, ...Action[]];
 type ElementAction = Extract<Action, { kind: "click_element" | "compose_text" | "type_text" }>;
+const TEXT_INPUT_ROLES = new Set(["AXTextField", "textbox", "searchbox", "combobox", "spinbutton"]);
+function isEditableElement(element: Window["elements"][number]): boolean {
+  const capabilities = element.actions ?? [];
+  return (
+    element.enabled !== false &&
+    (capabilities.includes("AXSetValue") ||
+      (TEXT_INPUT_ROLES.has(element.role) && !capabilities.includes("AXOpen")))
+  );
+}
 function validElement(action: ElementAction, window: Window): boolean {
   const element = window.elements.find(
     (candidate) => candidate.element_token === action.element_token,
@@ -107,10 +116,7 @@ function validElement(action: ElementAction, window: Window): boolean {
       ["AXPress", "AXPick", "AXConfirm", "AXOpen"].includes(name),
     );
   }
-  return (
-    ["AXTextField", "AXTextArea", "textbox", "searchbox", "combobox"].includes(element.role) ||
-    (element.actions ?? []).includes("AXSetValue")
-  );
+  return isEditableElement(element);
 }
 function validNavigation(url: string, observation: Observation): boolean {
   return (
@@ -203,5 +209,12 @@ function describeAction(action: Action): string {
   }
 }
 
-export { actionSchema, describeAction, desktopSchema, validateActions, windowSchema };
+export {
+  actionSchema,
+  describeAction,
+  desktopSchema,
+  isEditableElement,
+  validateActions,
+  windowSchema,
+};
 export type { Action, ActionChoices, Desktop, Observation, Window };

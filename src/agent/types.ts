@@ -1,10 +1,11 @@
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
-import type { ActionProbabilities, CompletionAnswer } from "../models/system-one-schema.ts";
+import type { ActionProbabilities, BinaryAnswer } from "../models/system-one-schema.ts";
 import type { DecisionModel } from "../models/system-one.ts";
 import type { TextModel } from "../models/text.ts";
 import type { Action } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import type { UnchangedDestination } from "./progress.ts";
+import type { ActionCheck } from "../models/decision-verification.ts";
 
 interface ActionResult {
   readonly output: string;
@@ -24,7 +25,8 @@ interface TaskStep {
   readonly unchanged?: UnchangedDestination;
   readonly index: number;
   readonly probabilities: ActionProbabilities;
-  readonly completion?: CompletionAnswer;
+  readonly completion?: BinaryAnswer;
+  readonly checks?: readonly ActionCheck[];
 }
 interface TaskResult {
   readonly status: "complete" | "blocked";

@@ -16,6 +16,7 @@ const SESSION_COUNT = 2;
 function nativeWindows(): readonly (Desktop["windows"][number] & {
   readonly layer: number;
   readonly is_on_screen: boolean;
+  readonly bounds: { readonly width: number; readonly height: number };
 })[] {
   return [
     {
@@ -25,6 +26,7 @@ function nativeWindows(): readonly (Desktop["windows"][number] & {
       title: "Messages",
       layer: 0,
       is_on_screen: true,
+      bounds: { width: 900, height: 700 },
     },
     {
       app_name: "Messages",
@@ -33,6 +35,16 @@ function nativeWindows(): readonly (Desktop["windows"][number] & {
       title: "Closed dialog",
       layer: 0,
       is_on_screen: false,
+      bounds: { width: 900, height: 700 },
+    },
+    {
+      app_name: "Messages",
+      pid: 7,
+      window_id: 11,
+      title: "Window",
+      layer: 0,
+      is_on_screen: true,
+      bounds: { width: 66, height: 20 },
     },
   ];
 }
