@@ -1,5 +1,16 @@
-import type { Action, Observation } from "./contracts.ts";
+import type { Action, Observation, Window } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
+
+// Snapshot handles can change between reads. Keep the observed document scope.
+function windowScopeKey(window: Window): string {
+  return JSON.stringify([
+    window.app_name,
+    window.pid,
+    window.window_id,
+    window.url,
+    window.window_title,
+  ]);
+}
 
 function textFieldKey(observation: Observation, token: string): string | undefined {
   const { window } = observation;
@@ -11,7 +22,7 @@ function textFieldKey(observation: Observation, token: string): string | undefin
   const ordinal = window.elements
     .filter((element) => element.role === field.role && textTargetName(element) === name)
     .findIndex((element) => element.element_token === token);
-  return JSON.stringify([window.pid, window.window_id, field.role, name, ordinal, field.value]);
+  return JSON.stringify([windowScopeKey(window), field.role, name, ordinal, field.value]);
 }
 
 function stateKey(observation: Observation): string {
@@ -96,4 +107,4 @@ function actionKey(action: Action, observation: Observation): string | undefined
     action.kind === "type_text" ? action.text : undefined,
   ]);
 }
-export { stateKey, actionKey, textFieldKey };
+export { stateKey, actionKey, textFieldKey, windowScopeKey };

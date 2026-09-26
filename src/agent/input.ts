@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Action, Desktop, Observation, Window } from "./contracts.ts";
 import { isEditableElement } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
-import { textFieldKey } from "./state-key.ts";
+import { textFieldKey, windowScopeKey } from "./state-key.ts";
 import { restoreSurface } from "../app/sessions/targets.ts";
 import type { ActionResult, TaskOptions } from "./types.ts";
 import type { UnchangedDestination } from "./progress.ts";
@@ -63,10 +63,11 @@ async function enterText({
   if (action.kind !== "compose_text") {
     throw new Error("Expected a text input action");
   }
-  const element = observation.window?.elements.find(
+  const selectedWindow = observation.window;
+  const element = selectedWindow?.elements.find(
     (entry) => entry.element_token === action.element_token,
   );
-  if (element === undefined) {
+  if (selectedWindow === undefined || element === undefined) {
     throw new Error("The selected input is no longer available");
   }
   const fieldMetadata = await computer.inspectField?.(action);
@@ -90,6 +91,11 @@ async function enterText({
     throw new Error("No suitable text was supplied for this field");
   }
   const fresh = await computer.window(action.pid, action.window_id);
+  if (windowScopeKey(fresh) !== windowScopeKey(selectedWindow)) {
+    throw new Error(
+      "The document changed while text was prepared. Observe the intended document again before typing.",
+    );
+  }
   const matches = fresh.elements.filter(
     (entry) =>
       entry.role === element.role && entry.label === element.label && entry.value === element.value,
