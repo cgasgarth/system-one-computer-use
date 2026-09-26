@@ -18,6 +18,9 @@ items without a UI action. They do not prove that every path remains available
 after a state change or that another app exposes its menu in the same way.
 Finder also returned AX read errors on some non-menu descendants; a consumer
 must use only complete, enabled menu-item paths from the current read.
+The Finder capture also contains a duplicate enabled full path. A discovered
+path is not necessarily unique. Exclude ambiguous paths and paths with a
+disabled ancestor before offering an action to the model.
 
 CUA Driver 0.28.2 already offers `invoke_menu(pid, window_id, path, session)`.
 It resolves an **exact immediate-child path** one live level at a time. Labels
@@ -41,7 +44,8 @@ replacement path.
    action is usable. Keep CUA's live fail-closed path check at execution.
 
 Before that change is accepted, test disabled, ambiguous, stale, and missing
-paths; exact path transport; read-only discovery in more than one app; and a
+paths; wrong application PID and no-window cases; exact path transport;
+read-only discovery in more than one app; and a
 supervised menu action that does not change user data after the installed app's
 Accessibility grant is confirmed. No production code or installed app was
 changed during this probe.
