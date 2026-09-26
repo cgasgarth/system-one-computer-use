@@ -1,7 +1,7 @@
 # Stable local signing for macOS installs
 
-The current machine reports **zero valid code-signing identities**. The
-installer now stops before changing the installed app until one is selected.
+The installer stops before changing the installed app until a valid
+code-signing identity is selected.
 An ad hoc signature changes with each rebuild, so macOS may no longer treat
 the rebuilt app as the same app for Accessibility access. Apple describes
 the designated requirement as the identity rule used to recognize updates

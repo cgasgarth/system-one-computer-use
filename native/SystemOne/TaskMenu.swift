@@ -96,10 +96,10 @@ final class TaskMenu: NSViewController {
         cancel.frame = run.frame
         for button in [voice, run, cancel] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 13, weight: .medium); view.addSubview(button) }
         cancel.isHidden = true
-        status.frame = NSRect(x: 20, y: 57, width: 320, height: 40)
+        status.frame = NSRect(x: 20, y: 57, width: 320, height: 46)
         status.font = .systemFont(ofSize: 11)
         status.maximumNumberOfLines = 3
-        status.lineBreakMode = .byWordWrapping
+        status.lineBreakMode = .byTruncatingTail
         view.addSubview(status)
         let line = NSBox(frame: NSRect(x: 18, y: 49, width: 324, height: 1))
         line.boxType = .separator
@@ -162,7 +162,7 @@ final class TaskMenu: NSViewController {
     }
 
     func setStatus(_ message: String, color: NSColor) {
-        status.stringValue = message
+        status.stringValue = message.replacingOccurrences(of: "\n", with: " ")
         status.textColor = color
         status.toolTip = message
     }

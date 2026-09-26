@@ -14,7 +14,6 @@ interface OptionContext {
   readonly mode: "browser" | "desktop" | undefined;
   readonly observation: Observation;
   readonly applications: readonly string[];
-  readonly canOpenDocument?: boolean;
   readonly observationFailed?: boolean;
 }
 function switches(mode: OptionContext["mode"]): Action[] {
@@ -53,13 +52,43 @@ function desktopTargets(context: OptionContext): Action[] {
       reason: `Inspect ${target.app_name}: ${target.title}`.slice(0, MAX_REASON),
     }));
 }
-function controlName(element: Window["elements"][number]): string | undefined {
+function descendantOf(
+  element: Window["elements"][number],
+  ancestor: number,
+  elements: ReadonlyMap<number, Window["elements"][number]>,
+): boolean {
+  let parent = element.parent_index;
+  const visited = new Set<number>();
+  while (parent !== undefined && parent !== null && !visited.has(parent)) {
+    visited.add(parent);
+    if (parent === ancestor) {
+      return true;
+    }
+    parent = elements.get(parent)?.parent_index;
+  }
+  return false;
+}
+function controlName(element: Window["elements"][number], window: Window): string | undefined {
   const label = element.label?.trim();
   if (label !== undefined && label.length > 0 && label !== element.role) {
     return label;
   }
   if (typeof element.value !== "string" && typeof element.value !== "number") {
-    return undefined;
+    if (!["AXRow", "AXCell"].includes(element.role)) {
+      return undefined;
+    }
+    const byIndex = new Map(window.elements.map((item) => [item.element_index, item]));
+    return window.elements
+      .find((item) => {
+        const text = item.label?.trim();
+        return (
+          item.role === "AXStaticText" &&
+          text !== undefined &&
+          text.length > 0 &&
+          descendantOf(item, element.element_index, byIndex)
+        );
+      })
+      ?.label?.trim();
   }
   const value = String(element.value).trim();
   return value.length > 0 ? value : undefined;
@@ -72,8 +101,8 @@ function keyboardOptions(window: Window, actions: readonly Action[]): readonly s
 }
 function windowInputs(window: Window): Action[] {
   const actions: Action[] = [];
-  for (const element of window.elements) {
-    const name = controlName(element);
+  for (const element of window.elements.filter((item) => item.enabled !== false)) {
+    const name = controlName(element, window);
     const target = {
       pid: window.pid,
       window_id: window.window_id,
@@ -129,15 +158,6 @@ function surfaceOptions(context: OptionContext): Action[] {
   }
   const actions = desktopTargets(context);
   if (context.mode === "desktop") {
-    if (context.canOpenDocument === true && context.observation.application !== undefined) {
-      const { name, pid } = context.observation.application;
-      actions.push({
-        kind: "open_document",
-        name,
-        pid,
-        reason: `Use ${name}'s Open command (Command+O) to choose a file.`.slice(0, MAX_REASON),
-      });
-    }
     actions.push({
       kind: "request_app",
       reason:

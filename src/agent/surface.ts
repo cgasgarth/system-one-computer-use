@@ -14,23 +14,6 @@ class SurfaceSession {
   private application: Desktop["apps"][number] | undefined;
   private desktopTarget: Target | undefined;
   private readonly restoreAttempts = new Set<string>();
-  private documentWindow: { readonly applicationPid: number; readonly target: Target } | undefined;
-  public rememberDocumentWindow(applicationPid: number, window: Desktop["windows"][number]): void {
-    this.documentWindow = {
-      applicationPid,
-      target: { pid: window.pid, windowId: window.window_id },
-    };
-    this.setTarget(this.documentWindow.target);
-  }
-  public documentTarget(applicationPid: number, observation: Observation): Target | undefined {
-    const saved = this.documentWindow;
-    return saved?.applicationPid === applicationPid &&
-      observation.desktop.windows.some(
-        (window) => window.pid === saved.target.pid && window.window_id === saved.target.windowId,
-      )
-      ? saved.target
-      : undefined;
-  }
   public setTarget(target: Target | undefined): void {
     this.target = target;
     if (this.mode === "desktop") {
@@ -125,7 +108,6 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
     case "refresh":
     case "request_url":
     case "request_app":
-    case "open_document":
     case "select_surface": {
       break;
     }

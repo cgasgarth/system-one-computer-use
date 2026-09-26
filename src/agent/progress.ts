@@ -7,22 +7,12 @@ const UNCHANGED_REFRESHES = 8;
 
 type UnchangedDestination =
   | { readonly kind: "url"; readonly url: string }
-  | { readonly kind: "application"; readonly name: string }
-  | {
-      readonly kind: "document";
-      readonly applicationPid: number;
-      readonly pid: number;
-      readonly windowId: number;
-    };
+  | { readonly kind: "application"; readonly name: string };
 
 class Progress {
   private readonly satisfiedInputs = new Set<string>();
   private readonly urls = new Set<string>();
   private readonly applications = new Set<string>();
-  private readonly documents = new Map<
-    number,
-    { readonly pid: number; readonly windowId: number }
-  >();
   private readonly visits = new Map<string, Map<string, number>>();
   private state: string | undefined;
   private failure: { readonly message: string; readonly count: number } | undefined;
@@ -66,9 +56,6 @@ class Progress {
     if (satisfiedInput !== undefined) {
       this.satisfiedInputs.add(satisfiedInput);
     }
-    if (destination?.kind === "document") {
-      this.documents.set(destination.applicationPid, destination);
-    }
     if (destination?.kind === "url") {
       this.urls.add(destination.url);
     }
@@ -85,15 +72,6 @@ class Progress {
       }
     }
     if (action.kind === "refresh" && (this.failure?.count ?? 0) >= UNCHANGED_ATTEMPTS) {
-      return true;
-    }
-    const opened = action.kind === "open_document" ? this.documents.get(action.pid) : undefined;
-    if (
-      opened !== undefined &&
-      observation.desktop.windows.some(
-        (window) => window.pid === opened.pid && window.window_id === opened.windowId,
-      )
-    ) {
       return true;
     }
     const key = actionKey(action, observation);

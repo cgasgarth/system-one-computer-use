@@ -61,12 +61,6 @@ const actionSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("request_url"), reason }),
   z.strictObject({ kind: z.literal("request_app"), reason }),
-  z.strictObject({
-    kind: z.literal("open_document"),
-    pid: z.number().int().positive(),
-    name: z.string().min(1),
-    reason,
-  }),
   z.strictObject({ kind: z.literal("refresh"), reason }),
   z.strictObject({ kind: z.literal("blocked"), reason }),
   z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),
@@ -139,11 +133,6 @@ function matchesWindow(action: Extract<Action, { window_id: number }>, window: W
 
 function validateActions(actions: readonly Action[], observation: Observation): Action[] {
   return actions.filter((action) => {
-    if (action.kind === "open_document") {
-      return observation.desktop.apps.some(
-        (app) => app.pid === action.pid && app.name === action.name,
-      );
-    }
     if (action.kind === "navigate") {
       return validNavigation(action.url, observation);
     }
@@ -171,9 +160,6 @@ function validateActions(actions: readonly Action[], observation: Observation): 
 
 function describeAction(action: Action): string {
   switch (action.kind) {
-    case "open_document": {
-      return action.reason;
-    }
     case "select_surface": {
       return action.reason;
     }

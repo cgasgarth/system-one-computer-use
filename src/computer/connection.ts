@@ -38,9 +38,6 @@ const observedWindowSchema = z.union([windowSchema, unavailableWindowSchema]);
 const cursorDisabledSchema = z.object({ enabled: z.literal(false), session: z.string() });
 const sessionSchema = z.object({ active: z.literal(true), session: z.string() });
 const endedSessionSchema = z.object({ active: z.literal(false), session: z.string() });
-const applicationStateSchema = z.object({
-  apps: z.array(z.object({ pid: z.number().int(), active: z.boolean(), running: z.boolean() })),
-});
 type CuaClient = Readonly<Pick<Client, "connect" | "callTool" | "close">>;
 
 class CuaConnection {
@@ -173,23 +170,6 @@ class CuaConnection {
       resultStatus,
     );
   }
-  public async openDocument(pid: number): Promise<void> {
-    if (!(await this.isActive(pid))) {
-      throw new CuaError("The selected app is not in front. Its Open command was not sent.");
-    }
-    await this.invoke(
-      {
-        name: "hotkey",
-        arguments: { scope: "desktop", keys: ["cmd", "o"], session: this.session },
-      },
-      resultStatus,
-    );
-  }
-  public async isActive(pid: number): Promise<boolean> {
-    const state = await this.invoke({ name: "list_apps" }, applicationStateSchema);
-    return state.apps.some((app) => app.pid === pid && app.active && app.running);
-  }
-
   private async readWindow(pid: number, windowId: number): Promise<Window> {
     const state = await this.invoke(
       {

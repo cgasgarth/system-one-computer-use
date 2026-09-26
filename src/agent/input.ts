@@ -138,20 +138,34 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
   if (computer.navigate === undefined) {
     throw new Error("Website navigation requires Chrome tools");
   }
-  const text = await options.text.generate({
-    task: options.task,
-    context: options.context ?? "",
-    tool: context.action.reason,
-    observation,
-    purpose: "url",
-  });
+  const text = await options.text
+    .generate({
+      task: options.task,
+      context: options.context ?? "",
+      tool: context.action.reason,
+      observation,
+      purpose: "url",
+    })
+    .catch((error: unknown) => {
+      throw new Error(
+        "Could not get a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
+        { cause: error },
+      );
+    });
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
     throw new Error(
       "The text helper found no URL for the current request. Choose another tool or request the missing information.",
     );
   }
-  const url = z.url({ protocol: /^https?$/u }).parse(text.trim());
+  const parsed = z.url({ protocol: /^https?$/u }).safeParse(text.trim());
+  if (!parsed.success) {
+    throw new Error(
+      "The text helper did not return a valid web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
+      { cause: parsed.error },
+    );
+  }
+  const url = parsed.data;
   const current = await computer.window(
     observation.window?.pid ?? 0,
     observation.window?.window_id ?? 0,

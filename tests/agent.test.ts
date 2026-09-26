@@ -123,6 +123,35 @@ test("returns a tool failure to the model so it can change surfaces", async () =
   expect(switched).toBe(true);
   expect(result.status).toBe("blocked");
 });
+
+test("blocked summary reduces structured validator errors to readable text", async () => {
+  const { computer } = computerFixture();
+  let selected = false;
+  const browser: ManagedComputer = {
+    ...computer,
+    async window() {
+      throw new Error('[{"message":"Invalid URL","code":"invalid_format"}]');
+    },
+  };
+  const result = await runTask({
+    task: "Open a page",
+    applications: [],
+    computer: (mode) => (mode === "browser" ? browser : computer),
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        if (!selected) {
+          selected = true;
+          return pick(input, "select_surface", "browser");
+        }
+        return pick(input, "blocked");
+      },
+    },
+  });
+  expect(result.status).toBe("blocked");
+  expect(result.summary).toContain("Invalid URL");
+  expect(result.summary).not.toContain("[");
+});
 test("passes the latest completion assessment only within the current request", async () => {
   const expectedDecisions = 2;
   const { computer } = computerFixture();

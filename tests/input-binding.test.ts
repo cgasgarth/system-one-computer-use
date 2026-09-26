@@ -3,7 +3,7 @@ import type { Window } from "../src/agent/contracts.ts";
 import type { TextModel } from "../src/models/text.ts";
 import type { ActionResult } from "../src/agent/types.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
-import { enterText } from "../src/agent/input.ts";
+import { enterText, openUrl } from "../src/agent/input.ts";
 import { textFieldKey } from "../src/agent/state-key.ts";
 import { computerFixture, desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
 
@@ -105,4 +105,72 @@ test("keeps satisfied inputs scoped to their document", () => {
   expect(
     textFieldKey({ ...observation, window: { ...window, url: "https://example.test" } }, "s1:1"),
   ).not.toBe(key);
+});
+
+test("rejects a text-helper URL error without leaking validator JSON", async () => {
+  const { computer } = computerFixture();
+  let navigations = 0;
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate() {
+      navigations += 1;
+    },
+  };
+  await expectFailure(
+    openUrl({
+      action: { kind: "request_url", reason: "Open the requested page" },
+      observation: { desktop: desktopFixture(), window: windowFixture() },
+      computer: browser,
+      options: {
+        task: "Open a page",
+        applications: [],
+        computer: () => browser,
+        text: {
+          async generate() {
+            return "not a web address";
+          },
+        },
+        decision: {
+          async choose() {
+            throw new Error("No decision needed");
+          },
+        },
+      },
+    }),
+    "valid web address",
+  );
+  expect(navigations).toBe(0);
+});
+
+test("explains an unavailable URL text helper", async () => {
+  const { computer } = computerFixture();
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate() {
+      throw new Error("Unexpected navigation");
+    },
+  };
+  await expectFailure(
+    openUrl({
+      action: { kind: "request_url", reason: "Open the requested page" },
+      observation: { desktop: desktopFixture(), window: windowFixture() },
+      computer: browser,
+      options: {
+        task: "Open a page",
+        applications: [],
+        computer: () => browser,
+        text: {
+          async generate() {
+            throw new Error("Service unavailable");
+          },
+        },
+        decision: {
+          async choose() {
+            throw new Error("No decision needed");
+          },
+        },
+      },
+    }),
+    "Could not get a web address",
+  );
 });

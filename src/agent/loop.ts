@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Observation } from "./contracts.ts";
 import type { TaskOptions, TaskResult, TaskStep } from "./types.ts";
 import type { Surface } from "../app/sessions/schema.ts";
@@ -6,6 +7,7 @@ import { performTurn } from "./turn.ts";
 import { Progress } from "./progress.ts";
 
 const MS_PER_SECOND = 1000;
+const validationIssues = z.array(z.object({ message: z.string() })).nonempty();
 async function bookmark(
   options: TaskOptions,
   surfaces: Readonly<SurfaceSession>,
@@ -36,6 +38,14 @@ interface FinishContext {
 }
 function blockedSummary(context: FinishContext): string {
   if (context.lastError.length > 0) {
+    try {
+      const issues = validationIssues.safeParse(JSON.parse(context.lastError));
+      if (issues.success) {
+        return `A tool input was invalid: ${issues.data[0]?.message ?? "Invalid input"}. Check the input and try again.`;
+      }
+    } catch {
+      // Ordinary errors are already readable.
+    }
     return context.lastError;
   }
   if (context.steps.every((step) => step.action.kind === "blocked")) {

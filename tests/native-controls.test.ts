@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { options } from "../src/agent/options.ts";
+import { actionDescription } from "../src/models/action-space.ts";
 import { relevantControls, textTargetName } from "../src/agent/controls.ts";
 import { SurfaceSession } from "../src/agent/surface.ts";
 import { computerFixture, desktopFixture, windowFixture } from "./fixtures.ts";
@@ -66,6 +67,69 @@ test("keeps editable content visible ahead of a long list of structural rows", (
   expect(
     choices.some((action) => action.kind === "compose_text" && action.element_token === "editor"),
   ).toBe(true);
+});
+
+test("uses an observed row action with its descendant text", () => {
+  const window = {
+    ...windowFixture(),
+    elements: [
+      { element_index: 0, element_token: "root", role: "AXWindow" },
+      {
+        element_index: 1,
+        parent_index: 0,
+        element_token: "row",
+        role: "AXRow",
+        actions: ["AXPress"],
+      },
+      { element_index: 2, parent_index: 1, element_token: "cell", role: "AXCell" },
+      {
+        element_index: 3,
+        parent_index: 2,
+        element_token: "text",
+        role: "AXStaticText",
+        label: "Contact and preview",
+      },
+      {
+        element_index: 4,
+        parent_index: 0,
+        element_token: "disabled",
+        role: "AXRow",
+        actions: ["AXPress"],
+        enabled: false,
+      },
+      {
+        element_index: 5,
+        parent_index: 4,
+        element_token: "disabled-text",
+        role: "AXStaticText",
+        label: "Unavailable contact",
+      },
+    ],
+  };
+  const choices = options({
+    mode: "desktop",
+    applications: [],
+    observation: { desktop: desktopFixture(), window },
+  });
+  expect(
+    choices.some(
+      (action) =>
+        action.kind === "click_element" &&
+        action.element_token === "row" &&
+        action.reason === "Activate Contact and preview",
+    ),
+  ).toBe(true);
+  expect(
+    choices.some(
+      (action) => action.kind === "click_element" && action.element_token === "disabled",
+    ),
+  ).toBe(false);
+  const row = choices.find(
+    (action) => action.kind === "click_element" && action.element_token === "row",
+  );
+  expect(row && actionDescription(row, { desktop: desktopFixture(), window })).toBe(
+    "Activate Contact and preview",
+  );
 });
 
 test("uses the active dialog subtree instead of controls behind it", async () => {

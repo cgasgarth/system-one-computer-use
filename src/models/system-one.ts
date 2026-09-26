@@ -1,4 +1,4 @@
-import { actionDescription, actionGroups, targetCorrectionActions } from "./action-space.ts";
+import { actionDescription, actionGroups } from "./action-space.ts";
 import type { OperationDecision } from "./action-space.ts";
 import { isEditableElement } from "../agent/contracts.ts";
 import { relevantControls, textTargetName } from "../agent/controls.ts";
@@ -263,18 +263,22 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     const available = checkCompletion
       ? input.actions.filter((action) => action.kind !== "finish")
       : input.actions;
-    const selected = await this.chooseAvailable(
-      input,
+    const targetUnconfirmed =
       completionTarget !== undefined &&
-        (completionTarget.choice === "A1" ||
-          (completionTarget.probabilities["A0"] ?? 0) < ACTION_MATCH_THRESHOLD)
-        ? targetCorrectionActions({
-            actions: available,
-            observation: input.observation,
-          })
-        : available,
-      start,
-    );
+      (completionTarget.choice === "A1" ||
+        (completionTarget.probabilities["A0"] ?? 0) < ACTION_MATCH_THRESHOLD);
+    const recoveryInput = targetUnconfirmed
+      ? {
+          ...input,
+          feedback: [
+            input.feedback ?? "",
+            "The current view has not been confirmed as the requested target. Locate the requested target using the observed controls. All available tools remain usable; do not treat the task as complete.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        }
+      : input;
+    const selected = await this.chooseAvailable(recoveryInput, available, start);
     return {
       ...selected,
       ...(completion === undefined ? {} : { completion }),

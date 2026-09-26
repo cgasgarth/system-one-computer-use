@@ -71,9 +71,6 @@ function actionKey(action: Action, observation: Observation): string | undefined
   if (action.kind === "observe_window") {
     return JSON.stringify([action.kind, action.pid, action.window_id]);
   }
-  if (action.kind === "open_document") {
-    return JSON.stringify([action.kind, action.pid]);
-  }
   if (action.kind === "press_key") {
     return JSON.stringify([action.kind, action.key, action.modifiers.toSorted()]);
   }

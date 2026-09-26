@@ -14,12 +14,14 @@ To build the app, install [Bun](https://bun.sh/), [uv](https://docs.astral.sh/uv
 [CUA Driver](https://github.com/trycua/cua). Native tasks use CUA's Accessibility
 and Screen Recording grants. Browser tasks use the
 [Playwright Chrome extension](https://github.com/microsoft/playwright/tree/main/packages/extension).
+Configure a [stable signing identity](docs/local-signing.md) once so rebuilds can
+retain the app's macOS permission identity.
 
 ```bash
 bun install --frozen-lockfile
 cp .env.example .env
 # The app downloads and runs local models. No serving terminal is needed.
-bun run app:install
+SYSTEM_ONE_CODESIGN_IDENTITY=<certificate-fingerprint> bun run app:install
 open "$HOME/Applications/System One Computer Use.app"
 ```
 

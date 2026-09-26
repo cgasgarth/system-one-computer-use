@@ -10,6 +10,64 @@ const LONG_CONTEXT_REPEATS = 100;
 const LONG_PRIOR_REPEATS = 400;
 const MAX_COMMIT_TEST_CHARS = 5000;
 const FINAL_CONSTRAINT = "Final constraint: do not save any other project.";
+test("can search for the requested person after rejecting the current conversation", async () => {
+  let verifiedField = false;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = decisionRequestSchema.parse(await request.json());
+      const question = body.questions.next_action.instructions;
+      const { criteria } = body.questions.next_action;
+      let choice = "A0";
+      if (question.startsWith("Does the current page")) {
+        choice = "A1";
+      }
+      if (question.startsWith("Which operation")) {
+        expect(body.state).toContain("Locate the requested target");
+        expect(Object.values(criteria)).toContain("Enter or replace text in an editable field.");
+      }
+      if (question.startsWith("Does entering")) {
+        verifiedField = true;
+      }
+      return Response.json({
+        answers: {
+          next_action: {
+            choice,
+            probabilities: Object.fromEntries(
+              Object.keys(criteria).map((key) => [key, key === choice ? 1 : 0]),
+            ),
+          },
+        },
+      });
+    },
+  });
+  try {
+    const window = { ...windowFixture(), window_title: "Another person" };
+    const search = {
+      kind: "compose_text",
+      pid: 7,
+      window_id: 9,
+      element_token: "s1:1",
+      reason: "Type into Search",
+    } as const;
+    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+      task: "Open my latest text with Alex Smth",
+      context: "An earlier task opened a different conversation.",
+      observation: { desktop: desktopFixture(), window },
+      mode: "desktop",
+      actions: [
+        search,
+        { kind: "finish", reason: "Complete", summary: "Done" },
+        { kind: "blocked", reason: "Stop" },
+      ],
+    });
+    expect(result.completionTarget?.choice).toBe("A1");
+    expect(result.action).toEqual(search);
+    expect(verifiedField).toBe(true);
+  } finally {
+    await server.stop(true);
+  }
+});
 const cases: { readonly probability: number; readonly expected: "finish" | "press_key" }[] = [
   { probability: 0.95, expected: "finish" },
   { probability: 0.51, expected: "press_key" },

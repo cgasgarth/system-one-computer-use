@@ -17,9 +17,6 @@ interface Computer {
   readonly desktop: () => Promise<Desktop>;
   readonly window: (pid: number, windowId: number) => Promise<Window>;
   readonly focusWindow?: (pid: number, windowId: number) => Promise<void>;
-  readonly openDocument?: (
-    application: Desktop["apps"][number],
-  ) => Promise<Desktop["windows"][number] | undefined>;
   readonly launchApp: (name: string) => Promise<void>;
   readonly clickElement: (action: ClickAction) => Promise<void>;
   readonly inspectClick: (action: ClickAction) => Promise<ClickInspection>;

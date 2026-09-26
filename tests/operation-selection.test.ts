@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { targetCorrectionActions } from "../src/models/action-space.ts";
 import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
@@ -53,33 +52,4 @@ test("selects an operation before a compatible target and records both distribut
   } finally {
     await server.stop(true);
   }
-});
-
-test("target correction offers navigation controls without unrelated action buttons", () => {
-  const names = ["Autumn plan", "Autumn plan", "Autumn plan", "Save document"];
-  const roles = ["button", "tab", "row", "button"];
-  const targets = names.map((name, index) => ({
-    kind: "click_element" as const,
-    pid: 7,
-    window_id: 9,
-    element_token: `e${index}`,
-    reason: `Activate ${name}`,
-  }));
-  const window = {
-    ...windowFixture(),
-    elements: names.map((name, index) => ({
-      element_index: index,
-      element_token: `e${index}`,
-      role: roles[index] ?? "button",
-      label: name,
-      actions: ["AXPress"],
-    })),
-  };
-  const corrected = targetCorrectionActions({
-    actions: targets,
-    observation: { desktop: desktopFixture(), window },
-  });
-  expect(
-    corrected.map((action) => (action.kind === "click_element" ? action.element_token : "")),
-  ).toEqual(["e1", "e2"]);
 });

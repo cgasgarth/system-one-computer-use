@@ -76,38 +76,6 @@ function selectedControl(action: Action, observation: Observation): TaskStep["co
   );
   return { role: element?.role ?? "control", label: element?.label ?? "" };
 }
-async function openFileChooser(context: TurnContext): Promise<ActionResult> {
-  const { action, surfaces, observation } = context;
-  if (action.kind !== "open_document" || surfaces.mode === undefined) {
-    throw new Error("Select an application before using Open");
-  }
-  const computer = context.options.computer(surfaces.mode);
-  if (computer.openDocument === undefined) {
-    throw new Error("This driver cannot use application Open commands");
-  }
-  const existing = surfaces.documentTarget(action.pid, observation);
-  if (existing !== undefined) {
-    surfaces.setTarget(existing);
-    return {
-      output:
-        "The window produced by Open is already available. Use its controls instead of opening it again.",
-      unchanged: {
-        kind: "document",
-        applicationPid: action.pid,
-        pid: existing.pid,
-        windowId: existing.windowId,
-      },
-    };
-  }
-  const opened = await computer.openDocument({ name: action.name, pid: action.pid });
-  if (opened !== undefined) {
-    surfaces.rememberDocumentWindow(action.pid, opened);
-  }
-  return {
-    output: `Requested ${action.name}'s Open command. Inspect the resulting file chooser.`,
-    performedAction: true,
-  };
-}
 async function verifyBrowserClick(context: TurnContext): Promise<void> {
   if (context.action.kind !== "click_element" || context.surfaces.mode !== "browser") {
     return;
@@ -140,9 +108,6 @@ async function applyInput({
   }
   const computer = options.computer(surfaces.mode);
   const input = { action, observation, options, computer };
-  if (action.kind === "open_document") {
-    return openFileChooser({ options, surfaces, observation, action });
-  }
   if (action.kind === "compose_text") {
     return enterText(input);
   }
@@ -291,8 +256,6 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
       observation,
       observationFailed: observationError !== undefined,
       applications: options.applications,
-      canOpenDocument:
-        surfaces.mode === "desktop" && options.computer("desktop").openDocument !== undefined,
     }),
     observation,
   );

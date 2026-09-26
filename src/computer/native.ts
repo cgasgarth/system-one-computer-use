@@ -115,32 +115,6 @@ class CuaMcpComputer implements Computer {
   public async focusWindow(pid: number, windowId: number): Promise<void> {
     await this.connection.focusWindow(pid, windowId);
   }
-  public async openDocument(
-    application: Desktop["apps"][number],
-  ): Promise<Desktop["windows"][number] | undefined> {
-    if (!(await this.connection.isActive(application.pid))) {
-      await openMacApplication(application.name);
-    }
-    const before = await this.desktop();
-    await waitForNativeWindow({
-      binary: this.nativeAccess,
-      application: application.name,
-      mode: "created",
-      act: async () => this.connection.openDocument(application.pid),
-    });
-    return this.openedWindow(before);
-  }
-  private async openedWindow(before: Desktop): Promise<Desktop["windows"][number] | undefined> {
-    const after = await this.desktop();
-    const created = after.windows.filter(
-      (window) => !before.windows.some((previous) => previous.window_id === window.window_id),
-    );
-    if (created.length === 1) {
-      return created[0];
-    }
-    return undefined;
-  }
-
   public async clickElement(action: ClickAction): Promise<void> {
     await this.connection.click(action);
   }

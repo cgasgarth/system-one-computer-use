@@ -48,7 +48,7 @@ function nativeWindows(): readonly (Desktop["windows"][number] & {
     },
   ];
 }
-function fixture(foreground = true): Fixture {
+function fixture(): Fixture {
   const calls: string[] = [];
   const active = new Set<string>();
   const client: CuaClient = {
@@ -73,19 +73,6 @@ function fixture(foreground = true): Fixture {
         return { isError: true, content: [{ type: "text", text: "The CUA session has ended" }] };
       }
       switch (request.name) {
-        case "list_apps": {
-          return {
-            content: [],
-            structuredContent: {
-              apps: desktopFixture().apps.map((app) => ({
-                name: app.name,
-                pid: app.pid,
-                running: true,
-                active: foreground,
-              })),
-            },
-          };
-        }
         case "hotkey": {
           expect(request.arguments).toMatchObject({ scope: "desktop", keys: ["cmd", "o"] });
           return { content: [], structuredContent: { effect: "unverifiable" } };
@@ -167,25 +154,6 @@ test("does not revive a stopped run and starts a fresh connection for the next t
     await second.close();
   }
   expect(next.calls.filter((name) => name === "start_session")).toHaveLength(SESSION_COUNT);
-});
-
-test("uses a desktop chord only after checking the selected app is in front", async () => {
-  const foreground = fixture();
-  const connection = new CuaConnection("unused-test-driver", foreground.client);
-  try {
-    await connection.openDocument(windowFixture().pid);
-  } finally {
-    await connection.close();
-  }
-  expect(foreground.calls).toContain("hotkey");
-  const background = fixture(false);
-  const refused = new CuaConnection("unused-test-driver", background.client);
-  try {
-    await expectFailure(refused.openDocument(windowFixture().pid), "not in front");
-  } finally {
-    await refused.close();
-  }
-  expect(background.calls).not.toContain("hotkey");
 });
 
 test("sets the intended field value through the exact element handle", async () => {

@@ -24,7 +24,6 @@ const DESCRIPTIONS: Readonly<Record<Action["kind"], string>> = {
   blocked: "Required input or access is missing. Stop.",
   request_app: "Open an installed application.",
   observe_window: "Select a different open window.",
-  open_document: "Open a document through the application's file chooser.",
 };
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
   const grouped = new Map<Action["kind"], Action[]>();
@@ -47,30 +46,12 @@ function actionDescription(action: Action, observation: Observation): string {
         )
       : undefined;
   if (target !== undefined) {
-    return `Activate ${target.role} ${JSON.stringify(target.label ?? "")}.`;
+    const label = target.label?.trim();
+    return label === undefined || label.length === 0
+      ? action.reason
+      : `Activate ${target.role} ${JSON.stringify(label)}.`;
   }
   return describeAction(action);
 }
-function targetCorrectionActions(input: {
-  readonly actions: readonly Action[];
-  readonly observation: Observation;
-}): readonly Action[] {
-  const navigationRoles = new Set(["link", "AXLink", "tab", "treeitem", "row", "cell"]);
-  return input.actions.filter((action) => {
-    if (action.kind === "compose_text" || action.kind === "type_text") {
-      return false;
-    }
-    if (action.kind === "press_key") {
-      return action.key === "escape";
-    }
-    if (action.kind === "click_element") {
-      const target = input.observation.window?.elements.find(
-        (element) => element.element_token === action.element_token,
-      );
-      return navigationRoles.has(target?.role ?? "");
-    }
-    return true;
-  });
-}
-export { actionDescription, actionGroups, targetCorrectionActions };
+export { actionDescription, actionGroups };
 export type { OperationDecision };
