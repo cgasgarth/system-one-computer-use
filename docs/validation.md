@@ -169,3 +169,33 @@ Known limits remain: small development task coverage; heuristic verification;
 no broad provider comparison; no complete native drag/scroll/canvas support;
 and unstable Accessibility grants across ad-hoc-signed rebuilds. No model was
 trained, no hosted text planner was added, and no video or upload was performed.
+
+## Read-only Calendar diagnosis and local QA, September 26, 2026
+
+The installed app opened Calendar, then chose the file Open command twice and
+switched to Reminders while handling a request for a new Tennis calendar item.
+That run stopped in Reminders. A later read-only Calendar search showed no Tennis
+result under Today. No test in this section created a user Calendar event.
+
+A later source-driver capture is not the installed failure snapshot. It exposed
+an actionable **Add Event** button, the file Open option, and an app-switch
+option. On that frozen capture, changing only the file Open description did not
+change the selected operation. A flat choice over 75 actions put Add Event at
+rank 56 with CLM 8B 4-bit. A paired read-only request to the pinned Kev 4B
+checkpoint put Add Event first. These are local model choices, not completed
+Calendar tasks or a general model ranking.
+
+Eight fixed app-target questions showed that a simple S1 choice over 114
+installed names plus stay/unavailable options missed all eight expected targets.
+The current Qwen app-name helper returned exact names on six valid fixed cases.
+In a separate replay of the failed app-switch argument, the old progress-aware
+prompt returned Reminders and the revised argument-only prompt returned Calendar.
+No app was opened by those replays.
+
+A disposable Chrome page changed after a real model Finish choice. The source
+harness rejected the stale Finish, recorded the fresh page, made another
+decision, and completed on the correct page with zero writes. In three other
+local form cases, Cancel saved nothing and passed; Create/Save and an unsaved
+draft did not meet their requested final states. Their persistent write counts
+were zero. These are small development checks on local pages, not a task success
+rate. Private traces and exact request bodies remain under ignored `runs/qa/`.

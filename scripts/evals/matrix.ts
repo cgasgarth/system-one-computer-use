@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const cases = [
   "open-document",
+  "finish-freshness",
   "edit-and-save",
   "follow-up",
   "multi-field-profile",

@@ -74,6 +74,14 @@ const cases: readonly BrowserCase[] = [
     validate: ({ url }): boolean => url?.startsWith(`${workspace.origin}/item/r-8`) === true,
   },
   {
+    name: "finish-freshness",
+    task: "Open the Roadmap Review document.",
+    start: "/item/r-8?finish=1",
+    context: "",
+    expectedSaves: 0,
+    validate: ({ url }): boolean => url?.startsWith(`${workspace.origin}/item/r-8`) === true,
+  },
+  {
     name: "edit-and-save",
     task: "Change the Roadmap Review document text to Discuss milestones on Thursday. Save the document.",
     start: "/",
@@ -279,16 +287,31 @@ function guardWrites(
     );
   }
 }
+function freshFinishEvidence(trace: readonly TaskStep[]): boolean {
+  const stale = trace.findIndex(
+    (step) =>
+      step.action.kind === "finish" &&
+      step.error?.includes("screen changed before Finish") === true &&
+      step.terminalObservation !== undefined,
+  );
+  return stale !== -1 && trace.length > stale + 1;
+}
 function decisionFor(scenario: BrowserCase): DecisionModel {
-  if (scenario.name !== "rerendered-button") {
+  if (scenario.name !== "rerendered-button" && scenario.name !== "finish-freshness") {
     return models.decision;
   }
   let injected = false;
   return {
     async choose(input) {
       const choice = await models.decision.choose(input);
+      if (!injected && scenario.name === "finish-freshness" && choice.action.kind === "finish") {
+        injected = true;
+        // Fault injection changes the owned local page after the model decides, before Finish executes.
+        await browser.navigate?.(`${workspace.origin}/item/c-3?stale=1`);
+      }
       if (
         !injected &&
+        scenario.name === "rerendered-button" &&
         choice.action.kind === "click_element" &&
         choice.action.reason.includes("Proceed")
       ) {
@@ -336,7 +359,8 @@ async function executeCase(scenario: BrowserCase): Promise<boolean> {
       passed:
         result.status === "complete" &&
         writesMatch(writeDelta(beforeWrites, writeCounts()), allowedWrites) &&
-        scenario.validate(final),
+        scenario.validate(final) &&
+        (scenario.name !== "finish-freshness" || freshFinishEvidence(trace)),
       totalMs: Math.round(result.totalMs),
       final,
     };

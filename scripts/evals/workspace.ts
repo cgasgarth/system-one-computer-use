@@ -26,6 +26,8 @@ interface Workspace {
   readonly volatileClicks: () => number;
   readonly triggerRerender: () => void;
   readonly rerendered: () => boolean;
+  readonly triggerFinishStale: () => void;
+  readonly finishChanged: () => boolean;
   readonly choice: () => string;
   readonly choiceSaves: () => number;
   readonly duplicateChoice: () => string;
@@ -43,6 +45,8 @@ interface WorkspaceState {
   volatileClickCount: number;
   volatileVersion: number;
   volatileRerendered: boolean;
+  finishVersion: number;
+  finishChanged: boolean;
   choice: string;
   choiceSaveCount: number;
   duplicateChoice: string;
@@ -147,6 +151,9 @@ function getSearchPage(): Response {
   );
 }
 function documentsPage(state: WorkspaceState, url: URL): Response {
+  if (url.pathname === "/finish/version") {
+    return new Response(String(state.finishVersion));
+  }
   if (url.pathname === "/search-get") {
     return getSearchPage();
   }
@@ -163,7 +170,7 @@ function documentsPage(state: WorkspaceState, url: URL): Response {
   }
   return page(
     document.title,
-    `<h2>${document.title}</h2><p>Saved text: ${escapeHtml(document.body)}</p>${url.searchParams.has("saved") ? '<p role="status">Changes saved.</p>' : ""}<form method="post" action="/save"><input type="hidden" name="id" value="${id}"><label>Document text<textarea name="body" aria-label="Document text">${escapeHtml(document.body)}</textarea></label><button>Save document</button></form>`,
+    `<h2>${document.title}</h2><p>Saved text: ${escapeHtml(document.body)}</p>${url.searchParams.has("saved") ? '<p role="status">Changes saved.</p>' : ""}<form method="post" action="/save"><input type="hidden" name="id" value="${id}"><label>Document text<textarea name="body" aria-label="Document text">${escapeHtml(document.body)}</textarea></label><button>Save document</button></form>${id === "r-8" && url.searchParams.has("finish") ? "<script>setInterval(async()=>{if(await (await fetch('/finish/version')).text()==='2'){await fetch('/finish/changed',{method:'POST'});location.href='/item/c-3?stale=1'}},20)</script>" : ""}`,
   );
 }
 async function saveDocument(state: WorkspaceState, request: Request, url: URL): Promise<Response> {
@@ -215,6 +222,17 @@ async function saveDuplicateChoice(
   state.duplicateSaveCount += 1;
   return Response.redirect(new URL("/select-duplicate?saved=1", url), SEE_OTHER);
 }
+function markTransition(state: WorkspaceState, pathname: string): Response | undefined {
+  if (pathname === "/volatile/replaced") {
+    state.volatileRerendered = true;
+    return new Response("ok");
+  }
+  if (pathname === "/finish/changed") {
+    state.finishChanged = true;
+    return new Response("ok");
+  }
+  return undefined;
+}
 async function writeRoute(
   state: WorkspaceState,
   request: Request,
@@ -236,9 +254,9 @@ async function writeRoute(
     state.volatileClickCount += 1;
     return Response.redirect(new URL("/volatile?done=1", url), SEE_OTHER);
   }
-  if (url.pathname === "/volatile/replaced") {
-    state.volatileRerendered = true;
-    return new Response("ok");
+  const transition = markTransition(state, url.pathname);
+  if (transition !== undefined) {
+    return transition;
   }
   if (url.pathname === "/select-values") {
     return saveChoice(state, request, url);
@@ -309,6 +327,8 @@ function startWorkspace(): Workspace {
     volatileClickCount: 0,
     volatileVersion: 1,
     volatileRerendered: false,
+    finishVersion: 1,
+    finishChanged: false,
     choice: "low-priority",
     choiceSaveCount: 0,
     duplicateChoice: "internal-high",
@@ -329,6 +349,10 @@ function startWorkspace(): Workspace {
       state.volatileVersion = 2;
     },
     rerendered: () => state.volatileRerendered,
+    triggerFinishStale: () => {
+      state.finishVersion = 2;
+    },
+    finishChanged: () => state.finishChanged,
     choice: () => state.choice,
     choiceSaves: () => state.choiceSaveCount,
     duplicateChoice: () => state.duplicateChoice,
