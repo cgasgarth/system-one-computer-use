@@ -100,6 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMenu(); return true }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if popover.contentViewController === settings && popover.isShown { settings.permissions.refresh() }
+    }
+
     @objc private func toggleMenu() {
         if popover.isShown { popover.performClose(nil) } else { showMenu() }
     }
@@ -132,6 +136,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func showSettings() {
         cancelVoice()
+        settings.maximumHeight = 470
+        if let window = statusItem?.button?.window, let screen = window.screen {
+            settings.maximumHeight = min(470, window.frame.minY - screen.visibleFrame.minY - 40)
+        }
         settings.load()
         popover.contentViewController = settings
         popover.contentSize = settings.preferredContentSize
@@ -304,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
         popover.contentViewController?.view.window?.makeKey()
+        if popover.contentViewController === settings { settings.permissions.refresh() }
         if popover.contentViewController === content {
             models.warm(immediate: true)
             content.focus()

@@ -1,7 +1,13 @@
 import AppKit
+import ApplicationServices
+
+private struct PermissionResult: Encodable { let accessibility: Bool }
 
 let arguments = CommandLine.arguments
-if arguments.count == 4, arguments[1] == "watch", let mode = WindowWatchMode(rawValue: arguments[3]) {
+if arguments.count == 2, arguments[1] == "permissions" {
+    let result = PermissionResult(accessibility: AXIsProcessTrusted())
+    try? FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(result))
+} else if arguments.count == 4, arguments[1] == "watch", let mode = WindowWatchMode(rawValue: arguments[3]) {
     let watcher = WindowEvents(name: arguments[2], mode: mode)
     watcher.start()
     if !watcher.isFinished { CFRunLoopRun() }

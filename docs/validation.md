@@ -214,3 +214,9 @@ state so the restored draft did not show the test's completion status. This
 confirms installed native access and app launch; Calendar event creation and the
 failed form workflows above remain unresolved. Native menu discovery is still a
 documented prototype, not a production action.
+
+### Settings permission check
+
+An installed Settings build (binary SHA-256 `dd26a0179e32b82e9b234980574952ae0d210eaa079cd9dd57744315f7ea71e2`) showed **Needs access** for System One Accessibility after the ad-hoc rebuild, **Granted** for CUA Driver Accessibility and Screen Recording from the driver's own daemon, and **Check in macOS** for Handy Microphone. No permission was changed. The Accessibility and Microphone Open buttons reached their macOS privacy pages. A separate preview with an injected missing Screen Recording state reached the Screen & System Audio Recording page without changing CUA's grant.
+
+The default Settings view kept Back and Save visible. With both endpoint forms open, Back and all four fields were visible at the top; the enabled scroll bar moved to Save and Quit at the bottom. The app restarted Ready with the user draft restored. Screenshots are under ignored `runs/qa/overnight/settings-install-backup/permissions-final-expanded-{top-clean,bottom}.png`. This check covers Settings status and layout, not a native task run.

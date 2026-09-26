@@ -1,5 +1,9 @@
 import AppKit
 
+private final class SettingsScrollContent: NSView {
+    override var isFlipped: Bool { true }
+}
+
 @MainActor
 final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     static let size = NSSize(width: 360, height: 510)
@@ -12,6 +16,7 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     private let decision = NSPopUpButton()
     private let writer = NSPopUpButton()
     private let retention = NSPopUpButton()
+    let permissions = PermissionSection()
     private let decisionStatus = NSTextField(wrappingLabelWithString: "")
     private let writerStatus = NSTextField(wrappingLabelWithString: "")
     private let decisionUrl = NSTextField()
@@ -21,17 +26,34 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     private let decisionEndpoint = NSStackView()
     private let textEndpoint = NSStackView()
     private let stack = NSStackView()
+    private let scroll = NSScrollView()
+    private let scrollContent = SettingsScrollContent()
     private var catalog: [ModelPreset] = []
     private var editingEndpoint: ModelRole?
+    var maximumHeight: CGFloat?
     var onModelsChange: ((ModelPreferences) -> Void)?
     var onSizeChange: ((NSSize) -> Void)?
 
     override func loadView() {
         view = MenuSurface(frame:NSRect(origin:.zero,size:Self.size)); view.wantsLayer = true
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 5
         stack.detachesHiddenViews = true; stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:view.leadingAnchor,constant:20),stack.trailingAnchor.constraint(equalTo:view.trailingAnchor,constant:-20),stack.topAnchor.constraint(equalTo:view.topAnchor,constant:20)])
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scrollContent.addSubview(stack)
+        scroll.documentView = scrollContent
+        view.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: scrollContent.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: scrollContent.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: scrollContent.topAnchor, constant: 20),
+        ])
         back.bezelStyle = .inline
         add(row([back,label("Settings",weight:.semibold),spacer()]))
         shortcut.bezelStyle = .rounded
@@ -52,6 +74,9 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
         retention.target = self; retention.action = #selector(modelChanged(_:))
         retention.widthAnchor.constraint(equalToConstant:218).isActive = true
         add(row([label("When idle"),spacer(),retention]))
+        separator()
+        add(permissions)
+        permissions.onLayoutChange = { [weak self] in self?.resize() }
         styleDetail(status); add(status)
         save.bezelStyle = .rounded; save.bezelColor = .controlAccentColor
         save.widthAnchor.constraint(equalToConstant:74).isActive = true
@@ -100,11 +125,24 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
         add(group); group.isHidden = true
     }
     private func resize() {
-        view.layoutSubtreeIfNeeded()
-        let size = NSSize(width:Self.size.width,height:ceil(stack.fittingSize.height)+40)
+        scrollContent.setFrameSize(NSSize(width: Self.size.width, height: max(scrollContent.frame.height, Self.size.height)))
+        scrollContent.layoutSubtreeIfNeeded()
+        let visible = stack.arrangedSubviews.filter { !$0.isHidden }
+        let rowsHeight = visible.reduce(CGFloat.zero) { $0 + $1.fittingSize.height }
+        let contentHeight = ceil(rowsHeight + CGFloat(max(0, visible.count - 1)) * stack.spacing) + 40
+        scrollContent.setFrameSize(NSSize(width: Self.size.width, height: contentHeight))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        let availableHeight = maximumHeight ?? (NSScreen.main?.visibleFrame.height ?? contentHeight) - 80
+        let size = NSSize(width:Self.size.width,height:min(contentHeight, max(320, availableHeight)))
         view.setFrameSize(size); preferredContentSize = size; onSizeChange?(size)
     }
-    func load() { mode.selectItem(at:UserDefaults.standard.integer(forKey:"targetMode")); resize() }
+    func load() {
+        mode.selectItem(at:UserDefaults.standard.integer(forKey:"targetMode"))
+        permissions.refresh()
+        resize()
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
     func updateModels(_ event:ModelEvent) {
         guard let preferences = event.preferences, let catalog = event.catalog else { return }
         if self.catalog.isEmpty { self.catalog = catalog; populate(decision,role:.decision); populate(writer,role:.text) }

@@ -33,6 +33,10 @@ voice control, status, and timing. It has no web portal or detached task window.
   Using the shortcut while a task runs or a transcript is pending stops that work and starts a new recording. The Dictate button stays available too.
 - **Settings** opens a separate page inside the dropdown. Change the voice
   shortcut, control surface, local models, external endpoints, and idle memory policy.
+  It checks System One Accessibility and the configured CUA Driver's Accessibility
+  and Screen Recording grants. Open the matching macOS privacy page from a missing
+  status, then select Recheck. Handy owns microphone access; Settings links to its
+  macOS page but does not claim to verify Handy's grant.
 - **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit. The decision model can mark a task Complete or Blocked. Tool errors go back to the model with switching options; model-service or storage failures stop execution. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`

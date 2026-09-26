@@ -21,6 +21,7 @@ const sources = [
   "HandyCommands",
   "SessionMenu",
   "SettingsMenu",
+  "Permissions",
   "ModelTypes",
   "LocalModels",
 ].map((name) => path.join(root, "native", "SystemOne", `${name}.swift`));
@@ -62,6 +63,7 @@ await command([
   path.join(root, "src/app/worker.ts"),
   path.join(root, "src/app/settings.ts"),
   path.join(root, "src/app/models/daemon.ts"),
+  path.join(root, "src/app/permission-status.ts"),
 ]);
 await Promise.all(
   ["@playwright/mcp", "playwright", "playwright-core"].map(async (name) =>

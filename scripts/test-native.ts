@@ -30,3 +30,16 @@ await run([
   binary,
 ]);
 await run([binary]);
+const permissionBinary = `${directory}/permissions`;
+await run([
+  "xcrun",
+  "swiftc",
+  "-swift-version",
+  "6",
+  "-O",
+  "native/SystemOne/Permissions.swift",
+  "tests/native/permission-checks.swift",
+  "-o",
+  permissionBinary,
+]);
+await run([permissionBinary]);
