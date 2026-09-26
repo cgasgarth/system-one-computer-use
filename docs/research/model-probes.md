@@ -96,6 +96,20 @@ cannot prove a committed create result from dialog closure alone. Full
 answers are ignored at
 `runs/research/overnight/dialog-final-state-results.json`.
 
+**Task-only final-state split, read-only development probe.** On four exact
+request texts, q4 answered whether a saved, created, or submitted result must
+exist at the end correctly in 4/4 cases: create-save Yes 0.914, edit-save Yes
+0.857, draft-only No 0.989, and fill-then-cancel No 0.975. A paired question
+about leaving entered values visible in an open, unsubmitted editor scored
+1/4: it correctly said Yes for draft-only at 0.772, but also falsely said
+Yes for create-save at 0.784, edit-save at 0.594, and fill-then-cancel at
+0.918. Each request contained only the current task, with no UI or history.
+The earlier generic open-dialog question also falsely said Yes for create
+and cancel. **There is no validated new final-state gate.** The eight exact
+request bodies, responses, and app-managed q4 runtime provenance are ignored
+at `runs/research/overnight/final-state-eight-results.json`; the failed
+pattern ended this wording experiment without further paraphrase controls.
+
 **Precision control.** A 53-request synthetic/read-only batch is frozen at
 `runs/research/overnight/precision-requests.json` (SHA-256
 `d4c42b7cceca85d65cf5e214b71c35c5392e4364fe1df7cf4681b06f7e4bc58f`).
@@ -130,6 +144,25 @@ some permissions and effect classes. Q8 matched BF16 on 52/53 argmax choices
 in this batch, but this does not establish better task success or a reason to
 change the user's selected q4 model. Full local answers are ignored at
 `runs/research/overnight/precision-{q4,q8,bf16}-results.json`.
+
+**Encoder parity control, read-only and offline.** No earlier saved probe
+compared this app's MLX CLM encoder against the upstream encoder on identical
+strings; q4/q8/BF16 all used the same MLX adapter. I compared MLX BF16 with
+Hugging Face Transformers BF16 on seven CLM-rendered strings of 1–86 tokens
+from two saved Notes and Calendar questions. The processes ran one at a time
+from cached `Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218`
+weights, with the same tokenizer IDs and the same
+`Contrastive-LM/CLM-v0.1-8B@87655cb835bd76fd66c2da78e1e3709f7fa11a94`
+projection head. Normalized pooled-vector cosine was 0.999845–0.999994.
+The maximum answer-probability difference was 0.00063 for Notes and 0.00840
+for the three-option Calendar subset; both backends had the same argmax.
+Both ranked Open Calendar over Open Notes in the saved Notes question
+(Notes probability: MLX 0.00560, HF 0.00497). Thus that narrow error is not
+explained by an MLX pooling or candidate-index fault. This is **HF
+Transformers parity, not stock vLLM parity**; seven short strings and a
+three-option subset cannot establish broad adapter equivalence. Full token
+IDs, pooled vectors, logits, scores, and hashes are ignored at
+`runs/research/overnight/clm-parity-{mlx,hf,summary}.json`.
 
 **Kev-4B provider replay.** The tester used Settings to download and load
 the app's pinned `jaredpalmer/kev-4b@139fdd94f1b6a6ad80cc15e08fcb99cac885a101`
