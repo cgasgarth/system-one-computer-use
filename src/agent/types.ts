@@ -36,6 +36,7 @@ interface TaskStep {
   readonly actionMs: number;
   readonly elapsedMs: number;
   readonly observation: string;
+  readonly terminalObservation?: string;
   readonly observationError?: string;
   readonly output?: string;
   readonly error?: string;

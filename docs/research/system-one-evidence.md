@@ -26,6 +26,7 @@ tool choice. No task planner, site workflow, or custom model training is propose
 - [Sources and local findings](./source-findings.md) records primary-source scope, runtime provenance, local failures, and unsupported assumptions.
 - [Harness experiments and evaluation](./experiment-plan.md) lists paired tests for grounding, freshness, effects, stopping, latency, and held-out outcomes.
 - [Model probes and task-effect constraints](./model-probes.md) records the q4/q8/BF16/Kev-4B fixed-input results, wrong-commit analysis, and the bounded gate ablation.
+- [Consult assessment](./consult-assessment.md) ranks small source fixes against speculative designs from two completed consultations.
 
 ## Current status
 

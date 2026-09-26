@@ -7,6 +7,7 @@ import type { ClickInspection } from "../computer/types.ts";
 import { requestJson } from "./request.ts";
 import { verificationRequest } from "./decision-verification.ts";
 import { hasPendingDialogDraft } from "./completion-evidence.ts";
+import { ActionSelectionError } from "./action-selection-error.ts";
 import { verifyCommit } from "./commit-verification.ts";
 import type { ActionCheck } from "./decision-verification.ts";
 import { binaryAnswerSchema, decisionResponseSchema } from "./system-one-schema.ts";
@@ -266,7 +267,10 @@ class SystemOneHttpDecisionModel implements DecisionModel {
   ): Promise<Decision> {
     let remaining = available;
     const rejectedOperations: OperationDecision[] = [];
+    const rejectedChecks: ActionCheck[] = [];
+    let groupCount = 0;
     while (remaining.length > 0) {
+      groupCount += 1;
       // Each retry excludes the rejected operation before asking the model again.
       // eslint-disable-next-line no-await-in-loop
       const { actions, operation } = await this.operationActions(input, remaining);
@@ -285,25 +289,27 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         },
       });
       // eslint-disable-next-line no-await-in-loop
-      const selected = await this.selectAction(input, {
+      const attempt = await this.selectAction(input, {
         actions,
         answer: payload.answers.next_action,
         started,
       });
-      if (selected !== undefined) {
+      if (attempt.decision !== undefined) {
         return {
-          ...selected,
+          ...attempt.decision,
+          checks: [...rejectedChecks, ...attempt.checks],
           candidates: actions,
           rejectedOperations,
           ...(operation === undefined ? {} : { operation }),
         };
       }
+      rejectedChecks.push(...attempt.checks);
       if (operation !== undefined) {
         rejectedOperations.push(operation);
       }
       remaining = remaining.filter((action) => !actions.includes(action));
     }
-    throw new Error("No available action passed the model's checks for the current screen.");
+    throw new ActionSelectionError(rejectedChecks, rejectedOperations, groupCount);
   }
 
   private async operationActions(
@@ -352,7 +358,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       readonly answer: DecisionAnswer;
       readonly started: number;
     },
-  ): Promise<Decision | undefined> {
+  ): Promise<{ readonly decision?: Decision; readonly checks: readonly ActionCheck[] }> {
     const { actions, answer, started } = selection;
     const initial = decision(answer, actions, performance.now() - started);
     const ranked = actions
@@ -370,7 +376,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     )) {
       const request = verificationRequest(action, input, this.modelId);
       if (request === undefined) {
-        return { ...initial, action, checks, latencyMs: performance.now() - started };
+        return { decision: { ...initial, action, latencyMs: performance.now() - started }, checks };
       }
       // Each check depends on the result of the previous candidate check.
       // eslint-disable-next-line no-await-in-loop
@@ -395,11 +401,14 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         });
         checks.push(...commit.checks);
         if (commit.allowed) {
-          return { ...initial, action, checks, latencyMs: performance.now() - started };
+          return {
+            decision: { ...initial, action, latencyMs: performance.now() - started },
+            checks,
+          };
         }
       }
     }
-    return undefined;
+    return { checks };
   }
 
   private async checkCompletion(input: DecisionInput): Promise<BinaryAnswer> {

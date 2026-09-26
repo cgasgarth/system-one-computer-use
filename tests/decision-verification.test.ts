@@ -1,8 +1,97 @@
 import { expect, test } from "bun:test";
 import type { ActionChoices } from "../src/agent/contracts.ts";
+import { ActionSelectionError } from "../src/models/action-selection-error.ts";
 import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
-import { desktopFixture } from "./fixtures.ts";
+import { desktopFixture, windowFixture } from "./fixtures.ts";
+
+function rankedAnswer(choice: string, keys: readonly string[]): Response {
+  return Response.json({
+    answers: {
+      next_action: {
+        choice,
+        probabilities: Object.fromEntries(keys.map((key) => [key, Number(key === choice)])),
+      },
+    },
+  });
+}
+
+async function expectRejectedSelection(choice: Promise<unknown>): Promise<void> {
+  try {
+    await choice;
+  } catch (error) {
+    expect(error).toBeInstanceOf(ActionSelectionError);
+    if (!(error instanceof ActionSelectionError)) {
+      throw new Error("Expected an action selection error", { cause: error });
+    }
+    expect(error.checks.map((check) => check.action.reason)).toEqual([
+      "Type in Search",
+      "Inspect Messages",
+    ]);
+    expect(error.rejectedOperations).toHaveLength(1);
+    const expectedGroups = 2;
+    expect(error.groupCount).toBe(expectedGroups);
+    expect(error.message).toContain("2 checks across 2 groups");
+    expect(error.toJSON().checks).toHaveLength(expectedGroups);
+    expect(JSON.stringify(error)).toContain('"kind":"action_selection"');
+    return;
+  }
+  throw new Error("Expected an action selection error");
+}
+
+test.each([false, true])(
+  "preserves checks from rejected operation groups (exhausted: %p)",
+  async (exhausted) => {
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = decisionRequestSchema.parse(await request.json());
+        const { instructions, criteria } = body.questions.next_action;
+        const keys = Object.keys(criteria);
+        if (instructions.startsWith("Has this user request")) {
+          return rankedAnswer("A1", keys);
+        }
+        if (instructions.startsWith("Does entering text")) {
+          return rankedAnswer("A1", keys);
+        }
+        if (instructions.startsWith("Does the proposed action")) {
+          return rankedAnswer(exhausted ? "A1" : "A0", keys);
+        }
+        return rankedAnswer("A0", keys);
+      },
+    });
+    try {
+      const choice = new SystemOneHttpDecisionModel(server.url.href, "model").choose({
+        task: "Open a window",
+        mode: "desktop",
+        observation: { desktop: desktopFixture(), window: windowFixture() },
+        actions: [
+          {
+            kind: "compose_text",
+            pid: 7,
+            window_id: 9,
+            element_token: "s1:1",
+            reason: "Type in Search",
+          },
+          { kind: "observe_window", pid: 7, window_id: 9, reason: "Inspect Messages" },
+        ],
+      });
+      if (exhausted) {
+        await expectRejectedSelection(choice);
+      } else {
+        const result = await choice;
+        expect(result.action.reason).toBe("Inspect Messages");
+        expect(result.checks?.map((check) => check.action.reason)).toEqual([
+          "Type in Search",
+          "Inspect Messages",
+        ]);
+        expect(result.rejectedOperations).toHaveLength(1);
+      }
+    } finally {
+      await server.stop(true);
+    }
+  },
+);
 
 test("rejects an unrelated window and selects the next ranked tool", async () => {
   const server = Bun.serve({

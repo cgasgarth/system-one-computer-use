@@ -6,6 +6,8 @@ import { taskTextSchema } from "./task-schema.ts";
 import { SessionStore } from "./sessions/store.ts";
 import { sessionContext } from "./sessions/context.ts";
 import { describeAction } from "../agent/contracts.ts";
+import { ActionSelectionError } from "../models/action-selection-error.ts";
+import type { TaskStep } from "../agent/types.ts";
 
 const ARGUMENT_OFFSET = 2;
 const config = loadConfig();
@@ -14,6 +16,7 @@ const sessions = new SessionStore("runs/sessions");
 const task = taskTextSchema.parse(Bun.argv.slice(ARGUMENT_OFFSET).join(" "));
 const { handle, session } = await sessions.begin(task);
 const computers = new Map<ComputerMode, ManagedComputer>();
+const steps: TaskStep[] = [];
 function computer(mode: ComputerMode): ManagedComputer {
   const existing = computers.get(mode);
   if (existing !== undefined) {
@@ -33,6 +36,7 @@ try {
     ...(config.CUA_MODE === "auto" ? {} : { preferredSurface: config.CUA_MODE }),
     ...(session.surface === undefined ? {} : { previousSurface: session.surface }),
     async onStep(step) {
+      steps.push(step);
       await sessions.update(handle, {
         action: describeAction(step.action),
         observation: step.observation,
@@ -49,6 +53,13 @@ try {
   });
   console.log(JSON.stringify(result));
 } catch (error) {
+  if (error instanceof ActionSelectionError) {
+    await Bun.write(
+      `runs/failed-cli-${Date.now()}.json`,
+      JSON.stringify({ status: "error", task, steps, selectionFailure: error.toJSON() }),
+      { createPath: true },
+    );
+  }
   await sessions.update(handle, {
     status: "error",
     message: error instanceof Error ? error.message : "Task failed",

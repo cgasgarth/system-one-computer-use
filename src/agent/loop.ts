@@ -103,7 +103,7 @@ async function runTask(options: TaskOptions): Promise<TaskResult> {
     steps.push(result.step);
     await options.onStep?.(result.step);
     const { kind } = result.step.action;
-    if (kind === "finish" || kind === "blocked") {
+    if ((kind === "finish" && result.step.error === undefined) || kind === "blocked") {
       return finish({
         options,
         surfaces,

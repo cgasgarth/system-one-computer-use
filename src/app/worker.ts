@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { runTask } from "../agent/loop.ts";
+import { ActionSelectionError } from "../models/action-selection-error.ts";
 import { describeAction } from "../agent/contracts.ts";
 import type { TaskStep } from "../agent/types.ts";
 import { createComputer, createModels, installedApplications, loadConfig } from "./config.ts";
@@ -8,6 +9,8 @@ import { taskInputSchema } from "./task-schema.ts";
 import { SessionStore } from "./sessions/store.ts";
 import type { TurnHandle } from "./sessions/store.ts";
 import { sessionContext } from "./sessions/context.ts";
+// The worker records typed model failures in its persisted task artifact.
+// eslint-disable-next-line import/max-dependencies
 import { decisionMetrics } from "./decision-metrics.ts";
 
 const config = loadConfig();
@@ -144,7 +147,11 @@ async function execute(line: string): Promise<void> {
     };
     await Bun.write(
       `runs/failed-${Date.now()}.json`,
-      JSON.stringify({ ...failure, steps: execution.steps }),
+      JSON.stringify({
+        ...failure,
+        steps: execution.steps,
+        ...(error instanceof ActionSelectionError ? { selectionFailure: error.toJSON() } : {}),
+      }),
       { createPath: true },
     );
     console.log(JSON.stringify(failure));
