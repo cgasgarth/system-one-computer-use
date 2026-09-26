@@ -11,7 +11,6 @@ import { stateKey } from "./state-key.ts";
 
 const HISTORY_CHARS = 2000;
 const ERROR_CHARS = 300;
-const RECENT_ACTIONS = 3;
 const REFRESH_WAIT_MS = 250;
 interface TurnContext {
   readonly options: TaskOptions;
@@ -328,12 +327,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   const result =
     finishSurface?.error === undefined
       ? await outcome({
-          options: {
-            ...options,
-            recentResults: history
-              .slice(-RECENT_ACTIONS)
-              .map((step) => step.output ?? step.error ?? step.action.reason),
-          },
+          options,
           surfaces,
           observation,
           action: decision.action,

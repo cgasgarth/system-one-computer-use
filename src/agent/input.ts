@@ -74,7 +74,6 @@ async function enterText({
   const text = await options.text.generate({
     task: options.task,
     context: options.context ?? "",
-    recentResults: options.recentResults ?? [],
     tool: action.reason,
     observation,
     purpose: "text",
@@ -142,7 +141,6 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
   const text = await options.text.generate({
     task: options.task,
     context: options.context ?? "",
-    recentResults: options.recentResults ?? [],
     tool: context.action.reason,
     observation,
     purpose: "url",
@@ -178,7 +176,6 @@ async function openApplication(context: InputContext): Promise<OpenedApplication
   const generated = await options.text.generate({
     task: options.task,
     context: options.context ?? "",
-    recentResults: options.recentResults ?? [],
     tool: context.action.reason,
     observation,
     purpose: "application",

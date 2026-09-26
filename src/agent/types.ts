@@ -67,7 +67,6 @@ interface TaskOptions {
   readonly text: TextModel;
   readonly task: string;
   readonly context?: string;
-  readonly recentResults?: readonly string[];
   readonly preferredSurface?: ComputerMode;
   readonly previousSurface?: Surface;
   readonly signal?: Readonly<Pick<AbortSignal, "aborted" | "throwIfAborted">>;

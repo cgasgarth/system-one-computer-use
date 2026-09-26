@@ -39,9 +39,8 @@ test("navigates once, reports an already reached URL, and offers another decisio
     text: {
       async generate(input) {
         argumentsGenerated += 1;
-        if (argumentsGenerated === SAME_ARGUMENT_ATTEMPTS) {
-          expect(input.recentResults).toContain(`Opened ${DESTINATION}`);
-        }
+        expect(input.task).toBe("Open the destination");
+        expect(input.purpose).toBe("url");
         return DESTINATION;
       },
     },

@@ -38,6 +38,37 @@ test("rejects truncated text before it can become input", () => {
   ).toThrow("Text model response was incomplete");
 });
 
+test("application argument keeps the current request, historical reference, tool, and installed names", async () => {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = textRequestSchema.parse(await request.json());
+      expect(body.messages[1]?.content).toContain("Make a new calendar item");
+      expect(body.messages[1]?.content).toContain("Previous request: Open Calendar");
+      expect(body.messages[1]?.content).toContain("Switch to another installed Mac application");
+      expect(body.messages[1]?.content).toContain("Reminders");
+      expect(body.messages[1]?.content).toContain("Messages");
+      return Response.json({
+        choices: [{ message: { content: "Calendar" }, finish_reason: "stop" }],
+      });
+    },
+  });
+  try {
+    const model = new ChatCompletionTextModel(server.url.href, "writer");
+    const result = await model.generate({
+      task: "Make a new calendar item",
+      context: "Previous request: Open Calendar",
+      observation: { desktop: desktopFixture(), window: windowFixture() },
+      purpose: "application",
+      applications: ["Calendar", "Reminders"],
+      tool: "Switch to another installed Mac application",
+    });
+    expect(result).toBe("Calendar");
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("supplies observed link destinations to the URL argument writer", async () => {
   const destination = "https://example.test/doc/opaque-72";
   const server = Bun.serve({
