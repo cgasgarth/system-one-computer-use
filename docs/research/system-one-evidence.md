@@ -27,6 +27,7 @@ tool choice. No task planner, site workflow, or custom model training is propose
 - [Harness experiments and evaluation](./experiment-plan.md) lists paired tests for grounding, freshness, effects, stopping, latency, and held-out outcomes.
 - [Model probes and task-effect constraints](./model-probes.md) records the q4/q8/BF16/Kev-4B fixed-input results, wrong-commit analysis, and the bounded gate ablation.
 - [Consult assessment](./consult-assessment.md) ranks small source fixes against speculative designs from two completed consultations.
+- [Native menu discovery](./native-menu-capabilities.md) records a read-only AX probe and the limits of CUA's exact menu invocation tool.
 
 ## Current status
 
