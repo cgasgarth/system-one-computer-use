@@ -10,6 +10,7 @@ import { summarizeObservation } from "../app/sessions/context.ts";
 import { stateKey } from "./state-key.ts";
 
 const HISTORY_CHARS = 2000;
+const RECENT_STEPS = 6;
 const ERROR_CHARS = 300;
 const REFRESH_WAIT_MS = 250;
 interface TurnContext {
@@ -259,7 +260,11 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     }),
     observation,
   );
-  const context = `${turnFeedback(lastError)}\n${input.progress.context(observation)}`;
+  const recentSteps = history
+    .slice(-RECENT_STEPS)
+    .map((step) => `${describeAction(step.action)} -> ${step.error ?? step.output ?? "No result"}`)
+    .join("\n");
+  const context = `${turnFeedback(lastError)}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
   const executed = completionEvidence(history, observation);
   const priorCommit = history.findLast((step) => step.completionCommit !== undefined);
   const chosenComputer = surfaces.mode === undefined ? undefined : options.computer(surfaces.mode);
@@ -328,6 +333,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     ...result,
   };
   input.progress.record(step.unchanged, step.satisfiedInput);
+  input.progress.advanced(step.action, step.performedAction === true);
   if (observationError === undefined) {
     input.progress.attempted(step.action, observation);
   }
@@ -335,6 +341,14 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     decision.action.kind === "finish" ||
     decision.action.kind === "blocked" ||
     decision.action.kind === "refresh";
-  return { step, observation, lastError: step.error ?? (terminal ? lastError : "") };
+  const taskAction =
+    step.performedAction === true &&
+    step.action.kind !== "select_surface" &&
+    step.action.kind !== "request_app";
+  return {
+    step,
+    observation,
+    lastError: step.error ?? (terminal || !taskAction ? lastError : ""),
+  };
 }
 export { performTurn };

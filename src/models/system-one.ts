@@ -353,14 +353,18 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     ) {
       return { actions };
     }
-    const descriptions = groups.map((group) => group.description);
+    const descriptions = groups.map((group) =>
+      group.kind === "observe_window" || group.kind === "select_surface"
+        ? `${group.description} Available targets: ${group.actions.map((action) => actionDescription(action, input.observation)).join(" | ")}`
+        : group.description,
+    );
     const response = await this.request({
       model: this.modelId,
       state: decisionState(input),
       questions: {
         next_action: {
           type: "choice",
-          instructions: "Which operation is needed next to fulfill the user request?",
+          instructions: `Which operation and available target best advance the current request: ${input.task}? Use the recent action results; do not repeat ineffective window switching.`,
           criteria: criteriaFor(descriptions),
         },
       },
@@ -373,7 +377,17 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     if (group === undefined) {
       throw new Error("System One selected an unavailable operation");
     }
-    return { actions: group.actions, operation: { options: descriptions, answer } };
+    const alternatives = actions.filter(
+      (action) =>
+        action.kind === "select_surface" ||
+        action.kind === "request_url" ||
+        action.kind === "request_app" ||
+        action.kind === "blocked",
+    );
+    return {
+      actions: [...new Set([...group.actions, ...alternatives])],
+      operation: { options: descriptions, answer },
+    };
   }
 
   // Candidate checks include a separate persistent-effect gate before execution.
@@ -415,7 +429,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       checks.push({ action, answer: check });
       if (
         check.choice === "A0" &&
-        (action.kind !== "click_element" ||
+        ((action.kind !== "click_element" && action.kind !== "observe_window") ||
           (check.probabilities["A0"] ?? 0) >= ACTION_MATCH_THRESHOLD)
       ) {
         // The ordinary action match does not establish that a persistent click is authorized.

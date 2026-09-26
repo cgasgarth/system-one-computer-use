@@ -1,5 +1,5 @@
 import type { Action, ActionChoices, Observation } from "./contracts.ts";
-import { actionKey, stateKey, textFieldKey } from "./state-key.ts";
+import { actionKey, progressStateKey, textFieldKey } from "./state-key.ts";
 
 const UNCHANGED_ATTEMPTS = 2;
 const REMEMBERED_STATES = 128;
@@ -14,6 +14,7 @@ class Progress {
   private readonly urls = new Set<string>();
   private readonly applications = new Set<string>();
   private readonly visits = new Map<string, Map<string, number>>();
+  private readonly inspections = new Map<string, number>();
   private state: string | undefined;
   private failure: { readonly message: string; readonly count: number } | undefined;
 
@@ -26,7 +27,7 @@ class Progress {
 
   public observe(observation: Observation): void {
     this.failure = undefined;
-    const current = stateKey(observation);
+    const current = progressStateKey(observation);
     if (this.state !== current) {
       this.urls.clear();
       this.applications.clear();
@@ -39,7 +40,10 @@ class Progress {
     if (key === undefined) {
       return;
     }
-    const state = stateKey(observation);
+    if (action.kind === "observe_window" || action.kind === "select_surface") {
+      this.inspections.set(key, (this.inspections.get(key) ?? 0) + 1);
+    }
+    const state = progressStateKey(observation);
     const attempts = this.visits.get(state) ?? new Map<string, number>();
     attempts.set(key, (attempts.get(key) ?? 0) + 1);
     this.visits.delete(state);
@@ -49,6 +53,20 @@ class Progress {
       if (oldest !== undefined) {
         this.visits.delete(oldest);
       }
+    }
+  }
+
+  public advanced(action: Action, performed: boolean): void {
+    if (
+      performed &&
+      (action.kind === "click_element" ||
+        action.kind === "compose_text" ||
+        action.kind === "type_text" ||
+        action.kind === "navigate" ||
+        action.kind === "request_url" ||
+        action.kind === "press_key")
+    ) {
+      this.inspections.clear();
     }
   }
 
@@ -75,9 +93,12 @@ class Progress {
       return true;
     }
     const key = actionKey(action, observation);
+    if (key !== undefined && (this.inspections.get(key) ?? 0) >= UNCHANGED_ATTEMPTS) {
+      return true;
+    }
     if (
       key !== undefined &&
-      (this.visits.get(stateKey(observation))?.get(key) ?? 0) >=
+      (this.visits.get(progressStateKey(observation))?.get(key) ?? 0) >=
         (action.kind === "refresh" ? UNCHANGED_REFRESHES : UNCHANGED_ATTEMPTS)
     ) {
       return true;
@@ -121,13 +142,18 @@ class Progress {
   public context(observation: Observation): string {
     const { window } = observation;
     const completed: string[] = [];
+    if ([...this.inspections.values()].some((count) => count >= UNCHANGED_ATTEMPTS)) {
+      completed.push(
+        "Repeated window or tool-set switches have not performed a task action. Those repeated destinations are unavailable until a task action succeeds. Use the current controls or another untried tool; switching windows alone does not advance the request.",
+      );
+    }
     if ((this.failure?.count ?? 0) >= UNCHANGED_ATTEMPTS) {
       completed.push(
         "Repeated observation attempts returned the same error. Refreshing is unavailable until an observation succeeds. Change tool sets or mark the task blocked.",
       );
     }
     if (
-      [...(this.visits.get(stateKey(observation))?.values() ?? [])].some(
+      [...(this.visits.get(progressStateKey(observation))?.values() ?? [])].some(
         (count) => count >= UNCHANGED_ATTEMPTS,
       )
     ) {

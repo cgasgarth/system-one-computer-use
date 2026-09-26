@@ -25,7 +25,7 @@ function textFieldKey(observation: Observation, token: string): string | undefin
   return JSON.stringify([windowScopeKey(window), field.role, name, ordinal, field.value]);
 }
 
-function stateKey(observation: Observation): string {
+function fingerprint(observation: Observation, includeTransient: boolean): string {
   const { window } = observation;
   return Bun.hash(
     JSON.stringify(
@@ -52,13 +52,20 @@ function stateKey(observation: Observation): string {
               href: element.href,
               value: element.value,
               selected: element.selected,
-              focused: element.focused,
               enabled: element.enabled,
-              frame: element.frame,
+              ...(includeTransient ? { focused: element.focused, frame: element.frame } : {}),
             })),
           },
     ),
   ).toString();
+}
+
+function stateKey(observation: Observation): string {
+  return fingerprint(observation, true);
+}
+
+function progressStateKey(observation: Observation): string {
+  return fingerprint(observation, false);
 }
 
 function actionKey(action: Action, observation: Observation): string | undefined {
@@ -104,4 +111,4 @@ function actionKey(action: Action, observation: Observation): string | undefined
     action.kind === "type_text" ? action.text : undefined,
   ]);
 }
-export { stateKey, actionKey, textFieldKey, windowScopeKey };
+export { stateKey, progressStateKey, actionKey, textFieldKey, windowScopeKey };

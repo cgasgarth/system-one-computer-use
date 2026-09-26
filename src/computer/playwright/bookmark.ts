@@ -21,19 +21,24 @@ async function restoreBrowser(
   );
   const matches = tabs.filter((tab) => tab.url === saved.url);
   const [tab] = matches;
-  if (matches.length !== 1 || tab === undefined) {
-    throw new Error(
-      "The saved Chrome tab is unavailable or ambiguous. Select a new session, or keep one tab open at the saved URL.",
-    );
+  if (matches.length === 1 && tab !== undefined) {
+    await connection.call({
+      name: "browser_tabs",
+      arguments: { action: "select", index: tab.index },
+    });
+    const current = await browserBookmark(connection);
+    if (current.url === saved.url) {
+      return;
+    }
   }
   await connection.call({
     name: "browser_tabs",
-    arguments: { action: "select", index: tab.index },
+    arguments: { action: "new", url: "about:blank" },
   });
   const current = await browserBookmark(connection);
-  if (current.url !== saved.url) {
+  if (current.url !== "about:blank") {
     throw new Error(
-      "Chrome selected a different tab. Observe the browser again before interacting.",
+      "Chrome did not select the new blank tab. Observe the browser again before interacting.",
     );
   }
 }

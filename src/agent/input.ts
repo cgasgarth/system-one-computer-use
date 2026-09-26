@@ -8,6 +8,10 @@ import type { ActionResult, TaskOptions } from "./types.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { Computer } from "../computer/types.ts";
 
+const webUrlSchema = z.url({ protocol: /^https?$/u });
+const bareDomainSchema = z.hostname().refine((name) => name.includes("."));
+const CORRECTION_CHARS = 200;
+
 interface InputContext {
   readonly action: Action;
   readonly observation: Observation;
@@ -133,18 +137,29 @@ async function enterText({
     ...(verified.key === undefined ? {} : { satisfiedInput: verified.key }),
   };
 }
-async function openUrl(context: InputContext): Promise<ActionResult> {
-  const { options, computer, observation } = context;
-  if (computer.navigate === undefined) {
-    throw new Error("Website navigation requires Chrome tools");
+function normalizedWebUrl(text: string): string | undefined {
+  const value = text.trim();
+  const complete = webUrlSchema.safeParse(value);
+  if (complete.success) {
+    return complete.data;
   }
-  const text = await options.text
+  const domain = bareDomainSchema.safeParse(value);
+  if (!domain.success) {
+    return undefined;
+  }
+  const normalized = webUrlSchema.safeParse(`https://${domain.data}`);
+  return normalized.success ? normalized.data : undefined;
+}
+async function generateWebAddress(context: InputContext, correction?: string): Promise<string> {
+  const { options, observation } = context;
+  return options.text
     .generate({
       task: options.task,
       context: options.context ?? "",
       tool: context.action.reason,
       observation,
       purpose: "url",
+      ...(correction === undefined ? {} : { correction }),
     })
     .catch((error: unknown) => {
       throw new Error(
@@ -152,20 +167,36 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
         { cause: error },
       );
     });
+}
+async function openUrl(context: InputContext): Promise<ActionResult> {
+  const { options, computer, observation } = context;
+  if (computer.navigate === undefined) {
+    throw new Error("Website navigation requires Chrome tools");
+  }
+  const text = await generateWebAddress(context);
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
     throw new Error(
       "The text helper found no URL for the current request. Choose another tool or request the missing information.",
     );
   }
-  const parsed = z.url({ protocol: /^https?$/u }).safeParse(text.trim());
-  if (!parsed.success) {
+  let url = normalizedWebUrl(text);
+  if (url === undefined) {
+    const correction = `Your previous output ${JSON.stringify(text.slice(0, CORRECTION_CHARS))} was not a complete HTTP or HTTPS URL or a bare domain. Correct only this URL argument for the current request. Return one address with no quotes or explanation; return an empty string if unknown.`;
+    const corrected = await generateWebAddress(context, correction);
+    options.signal?.throwIfAborted();
+    if (corrected.trim().length === 0) {
+      throw new Error(
+        "The text helper could not identify a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
+      );
+    }
+    url = normalizedWebUrl(corrected);
+  }
+  if (url === undefined) {
     throw new Error(
       "The text helper did not return a valid web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
-      { cause: parsed.error },
     );
   }
-  const url = parsed.data;
   const current = await computer.window(
     observation.window?.pid ?? 0,
     observation.window?.window_id ?? 0,
