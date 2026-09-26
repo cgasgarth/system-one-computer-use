@@ -3,6 +3,16 @@ import AppKit
 @main
 @MainActor
 struct PermissionTests {
+    static func labels(in view: NSView) -> [String] {
+        let current = (view as? NSTextField).map { [$0.stringValue] } ?? []
+        return current + view.subviews.flatMap { labels(in: $0) }
+    }
+
+    static func buttons(in view: NSView) -> [NSButton] {
+        let current = (view as? NSButton).map { [$0] } ?? []
+        return current + view.subviews.flatMap { buttons(in: $0) }
+    }
+
     static func main() {
         let granted = PermissionSnapshot(appAccessibility: true, helperAccessibility: true, driverAccessibility: true, driverScreenRecording: true)
         precondition(granted.systemOneAccessibility == .granted)
@@ -24,17 +34,17 @@ struct PermissionTests {
         app.setActivationPolicy(.accessory)
         let section = PermissionSection()
         section.update(missing)
-        let labels = section.arrangedSubviews.flatMap { ($0 as? NSStackView)?.arrangedSubviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? [] }
-        precondition(labels.contains("Needs access"))
-        precondition(labels.contains("Unable to check"))
-        precondition(labels.contains("Check in macOS"))
+        let shown = labels(in: section)
+        precondition(shown.contains("Needs access"))
+        precondition(shown.contains("Unable to check"))
+        precondition(shown.contains("Check in macOS"))
         section.update(granted)
-        let buttons = section.arrangedSubviews.dropFirst().compactMap { $0 as? NSStackView }.flatMap { $0.arrangedSubviews.compactMap { $0 as? NSButton } }
-        precondition(buttons.filter { !$0.isHidden }.count == 1, "Only Handy should retain an Open button when grants are confirmed")
+        let links = buttons(in: section).filter { $0.title == "Open Settings" }
+        precondition(links.filter { !$0.isHidden }.count == 1, "Only Handy should retain an Open button when grants are confirmed")
         section.refresh(using: { Thread.sleep(forTimeInterval: 0.2); return granted })
         section.refresh(using: { missing })
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let latest = section.arrangedSubviews.flatMap { ($0 as? NSStackView)?.arrangedSubviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? [] }
+        let latest = labels(in: section)
         precondition(latest.contains("Needs access") && !latest.contains("Granted"), "An older permission result replaced the latest check")
         for pane in PermissionPane.allCases { precondition(pane.url.scheme == "x-apple.systempreferences") }
         print("Permissions: owner attribution, missing/unknown states, and compact UI passed.")

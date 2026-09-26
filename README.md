@@ -31,8 +31,9 @@ voice control, status, and timing. It has no web portal or detached task window.
 - **Command–Option–C** starts Handy dictation and follows Handy's Hold, Auto, or Toggle setting. Handy
   pastes its transcript into the task field, which starts the task.
   Using the shortcut while a task runs or a transcript is pending stops that work and starts a new recording. The Dictate button stays available too.
-- **Settings** opens a separate page inside the dropdown. Change the voice
-  shortcut, control surface, local models, external endpoints, and idle memory policy.
+- **Settings** stays inside the dropdown, with General, Models, and Permissions
+  tabs. General holds the voice shortcut, control surface, and idle memory policy;
+  Models holds local models and external endpoints.
   It checks System One Accessibility and the configured CUA Driver's Accessibility
   and Screen Recording grants. Open the matching macOS privacy page from a missing
   status, then select Recheck. Handy owns microphone access; Settings links to its

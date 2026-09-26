@@ -121,11 +121,11 @@ enum PermissionProbe {
 @MainActor
 final class PermissionSection: NSStackView {
     private let recheck = NSButton(title: "Recheck", target: nil, action: nil)
-    private let appRow = PermissionRow(title: "System One · Accessibility", pane: .accessibility)
+    private let appRow = PermissionRow(owner: "System One", capability: "Accessibility", pane: .accessibility)
     private let appHint = NSTextField(wrappingLabelWithString: "If already enabled, remove System One and add it again.")
-    private let driverAXRow = PermissionRow(title: "CUA Driver · Accessibility", pane: .accessibility)
-    private let driverScreenRow = PermissionRow(title: "CUA Driver · Screen Recording", pane: .screenRecording)
-    private let handyRow = PermissionRow(title: "Handy · Microphone", pane: .microphone)
+    private let driverAXRow = PermissionRow(owner: "CUA Driver", capability: "Accessibility", pane: .accessibility)
+    private let driverScreenRow = PermissionRow(owner: "CUA Driver", capability: "Screen Recording", pane: .screenRecording)
+    private let handyRow = PermissionRow(owner: "Handy", capability: "Microphone", pane: .microphone)
     private var generation = 0
     var onLayoutChange: (() -> Void)?
 
@@ -133,33 +133,44 @@ final class PermissionSection: NSStackView {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .leading
-        spacing = 3
-        let heading = NSTextField(labelWithString: "Permissions")
+        spacing = 6
+        let heading = NSTextField(labelWithString: "App access")
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
-        recheck.bezelStyle = .inline
+        recheck.isBordered = false
+        recheck.font = .systemFont(ofSize: 12)
+        recheck.contentTintColor = .linkColor
         recheck.target = self
         recheck.action = #selector(recheckPressed)
         let header = NSStackView(views: [heading, NSView(), recheck])
         header.orientation = .horizontal
         header.alignment = .centerY
         addArrangedSubview(header)
-        addArrangedSubview(appRow)
+        append(appRow)
         appHint.font = .systemFont(ofSize: 11)
         appHint.textColor = .secondaryLabelColor
         addArrangedSubview(appHint)
-        for row in [driverAXRow, driverScreenRow, handyRow] { addArrangedSubview(row) }
+        for row in [driverAXRow, driverScreenRow, handyRow] { append(row) }
         for view in arrangedSubviews { view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
         update(PermissionSnapshot(appAccessibility: nil, helperAccessibility: nil, driverAccessibility: nil, driverScreenRecording: nil))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
+    private func append(_ row: PermissionRow) {
+        let separator = NSBox()
+        separator.boxType = .separator
+        addArrangedSubview(separator)
+        addArrangedSubview(row)
+    }
+
     @objc private func recheckPressed() { refresh() }
 
     func refresh(using probe: @escaping @Sendable () -> PermissionSnapshot = PermissionProbe.read) {
         generation += 1
         let current = generation
+        appHint.isHidden = true
         for row in [appRow, driverAXRow, driverScreenRow] { row.update(.unknown, title: "Checking…") }
+        onLayoutChange?()
         Task.detached(priority: .utility) { [weak self] in
             let snapshot = probe()
             await MainActor.run {
@@ -182,34 +193,46 @@ final class PermissionSection: NSStackView {
 @MainActor
 private final class PermissionRow: NSStackView {
     let status = NSTextField(labelWithString: "Unable to check")
-    private let button = NSButton(title: "Open", target: nil, action: nil)
+    private let button = NSButton(title: "Open Settings", target: nil, action: nil)
     private let pane: PermissionPane
 
-    init(title: String, pane: PermissionPane) {
+    init(owner: String, capability: String, pane: PermissionPane) {
         self.pane = pane
         super.init(frame: .zero)
         orientation = .horizontal
-        alignment = .centerY
-        spacing = 5
-        let name = NSTextField(labelWithString: title)
-        name.font = .systemFont(ofSize: 11)
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        alignment = .top
+        spacing = 12
+        let name = NSTextField(labelWithString: owner)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        let detail = NSTextField(labelWithString: capability)
+        detail.font = .systemFont(ofSize: 11)
+        detail.textColor = .secondaryLabelColor
+        let left = NSStackView(views: [name, detail])
+        left.orientation = .vertical
+        left.alignment = .leading
+        left.spacing = 3
         status.font = .systemFont(ofSize: 11)
-        button.bezelStyle = .inline
+        status.alignment = .right
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 11)
+        button.contentTintColor = .linkColor
         button.target = self
         button.action = #selector(openPane)
-        button.setAccessibilityLabel("Open \(title) settings")
-        addArrangedSubview(name)
+        button.setAccessibilityLabel("Open \(owner) \(capability) settings")
+        let right = NSStackView(views: [status, button])
+        right.orientation = .vertical
+        right.alignment = .trailing
+        right.spacing = 3
+        addArrangedSubview(left)
         addArrangedSubview(NSView())
-        addArrangedSubview(status)
-        addArrangedSubview(button)
+        addArrangedSubview(right)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
     func update(_ state: PermissionState, title: String? = nil) {
         status.stringValue = title ?? state.title
-        status.textColor = state == .granted ? .systemGreen : state == .missing ? .systemOrange : .secondaryLabelColor
+        status.textColor = state == .missing ? .systemOrange : .secondaryLabelColor
         button.isHidden = state == .granted
     }
 
