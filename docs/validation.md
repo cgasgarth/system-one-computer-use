@@ -199,3 +199,18 @@ local form cases, Cancel saved nothing and passed; Create/Save and an unsaved
 draft did not meet their requested final states. Their persistent write counts
 were zero. These are small development checks on local pages, not a task success
 rate. Private traces and exact request bodies remain under ignored `runs/qa/`.
+
+### Installed app check after the grant refresh
+
+The updated bundle was installed from `38d2ee2`. After the user approved the
+macOS authentication prompt, its stale Accessibility entry was removed and the
+same app was added again. The installed request **Open Calendar on this Mac**
+completed in two decisions: open the application, then Finish. CUA separately
+confirmed a visible Calendar window. No event was created or edited.
+
+The current user draft, model preferences, Auto/Automatic selections, and session
+files were restored from fresh backups. The app was restarted into an idle Ready
+state so the restored draft did not show the test's completion status. This
+confirms installed native access and app launch; Calendar event creation and the
+failed form workflows above remain unresolved. Native menu discovery is still a
+documented prototype, not a production action.
