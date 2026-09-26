@@ -29,6 +29,11 @@ const LONG_LIST_HALF_CHARS = LONG_LIST_SUMMARY_CHARS / LONG_LIST_HALVES;
 const MAX_FIELD_CHARS = 100;
 const MAX_STATE_CHARS = 6000;
 const MIN_STATE_CHARS = 1200;
+const COMMIT_CONTROLS_CHARS = 2200;
+const COMMIT_PRIOR_CHARS = 900;
+const COMMIT_CONTEXT_CHARS = 400;
+const COMMIT_EVIDENCE_CHARS = 500;
+const COMMIT_LOCATION_CHARS = 300;
 const PROBABILITY_TOLERANCE = 0.02;
 const COMPLETION_CLASSES = 2;
 const COMPLETION_THRESHOLD = 0.6;
@@ -63,6 +68,11 @@ interface DecisionInput {
   readonly context?: string;
   readonly feedback?: string;
   readonly completionEvidence?: string;
+  readonly priorCompletionCommit?: {
+    readonly answer: BinaryAnswer;
+    readonly observedState: string;
+    readonly stepIndex: number;
+  };
   readonly inspectClick?: (
     action: Extract<Action, { kind: "click_element" }>,
   ) => Promise<ClickInspection>;
@@ -160,6 +170,12 @@ function criteriaFor(descriptions: readonly string[]): ActionCriteria {
   return criteria;
 }
 
+function excerpt(value: string, limit: number): string {
+  return value.length <= limit
+    ? value
+    : `${value.slice(0, limit)} [${value.length - limit} characters omitted from this excerpt]`;
+}
+
 function validProbabilities(probabilities: ActionProbabilities, count: number): boolean {
   const keys = Object.keys(probabilities);
   const sum = Object.values(probabilities).reduce((total, value) => total + value, 0);
@@ -221,8 +237,15 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       complete && (input.context?.length ?? 0) > 0
         ? await this.checkCompletionTarget(input)
         : undefined;
+    const priorCommit = input.priorCompletionCommit?.answer;
+    const unresolvedCommit =
+      priorCommit !== undefined &&
+      (priorCommit.choice === "A0" ||
+        (priorCommit.probabilities["A1"] ?? 0) < ACTION_MATCH_THRESHOLD);
     const completionCommit =
-      complete && pendingDraft ? await this.checkCompletionCommit(input) : undefined;
+      complete && (pendingDraft || unresolvedCommit)
+        ? await this.checkCompletionCommit(input)
+        : undefined;
     if (completion !== undefined && finishEligible(complete, completionTarget, completionCommit)) {
       const action = input.actions.find((candidate) => candidate.kind === "finish");
       if (action === undefined) {
@@ -497,26 +520,34 @@ class SystemOneHttpDecisionModel implements DecisionModel {
   }
 
   private async checkCompletionCommit(input: DecisionInput): Promise<BinaryAnswer> {
-    const controls =
-      input.observation.window?.elements.map((element) => describeControl(element)).join(" | ") ??
-      "";
+    const { window } = input.observation;
+    const controls = window?.elements.map((element) => describeControl(element)).join(" | ") ?? "";
+    const prior = input.priorCompletionCommit;
     const response = await this.request({
       model: this.modelId,
       state: [
         `User request: ${input.task}`,
-        `Current open dialog: ${controls.slice(0, MAX_STATE_CHARS)}`,
-        `Prior task context: ${input.context ?? ""}`,
-        `Executed actions in this request: ${input.completionEvidence ?? ""}`,
-        "Text shown in an open dialog can be an unsubmitted draft. Do not infer a saved result from field contents alone.",
+        `Current window: ${window === undefined ? "None" : excerpt(window.app_name, COMMIT_LOCATION_CHARS)}: ${window === undefined ? "None" : excerpt(window.window_title, COMMIT_LOCATION_CHARS)}`,
+        ...(window?.url === undefined
+          ? []
+          : [`Current URL: ${excerpt(window.url, COMMIT_LOCATION_CHARS)}`]),
+        `Current observed controls and values: ${excerpt(controls, COMMIT_CONTROLS_CHARS)}`,
+        `Prior task context: ${excerpt(input.context ?? "", COMMIT_CONTEXT_CHARS)}`,
+        `Executed actions in this request: ${excerpt(input.completionEvidence ?? "", COMMIT_EVIDENCE_CHARS)}`,
+        ...(prior === undefined
+          ? []
+          : [
+              `Earlier assessment in this request at step ${prior.stepIndex}: ${prior.answer.choice} with probabilities ${JSON.stringify(prior.answer.probabilities)}. Earlier observed state: ${excerpt(prior.observedState, COMMIT_PRIOR_CHARS)}. Re-evaluate against the current observation; this assessment is not proof of a saved result.`,
+            ]),
+        "Field contents and a successful click do not alone prove a saved result. An omitted control in an excerpt is not proof that the control is absent.",
       ].join("\n"),
       questions: {
         next_action: {
           type: "choice",
-          instructions:
-            "Does the user's requested final result require a committed change beyond the values currently shown in this open dialog?",
+          instructions: "Is a requested persistent result still unobserved?",
           criteria: {
             A0: "Yes. The user requested a created, saved, or submitted result that is not yet observed.",
-            A1: "No. The user requested this dialog or an unsubmitted draft as the final state.",
+            A1: "No. The requested result is observed, or the request asks only for a view or unsubmitted draft.",
           },
         },
       },

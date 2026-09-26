@@ -123,6 +123,38 @@ test("returns a tool failure to the model so it can change surfaces", async () =
   expect(switched).toBe(true);
   expect(result.status).toBe("blocked");
 });
+test("passes the latest completion assessment only within the current request", async () => {
+  const expectedDecisions = 2;
+  const { computer } = computerFixture();
+  let decisions = 0;
+  const result = await runTask({
+    task: "Create a project",
+    preferredSurface: "desktop",
+    applications: [],
+    computer: () => computer,
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        decisions += 1;
+        if (decisions === 1) {
+          expect(input.priorCompletionCommit).toBeUndefined();
+          return {
+            ...pick(input, "observe_window"),
+            completionCommit: { choice: "A0", probabilities: { A0: 0.54, A1: 0.46 } },
+          };
+        }
+        expect(input.priorCompletionCommit).toMatchObject({
+          answer: { choice: "A0", probabilities: { A0: 0.54, A1: 0.46 } },
+          stepIndex: 1,
+        });
+        expect(input.priorCompletionCommit?.observedState).toContain("Messages");
+        return pick(input, "blocked");
+      },
+    },
+  });
+  expect(result.status).toBe("blocked");
+  expect(decisions).toBe(expectedDecisions);
+});
 test("validates element targets against the fresh snapshot", () => {
   const action: Action = {
     kind: "compose_text",

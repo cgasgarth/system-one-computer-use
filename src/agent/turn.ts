@@ -299,6 +299,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   );
   const context = `${turnFeedback(lastError)}\n${input.progress.context(observation)}`;
   const executed = completionEvidence(history, observation);
+  const priorCommit = history.findLast((step) => step.completionCommit !== undefined);
   const chosenComputer = surfaces.mode === undefined ? undefined : options.computer(surfaces.mode);
   const inspectClick = chosenComputer?.inspectClick.bind(chosenComputer);
   const decision = await options.decision.choose({
@@ -308,6 +309,15 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     context: options.context?.slice(0, HISTORY_CHARS) ?? "",
     feedback: context,
     ...(executed === undefined ? {} : { completionEvidence: executed }),
+    ...(priorCommit?.completionCommit === undefined
+      ? {}
+      : {
+          priorCompletionCommit: {
+            answer: priorCommit.completionCommit,
+            observedState: priorCommit.observation,
+            stepIndex: priorCommit.index,
+          },
+        }),
     ...(inspectClick === undefined ? {} : { inspectClick }),
     mode: surfaces.mode,
   });
