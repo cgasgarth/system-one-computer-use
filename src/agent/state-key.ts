@@ -1,4 +1,18 @@
 import type { Action, Observation } from "./contracts.ts";
+import { textTargetName } from "./controls.ts";
+
+function textFieldKey(observation: Observation, token: string): string | undefined {
+  const { window } = observation;
+  const field = window?.elements.find((element) => element.element_token === token);
+  if (window === undefined || field === undefined) {
+    return undefined;
+  }
+  const name = textTargetName(field);
+  const ordinal = window.elements
+    .filter((element) => element.role === field.role && textTargetName(element) === name)
+    .findIndex((element) => element.element_token === token);
+  return JSON.stringify([window.pid, window.window_id, field.role, name, ordinal, field.value]);
+}
 
 function stateKey(observation: Observation): string {
   const { window } = observation;
@@ -37,7 +51,10 @@ function stateKey(observation: Observation): string {
 }
 
 function actionKey(action: Action, observation: Observation): string | undefined {
-  if (action.kind === "request_window" || action.kind === "refresh") {
+  if (action.kind === "select_surface") {
+    return JSON.stringify([action.kind, action.surface]);
+  }
+  if (action.kind === "refresh" || action.kind === "request_app" || action.kind === "request_url") {
     return action.kind;
   }
   if (action.kind === "observe_window") {
@@ -71,6 +88,7 @@ function actionKey(action: Action, observation: Observation): string | undefined
     .findIndex((element) => element.element_token === target.element_token);
   return JSON.stringify([
     action.kind,
+    action.kind === "click_element" ? (action.operation ?? "press") : undefined,
     target.role,
     target.label,
     target.href,
@@ -78,4 +96,4 @@ function actionKey(action: Action, observation: Observation): string | undefined
     action.kind === "type_text" ? action.text : undefined,
   ]);
 }
-export { stateKey, actionKey };
+export { stateKey, actionKey, textFieldKey };

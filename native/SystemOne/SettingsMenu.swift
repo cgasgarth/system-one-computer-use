@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 final class SettingsMenu: NSViewController, NSTextFieldDelegate {
-    static let size = NSSize(width: 400, height: 510)
+    static let size = NSSize(width: 360, height: 510)
     let back = NSButton(title: "Back", target: nil, action: nil)
     let quit = NSButton(title: "Quit System One", target: nil, action: nil)
     let shortcut = NSButton(title: "Record shortcut", target: nil, action: nil)
@@ -28,14 +28,14 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
 
     override func loadView() {
         view = MenuSurface(frame:NSRect(origin:.zero,size:Self.size)); view.wantsLayer = true
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.detachesHiddenViews = true; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:view.leadingAnchor,constant:20),stack.trailingAnchor.constraint(equalTo:view.trailingAnchor,constant:-20),stack.topAnchor.constraint(equalTo:view.topAnchor,constant:20)])
         back.bezelStyle = .inline
         add(row([back,label("Settings",weight:.semibold),spacer()]))
         shortcut.bezelStyle = .rounded
-        shortcut.widthAnchor.constraint(equalToConstant:170).isActive = true
+        shortcut.widthAnchor.constraint(equalToConstant:112).isActive = true
         add(row([label("Voice shortcut"),spacer(),shortcut]))
         mode.addItems(withTitles:["Auto","Chrome","Desktop"])
         mode.setAccessibilityLabel("Control surface")

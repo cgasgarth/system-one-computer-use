@@ -21,7 +21,7 @@ function commands(
   model: Preset,
   port: number,
   paths: RuntimePaths,
-): { download: string[]; serve: string[]; environment: NodeJS.ProcessEnv } {
+): { download: string[]; serve: string[]; readyMessage: string; environment: NodeJS.ProcessEnv } {
   const projectName = model.family === "kev" ? "kev-mlx" : "clm-mlx";
   const project = path.join(paths.integrations, projectName);
   const prefix = [paths.uv, "run", "--project", project, "--frozen", "python"];
@@ -36,6 +36,7 @@ function commands(
   if (model.family === "kev") {
     return {
       environment,
+      readyMessage: `Uvicorn running on http://127.0.0.1:${port}`,
       download: [...prefix, path.join(project, "download.py"), "--run", checkpoint(model)],
       serve: [...prefix, "-m", "kev.serve", "--run", checkpoint(model), "--port", String(port)],
     };
@@ -43,6 +44,7 @@ function commands(
   if (model.family === "clm") {
     return {
       environment,
+      readyMessage: `Uvicorn running on http://127.0.0.1:${port}`,
       download: [...prefix, "-m", "clm_mlx.download"],
       serve: [
         ...prefix,
@@ -57,6 +59,7 @@ function commands(
   }
   return {
     environment,
+    readyMessage: `Starting httpd at 127.0.0.1 on port ${port}...`,
     download: [
       ...prefix,
       "-m",

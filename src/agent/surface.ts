@@ -9,11 +9,11 @@ interface Target {
 }
 class SurfaceSession {
   public mode: "browser" | "desktop" | undefined;
+  public needsApplication = false;
   public target: Target | undefined = undefined;
-  public choosingWindow = false;
   private application: Desktop["apps"][number] | undefined;
   private desktopTarget: Target | undefined;
-  private readonly restored = new Set<string>();
+  private readonly restoreAttempts = new Set<string>();
   private documentWindow: { readonly applicationPid: number; readonly target: Target } | undefined;
   public rememberDocumentWindow(applicationPid: number, window: Desktop["windows"][number]): void {
     this.documentWindow = {
@@ -33,20 +33,13 @@ class SurfaceSession {
   }
   public setTarget(target: Target | undefined): void {
     this.target = target;
-    if (target !== undefined) {
-      this.choosingWindow = false;
-    }
     if (this.mode === "desktop") {
       this.desktopTarget = target;
     }
   }
-  public chooseWindow(): void {
-    this.target = undefined;
-    this.choosingWindow = true;
-  }
   public selectApplication(application: Desktop["apps"][number] | undefined): void {
     this.application = application;
-    this.choosingWindow = false;
+    this.needsApplication = false;
   }
   public async observe(
     getComputer: (mode: "browser" | "desktop") => ManagedComputer,
@@ -55,6 +48,9 @@ class SurfaceSession {
     const desktop = await computer.desktop();
     if (this.mode === "browser") {
       return { desktop, window: await computer.window(0, 0) };
+    }
+    if (this.needsApplication) {
+      return { desktop };
     }
     const application = desktop.apps.find(
       (app) => app.pid === (this.application?.pid ?? this.target?.pid),
@@ -68,12 +64,7 @@ class SurfaceSession {
     ) {
       this.setTarget(undefined);
     }
-    if (
-      !this.choosingWindow &&
-      this.target === undefined &&
-      windows.length === 1 &&
-      windows[0] !== undefined
-    ) {
+    if (this.target === undefined && windows.length === 1 && windows[0] !== undefined) {
       this.setTarget({ pid: windows[0].pid, windowId: windows[0].window_id });
     }
     const { target } = this;
@@ -98,16 +89,11 @@ class SurfaceSession {
     saved: Surface | undefined,
   ): Promise<void> {
     this.mode = mode;
-    this.choosingWindow = false;
+    this.needsApplication = mode === "desktop";
     this.target = mode === "desktop" ? this.desktopTarget : undefined;
-    if (saved?.kind === mode && !this.restored.has(mode)) {
-      try {
-        this.setTarget(await restoreSurface(computer, saved));
-        this.restored.add(mode);
-      } catch (error) {
-        this.mode = undefined;
-        throw error;
-      }
+    if (saved?.kind === mode && !this.restoreAttempts.has(mode)) {
+      this.restoreAttempts.add(mode);
+      this.setTarget(await restoreSurface(computer, saved));
     }
   }
 }
@@ -139,7 +125,6 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
     case "refresh":
     case "request_url":
     case "request_app":
-    case "request_window":
     case "open_document":
     case "select_surface": {
       break;

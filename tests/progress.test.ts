@@ -1,3 +1,4 @@
+import type { Action } from "../src/agent/contracts.ts";
 import { expect, test } from "bun:test";
 import { Progress } from "../src/agent/progress.ts";
 import { options } from "../src/agent/options.ts";
@@ -53,7 +54,7 @@ test("navigates once, reports an already reached URL, and offers another decisio
           "different website",
         );
         expect(input.actions.some((action) => action.kind === "select_surface")).toBe(true);
-        expect(input.context).toContain("repeating that navigation has no effect");
+        expect(input.feedback).toContain("repeating that navigation has no effect");
         return choose(input, "finish");
       },
     },
@@ -229,4 +230,49 @@ test("detects a repeated focus cycle across two different states", () => {
   );
   expect(available.some((action) => action.kind === "compose_text")).toBe(true);
   expect(available.some((action) => action.kind === "select_surface")).toBe(true);
+});
+
+test("offers other tools after repeated app-launch failures in an unchanged desktop", () => {
+  const progress = new Progress();
+  const observation = { desktop: desktopFixture() };
+  const action = {
+    kind: "request_app",
+    reason: "Open an installed application on this Mac.",
+  } as const;
+  progress.observe(observation);
+  progress.attempted(action, observation);
+  progress.attempted(action, observation);
+  const choices = progress.choices(
+    options({ mode: "desktop", observation, applications: ["Messages"] }),
+    observation,
+  );
+  expect(choices.some((candidate) => candidate.kind === "request_app")).toBe(false);
+  expect(choices.some((candidate) => candidate.kind === "observe_window")).toBe(true);
+  expect(choices.some((candidate) => candidate.kind === "select_surface")).toBe(true);
+  expect(choices.some((candidate) => candidate.kind === "blocked")).toBe(true);
+  const changed = { desktop: { apps: observation.desktop.apps, windows: [] } };
+  progress.observe(changed);
+  expect(
+    progress
+      .choices(
+        options({ mode: "desktop", observation: changed, applications: ["Messages"] }),
+        changed,
+      )
+      .some((candidate) => candidate.kind === "request_app"),
+  ).toBe(true);
+});
+
+test("offers recovery after repeated failed switches on the same screen", () => {
+  const progress = new Progress();
+  const observation = { desktop: desktopFixture(), window: windowFixture() };
+  const change: Action = {
+    kind: "select_surface",
+    surface: "browser",
+    reason: "Use browser tools",
+  };
+  progress.observe(observation);
+  progress.attempted(change, observation);
+  progress.attempted(change, observation);
+  const recovery: Action = { kind: "blocked", reason: "Need browser access" };
+  expect(progress.choices([change, recovery], observation)).toEqual([recovery]);
 });

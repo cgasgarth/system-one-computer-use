@@ -2,7 +2,7 @@ import type { ManagedComputer } from "../../computer/types.ts";
 import type { Surface } from "./schema.ts";
 
 async function restoreSurface(
-  computer: Readonly<ManagedComputer>,
+  computer: Readonly<Pick<ManagedComputer, "desktop" | "restore">>,
   surface: Surface,
 ): Promise<{ readonly pid: number; readonly windowId: number } | undefined> {
   if (surface.kind === "browser") {
@@ -24,7 +24,6 @@ async function restoreSurface(
   );
   const target = exact ?? (candidates.length === 1 ? candidates[0] : undefined);
   if (target !== undefined) {
-    await computer.window(target.pid, target.window_id);
     return { pid: target.pid, windowId: target.window_id };
   }
   return undefined;

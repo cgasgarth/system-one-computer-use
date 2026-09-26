@@ -52,6 +52,10 @@ function computerFixture(): { computer: ManagedComputer; typed: string[] } {
     async clickElement() {
       /* This fixture records text input only. */
     },
+    // eslint-disable-next-line typescript/promise-function-async
+    inspectClick() {
+      return Promise.resolve({ kind: "unclassified" });
+    },
     async launchApp() {
       /* This fixture records text input only. */
     },

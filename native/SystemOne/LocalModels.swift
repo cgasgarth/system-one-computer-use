@@ -55,9 +55,9 @@ final class LocalModels {
         } catch { onError?(error.localizedDescription) }
     }
 
-    func warm() {
+    func warm(immediate: Bool = false) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard !warming, now - lastWarm >= 1 else { return }
+        guard !warming, immediate || now - lastWarm >= 1 else { return }
         warming = true; lastWarm = now
         do { try send(ModelCommand(operation: .warm)) }
         catch { warming = false; onError?(error.localizedDescription) }

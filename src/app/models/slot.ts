@@ -7,7 +7,6 @@ import { startProcess } from "./process.ts";
 import type { ModelProcess } from "./process.ts";
 
 const STARTUP_TIMEOUT_MS = 180_000;
-const HEALTH_INTERVAL_MS = 500;
 const HEALTH_TIMEOUT_MS = 1000;
 type LoadState = "unloaded" | "downloading" | "loading" | "ready" | "error";
 interface SlotStatus {
@@ -97,7 +96,7 @@ class ModelSlot {
     const command = commands(model, this.port, this.paths);
     const log = path.join(this.paths.data, "logs", `${model.id}.log`);
     this.update("downloading", `Preparing ${model.name}…`);
-    this.child = await startProcess(command.download, command.environment, log);
+    this.child = await startProcess(command.download, command.environment, { logPath: log });
     this.abort.signal.throwIfAborted();
     if ((await this.child.exited) !== 0) {
       throw new Error(`Download failed. See ${log}`);
@@ -107,30 +106,49 @@ class ModelSlot {
     this.child = await startProcess(
       command.serve,
       { ...command.environment, HF_HUB_OFFLINE: "1" },
-      log,
+      {
+        logPath: log,
+        readiness: {
+          message: command.readyMessage,
+          signal: this.abort.signal,
+          timeoutMs: STARTUP_TIMEOUT_MS,
+        },
+      },
     );
     this.abort.signal.throwIfAborted();
-    const ready = this.waitUntilReady(Date.now() + STARTUP_TIMEOUT_MS);
-    await Promise.race([ready, this.serverExit(this.child, log)]);
+    await Promise.race([this.child.waitUntilReady(), this.serverExit(this.child, log)]);
+    await this.verifyReady();
     this.update("ready", `${model.name} is ready`);
   }
-  private async waitUntilReady(deadline: number): Promise<void> {
+  private async verifyReady(): Promise<void> {
     this.abort.signal.throwIfAborted();
-    try {
-      const response = await fetch(`http://127.0.0.1:${this.port}/v1/models`, {
-        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(HEALTH_TIMEOUT_MS)]),
-      });
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      /* Wait for the owned server to finish loading. */
+    // MLX starts its HTTP listener while the text model loads on a worker thread.
+    // One small completion confirms that loading and inference both finished.
+    const text = this.role === "text";
+    const response = await fetch(
+      text ? this.endpoint() : `http://127.0.0.1:${this.port}/v1/models`,
+      {
+        ...(text
+          ? {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                messages: [{ role: "user", content: "Ready" }],
+                max_tokens: 1,
+                stream: false,
+              }),
+            }
+          : { method: "GET" }),
+        signal: AbortSignal.any([
+          this.abort.signal,
+          AbortSignal.timeout(text ? STARTUP_TIMEOUT_MS : HEALTH_TIMEOUT_MS),
+        ]),
+      },
+    );
+    await response.body?.cancel();
+    if (!response.ok) {
+      throw new Error(`Model startup check failed: HTTP ${response.status}`);
     }
-    if (Date.now() >= deadline) {
-      throw new Error("Model loading timed out. Check its log and retry.");
-    }
-    await Bun.sleep(HEALTH_INTERVAL_MS);
-    await this.waitUntilReady(deadline);
   }
   public async unload(): Promise<void> {
     this.unloading ??= this.unloadTracked();

@@ -21,15 +21,18 @@ const windowSchema = z.object({
   elements: z.array(
     z.object({
       element_index: z.number().int(),
+      parent_index: z.number().int().nullable().optional(),
       element_token: z.string(),
       role: z.string(),
       label: z.string().optional(),
+      placeholder: z.string().optional(),
       href: z.url().optional(),
       value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
       actions: z.array(z.string()).optional(),
       enabled: z.boolean().optional(),
       selected: z.boolean().optional(),
       focused: z.boolean().optional(),
+      editable: z.boolean().optional(),
       frame: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
     }),
   ),
@@ -58,7 +61,6 @@ const actionSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("request_url"), reason }),
   z.strictObject({ kind: z.literal("request_app"), reason }),
-  z.strictObject({ kind: z.literal("request_window"), reason }),
   z.strictObject({
     kind: z.literal("open_document"),
     pid: z.number().int().positive(),
@@ -71,6 +73,7 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("observe_window"), ...target, reason }),
   z.strictObject({
     kind: z.literal("click_element"),
+    operation: z.enum(["press", "pick", "confirm", "open"]).optional(),
     ...target,
     element_token: z.string(),
     reason,
@@ -97,6 +100,9 @@ type ActionChoices = readonly [Action, ...Action[]];
 type ElementAction = Extract<Action, { kind: "click_element" | "compose_text" | "type_text" }>;
 const TEXT_INPUT_ROLES = new Set(["AXTextField", "textbox", "searchbox", "combobox", "spinbutton"]);
 function isEditableElement(element: Window["elements"][number]): boolean {
+  if (element.editable !== undefined) {
+    return element.editable && element.enabled !== false;
+  }
   const capabilities = element.actions ?? [];
   return (
     element.enabled !== false &&
@@ -112,9 +118,13 @@ function validElement(action: ElementAction, window: Window): boolean {
     return false;
   }
   if (action.kind === "click_element") {
-    return (element.actions ?? []).some((name) =>
-      ["AXPress", "AXPick", "AXConfirm", "AXOpen"].includes(name),
-    );
+    const operations = {
+      press: "AXPress",
+      pick: "AXPick",
+      confirm: "AXConfirm",
+      open: "AXOpen",
+    } as const;
+    return (element.actions ?? []).includes(operations[action.operation ?? "press"]);
   }
   return isEditableElement(element);
 }
@@ -173,9 +183,6 @@ function describeAction(action: Action): string {
     case "request_app": {
       return action.reason;
     }
-    case "request_window": {
-      return action.reason;
-    }
     case "compose_text": {
       return action.reason;
     }
@@ -189,7 +196,7 @@ function describeAction(action: Action): string {
       return action.reason;
     }
     case "click_element": {
-      return `Click. ${action.reason}`;
+      return action.operation === "confirm" ? action.reason : `Click. ${action.reason}`;
     }
     case "type_text": {
       return `Type ${JSON.stringify(action.text)}. ${action.reason}`;

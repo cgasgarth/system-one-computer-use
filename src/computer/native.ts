@@ -1,13 +1,14 @@
 import type { Desktop, Window } from "../agent/contracts.ts";
 import { CuaConnection } from "./connection.ts";
 import { taskDesktop } from "./targets.ts";
-import type { ClickAction, Computer, KeyAction, TypeAction } from "./types.ts";
+import type { ClickAction, ClickInspection, Computer, KeyAction, TypeAction } from "./types.ts";
 import { CuaError } from "./errors.ts";
+import { DEFAULT_NATIVE_ACCESS, readWritableFields, waitForNativeWindow } from "./native-access.ts";
+import { activeWindowElements } from "./native-scope.ts";
 
 const HALF = 2;
 const ERROR_LIMIT = 400;
-const WINDOW_READY_MS = 1000;
-const WINDOW_POLL_MS = 50;
+const FRAME_TOLERANCE = 1;
 
 async function openMacApplication(name: string): Promise<void> {
   const process = Bun.spawn(["/usr/bin/open", "-a", name], { stdout: "ignore", stderr: "pipe" });
@@ -17,11 +18,43 @@ async function openMacApplication(name: string): Promise<void> {
   }
 }
 
+function withTextCapability(
+  element: Window["elements"][number],
+  fields: Awaited<ReturnType<typeof readWritableFields>>["fields"],
+): Window["elements"][number] {
+  if (!["AXTextArea", "AXTextField", "AXComboBox"].includes(element.role)) {
+    return element;
+  }
+  const { frame } = element;
+  const matches = fields.filter(
+    (field) =>
+      frame !== undefined &&
+      field.role === element.role &&
+      Math.abs(field.frame.x - frame.x) < FRAME_TOLERANCE &&
+      Math.abs(field.frame.y - frame.y) < FRAME_TOLERANCE &&
+      Math.abs(field.frame.w - frame.w) < FRAME_TOLERANCE &&
+      Math.abs(field.frame.h - frame.h) < FRAME_TOLERANCE,
+  );
+  const [field] = matches;
+  if (matches.length !== 1 || field === undefined) {
+    return { ...element, editable: false };
+  }
+  return {
+    ...element,
+    editable: field.editable,
+    ...(field.value === undefined ? {} : { value: field.value }),
+    ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
+    ...(field.focused === undefined ? {} : { focused: field.focused }),
+  };
+}
+
 class CuaMcpComputer implements Computer {
   private readonly connection: CuaConnection;
+  private readonly nativeAccess: string;
 
-  public constructor(binary = "cua-driver") {
+  public constructor(binary = "cua-driver", nativeAccess = DEFAULT_NATIVE_ACCESS) {
     this.connection = new CuaConnection(binary);
+    this.nativeAccess = nativeAccess;
   }
 
   public async close(): Promise<void> {
@@ -40,11 +73,11 @@ class CuaMcpComputer implements Computer {
     if (!root) {
       return snapshot;
     }
-    return {
+    const visible: Window = {
       ...snapshot,
-      elements: snapshot.elements.filter((element) => {
+      elements: activeWindowElements(snapshot).filter((element) => {
         const { frame } = element;
-        if (!frame) {
+        if (!frame || frame.w <= 1 || frame.h <= 1) {
           return false;
         }
         const middleX = frame.x + frame.w / HALF;
@@ -57,9 +90,28 @@ class CuaMcpComputer implements Computer {
         );
       }),
     };
+    if (
+      !visible.elements.some((element) =>
+        ["AXTextArea", "AXTextField", "AXComboBox"].includes(element.role),
+      )
+    ) {
+      return visible;
+    }
+    const capabilities = await readWritableFields(this.nativeAccess, visible);
+    return {
+      ...visible,
+      elements: visible.elements.map((element) => withTextCapability(element, capabilities.fields)),
+    };
   }
 
-  public readonly launchApp = openMacApplication;
+  public async launchApp(name: string): Promise<void> {
+    await waitForNativeWindow({
+      binary: this.nativeAccess,
+      application: name,
+      mode: "available",
+      act: async () => openMacApplication(name),
+    });
+  }
   public async focusWindow(pid: number, windowId: number): Promise<void> {
     await this.connection.focusWindow(pid, windowId);
   }
@@ -70,13 +122,15 @@ class CuaMcpComputer implements Computer {
       await openMacApplication(application.name);
     }
     const before = await this.desktop();
-    await this.connection.openDocument(application.pid);
-    return this.openedWindow(before, Date.now() + WINDOW_READY_MS);
+    await waitForNativeWindow({
+      binary: this.nativeAccess,
+      application: application.name,
+      mode: "created",
+      act: async () => this.connection.openDocument(application.pid),
+    });
+    return this.openedWindow(before);
   }
-  private async openedWindow(
-    before: Desktop,
-    deadline: number,
-  ): Promise<Desktop["windows"][number] | undefined> {
+  private async openedWindow(before: Desktop): Promise<Desktop["windows"][number] | undefined> {
     const after = await this.desktop();
     const created = after.windows.filter(
       (window) => !before.windows.some((previous) => previous.window_id === window.window_id),
@@ -84,15 +138,16 @@ class CuaMcpComputer implements Computer {
     if (created.length === 1) {
       return created[0];
     }
-    if (Date.now() >= deadline) {
-      return undefined;
-    }
-    await Bun.sleep(WINDOW_POLL_MS);
-    return this.openedWindow(before, deadline);
+    return undefined;
   }
 
   public async clickElement(action: ClickAction): Promise<void> {
     await this.connection.click(action);
+  }
+  // Native AX does not expose web form submission metadata.
+  // eslint-disable-next-line eslint/class-methods-use-this, typescript/promise-function-async
+  public inspectClick(): Promise<ClickInspection> {
+    return Promise.resolve({ kind: "unclassified" });
   }
 
   public async typeText(action: TypeAction): Promise<void> {

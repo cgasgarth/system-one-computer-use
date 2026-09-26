@@ -43,7 +43,7 @@ test("keeps a blocked stop when the model confirms required user help", async ()
     port: 0,
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
-      const check = body.questions.next_action.instructions.startsWith("Does a missing");
+      const check = body.questions.next_action.instructions.startsWith("Is there an enabled");
       return Response.json({
         answers: {
           next_action: check
@@ -65,6 +65,53 @@ test("keeps a blocked stop when the model confirms required user help", async ()
     });
     expect(result.action.kind).toBe("blocked");
     expect(result.checks?.[0]?.answer.choice).toBe("A0");
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("rejects an uncertain click match and chooses the clearly matching operation", async () => {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = decisionRequestSchema.parse(await request.json());
+      const uncertain = 0.6;
+      const clear = 0.9;
+      const matches =
+        body.questions.next_action.instructions.startsWith("Is this exact click") &&
+        body.state.includes("Create event");
+      const probability = matches ? clear : uncertain;
+      return Response.json({
+        answers: {
+          next_action: { choice: "A0", probabilities: { A0: probability, A1: 1 - probability } },
+        },
+      });
+    },
+  });
+  try {
+    const result = await new SystemOneHttpDecisionModel(server.url.href, "model").choose({
+      task: "Schedule an event",
+      observation: { desktop: desktopFixture() },
+      actions: [
+        {
+          kind: "click_element",
+          pid: 7,
+          window_id: 9,
+          element_token: "reminder",
+          reason: "Create reminder",
+        },
+        {
+          kind: "click_element",
+          pid: 7,
+          window_id: 9,
+          element_token: "event",
+          reason: "Create event",
+        },
+      ],
+    });
+    expect(result.action.reason).toBe("Create event");
+    const checked = 2;
+    expect(result.checks).toHaveLength(checked);
   } finally {
     await server.stop(true);
   }

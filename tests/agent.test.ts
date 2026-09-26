@@ -66,7 +66,10 @@ test("lets the decision model select desktop and invokes the writer only for an 
       return computer;
     },
     text: {
-      async generate() {
+      async generate(input) {
+        if (input.purpose === "application") {
+          return "Messages";
+        }
         writes += 1;
         return "Alex";
       },
@@ -77,9 +80,7 @@ test("lets the decision model select desktop and invokes the writer only for an 
           if (input.actions.some((action) => action.kind === "observe_window")) {
             return pick(input, "observe_window");
           }
-          return input.actions.some((action) => action.kind === "request_window")
-            ? pick(input, "request_window")
-            : pick(input, "select_surface", "desktop");
+          return pick(input, "select_surface", "desktop");
         }
         return typed.length === 0 ? pick(input, "compose_text") : pick(input, "finish");
       },
@@ -111,7 +112,7 @@ test("returns a tool failure to the model so it can change surfaces", async () =
           return pick(input, "select_surface", "browser");
         }
         if (!switched) {
-          expect(input.context).toContain("Browser access unavailable");
+          expect(input.feedback).toContain("Browser access unavailable");
           switched = true;
           return pick(input, "select_surface", "desktop");
         }
@@ -202,7 +203,7 @@ test("lets the model change tools when saved browser restoration fails", async (
     decision: {
       async choose(input) {
         if (!switched) {
-          expect(input.context).toContain("Saved tab is unavailable");
+          expect(input.feedback).toContain("Saved tab is unavailable");
           switched = true;
           return pick(input, "select_surface", "desktop");
         }
@@ -253,4 +254,26 @@ test("explains a stop before any tool action without claiming a permission failu
   expect(result.summary).toBe(
     "Stopped before taking an action. Review the task text or dictate it again, then select Start.",
   );
+});
+
+test("continues after verifying a field value without writing it again", async () => {
+  const { computer, typed } = computerFixture();
+  let decisions = 0;
+  const result = await runTask({
+    task: "Fill the search field with Alex",
+    preferredSurface: "browser",
+    applications: [],
+    computer: () => computer,
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        decisions += 1;
+        return pick(input, decisions === 1 ? "compose_text" : "finish");
+      },
+    },
+  });
+  expect(typed).toEqual(["Alex"]);
+  expect(result.steps[0]?.performedAction).toBe(true);
+  expect(result.steps[1]?.performedAction).not.toBe(true);
+  expect(result.status).toBe("complete");
 });

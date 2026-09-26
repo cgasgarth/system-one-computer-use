@@ -22,7 +22,7 @@ test("asks the text provider for field content with the task and session context
         context: "previous request",
         observation: { desktop: desktopFixture(), window: windowFixture() },
         purpose: "text",
-        field: { label: "Search", value: "" },
+        field: { role: "textbox", label: "Search", value: "" },
       }),
     ).toBe("Alex");
   } finally {
@@ -36,4 +36,46 @@ test("rejects truncated text before it can become input", () => {
       choices: [{ message: { content: "unfinished" }, finish_reason: "length" }],
     }),
   ).toThrow("Text model response was incomplete");
+});
+
+test("supplies observed link destinations to the URL argument writer", async () => {
+  const destination = "https://example.test/doc/opaque-72";
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = textRequestSchema.parse(await request.json());
+      expect(body.messages.at(-1)?.content).toContain(destination);
+      return Response.json({
+        choices: [{ message: { content: destination }, finish_reason: "stop" }],
+      });
+    },
+  });
+  try {
+    const window = windowFixture();
+    const model = new ChatCompletionTextModel(server.url.href, "writer");
+    const url = await model.generate({
+      task: "Open the budget document",
+      context: "",
+      purpose: "url",
+      observation: {
+        desktop: desktopFixture(),
+        window: {
+          ...window,
+          elements: [
+            {
+              element_index: 1,
+              element_token: "link",
+              role: "link",
+              label: "Budget",
+              href: destination,
+              actions: ["AXPress"],
+            },
+          ],
+        },
+      },
+    });
+    expect(url).toBe(destination);
+  } finally {
+    await server.stop(true);
+  }
 });

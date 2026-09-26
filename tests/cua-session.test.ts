@@ -187,3 +187,82 @@ test("uses a desktop chord only after checking the selected app is in front", as
   }
   expect(background.calls).not.toContain("hotkey");
 });
+
+test("sets the intended field value through the exact element handle", async () => {
+  const base = fixture();
+  let writes = 0;
+  const client: CuaClient = {
+    ...base.client,
+    async callTool(request) {
+      if (request.name === "set_value") {
+        writes += 1;
+        expect(request.arguments).toMatchObject({
+          pid: 7,
+          window_id: 9,
+          element_token: "s1:1",
+          value: "hello",
+        });
+        return { content: [], structuredContent: { effect: "confirmed" } };
+      }
+      return base.client.callTool(request);
+    },
+  };
+  const connection = new CuaConnection("unused", client);
+  try {
+    await connection.typeText({
+      kind: "type_text",
+      pid: 7,
+      window_id: 9,
+      element_token: "s1:1",
+      text: "hello",
+      reason: "Fill field",
+    });
+    expect(writes).toBe(1);
+  } finally {
+    await connection.close();
+  }
+});
+
+test("uses guarded foreground delivery only after an ambiguous background key is refused", async () => {
+  const base = fixture();
+  let keys = 0;
+  const client: CuaClient = {
+    ...base.client,
+    async callTool(request) {
+      if (request.name !== "press_key") {
+        return base.client.callTool(request);
+      }
+      keys += 1;
+      if (keys === 1) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: "Background input refused (same_pid_keyboard_ambiguity)" },
+          ],
+        };
+      }
+      expect(request.arguments).toMatchObject({
+        pid: 7,
+        window_id: 9,
+        key: "return",
+        delivery_mode: "foreground",
+      });
+      return { content: [], structuredContent: { effect: "unverifiable" } };
+    },
+  };
+  const connection = new CuaConnection("unused", client);
+  try {
+    await connection.pressKey({
+      kind: "press_key",
+      pid: 7,
+      window_id: 9,
+      key: "return",
+      modifiers: [],
+      reason: "Submit",
+    });
+    const attempts = 2;
+    expect(keys).toBe(attempts);
+  } finally {
+    await connection.close();
+  }
+});

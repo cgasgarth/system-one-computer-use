@@ -10,7 +10,10 @@
     "check": "oxlint --type-aware --type-check --max-warnings 0 --report-unused-disable-directives && bun scripts/check-source-size.ts",
     "format": "oxfmt --write src tests scripts README.md AGENTS.md docs integrations/clm-mlx/README.md .oxlintrc.json .oxfmtrc.json tsconfig.json package.json",
     "format:check": "oxfmt --check src tests scripts README.md AGENTS.md docs integrations/clm-mlx/README.md .oxlintrc.json .oxfmtrc.json tsconfig.json package.json",
-    "app:install": "bun scripts/install-macos.ts"
+    "app:install": "bun scripts/install-macos.ts",
+    "test:native": "bun scripts/test-native.ts",
+    "eval:decisions": "bun scripts/evals/decisions.ts",
+    "eval:browser": "bun scripts/evals/browser-tasks.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.1.0",

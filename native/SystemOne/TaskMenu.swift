@@ -27,7 +27,7 @@ final class TranscriptView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
-            ("Describe a task…" as NSString).draw(at: NSPoint(x: 13, y: 12), withAttributes: [
+            ("What would you like done?" as NSString).draw(at: NSPoint(x: 13, y: 12), withAttributes: [
                 .font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor,
             ])
         }
@@ -36,7 +36,7 @@ final class TranscriptView: NSTextView {
 
 @MainActor
 final class TaskMenu: NSViewController {
-    static let size = NSSize(width: 360, height: 370)
+    static let size = NSSize(width: 360, height: 372)
     let editor = TranscriptView()
     let sessions = SessionMenu()
     var onActivity: (() -> Void)?
@@ -49,8 +49,6 @@ final class TaskMenu: NSViewController {
     let latency = NSTextField(labelWithString: "—")
     let rate = NSTextField(labelWithString: "—")
     private var locked = false
-    private var baseFrames: [(NSView, NSRect)] = []
-    var onSizeChange: ((NSSize) -> Void)?
 
     override func loadView() {
         view = MenuSurface(frame: NSRect(origin: .zero, size: Self.size))
@@ -58,10 +56,10 @@ final class TaskMenu: NSViewController {
         view.autoresizesSubviews = false
         preferredContentSize = Self.size
         let heading = NSTextField(labelWithString: "System One")
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
-        heading.frame = NSRect(x: 18, y: 331, width: 200, height: 22)
+        heading.font = .systemFont(ofSize: 16, weight: .semibold)
+        heading.frame = NSRect(x: 18, y: 333, width: 200, height: 22)
         view.addSubview(heading)
-        settings.frame = NSRect(x: 306, y: 328, width: 36, height: 28)
+        settings.frame = NSRect(x: 314, y: 330, width: 28, height: 28)
         settings.bezelStyle = .accessoryBarAction
         settings.isBordered = false
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
@@ -69,69 +67,72 @@ final class TaskMenu: NSViewController {
         settings.setAccessibilityLabel("Settings")
         view.addSubview(settings)
         let target = NSTextField(labelWithString: "Control surface")
-        target.font = .systemFont(ofSize: 12)
+        target.font = .systemFont(ofSize: 10, weight: .medium)
         target.textColor = .secondaryLabelColor
-        target.frame = NSRect(x: 18, y: 294, width: 120, height: 18)
+        target.frame = NSRect(x: 20, y: 174, width: 120, height: 14)
         view.addSubview(target)
-        mode.frame = NSRect(x: 258, y: 288, width: 84, height: 28)
+        mode.frame = NSRect(x: 14, y: 144, width: 100, height: 28)
+        mode.isBordered = false
+        mode.font = .systemFont(ofSize: 12, weight: .medium)
+        sessions.picker.isBordered = false
+        sessions.picker.font = .systemFont(ofSize: 12, weight: .medium)
         mode.addItems(withTitles: ["Auto", "Chrome", "Desktop"])
         mode.setAccessibilityLabel("Control surface")
         mode.toolTip = "Choose automatically, use Chrome, or use the macOS desktop."
         view.addSubview(mode)
         let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.font = .systemFont(ofSize: 12); sessionLabel.textColor = .secondaryLabelColor
-        sessionLabel.frame = NSRect(x: 18, y: 258, width: 90, height: 18)
+        sessionLabel.font = .systemFont(ofSize: 10, weight: .medium); sessionLabel.textColor = .secondaryLabelColor
+        sessionLabel.frame = NSRect(x: 190, y: 174, width: 90, height: 14)
         view.addSubview(sessionLabel)
-        sessions.picker.frame = NSRect(x: 138, y: 252, width: 204, height: 28)
+        sessions.picker.frame = NSRect(x: 184, y: 144, width: 162, height: 28)
         view.addSubview(sessions.picker)
         addEditor()
-        voice.frame = NSRect(x: 18, y: 109, width: 82, height: 30)
-        run.frame = NSRect(x: 260, y: 109, width: 82, height: 30)
+        voice.frame = NSRect(x: 18, y: 104, width: 82, height: 30)
+        run.frame = NSRect(x: 260, y: 104, width: 82, height: 30)
         run.bezelColor = .controlAccentColor
         run.keyEquivalent = "\r"
         run.keyEquivalentModifierMask = .command
         run.toolTip = "Start task (⌘Return)"
-        cancel.frame = NSRect(x: 184, y: 109, width: 68, height: 30)
+        cancel.frame = run.frame
         for button in [voice, run, cancel] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 13, weight: .medium); view.addSubview(button) }
         cancel.isHidden = true
-        status.frame = NSRect(x: 18, y: 65, width: 324, height: 28)
+        status.frame = NSRect(x: 20, y: 57, width: 320, height: 40)
         status.font = .systemFont(ofSize: 11)
-        status.maximumNumberOfLines = 0
+        status.maximumNumberOfLines = 3
         status.lineBreakMode = .byWordWrapping
         view.addSubview(status)
-        let line = NSBox(frame: NSRect(x: 18, y: 57, width: 324, height: 1))
+        let line = NSBox(frame: NSRect(x: 18, y: 49, width: 324, height: 1))
         line.boxType = .separator
         view.addSubview(line)
-        metric(latency, title: "Median latency · ms", x: 18)
+        metric(latency, title: "Median decision · ms", x: 18)
         metric(rate, title: "Actions / sec", x: 180)
         latency.toolTip = "Median System One request latency for this task, in milliseconds."
-        rate.toolTip = "Completed model-selected actions per second since the first decision started. Includes tool execution and observations; excludes initial planning."
+        rate.toolTip = "Tool actions that returned successfully per second, including observation and execution time. Failed attempts, unchanged results, waits, and internal decisions do not count."
         editor.onChange = { [weak self] in
             guard let self else { return }; self.updateRunButton()
             if !self.locked && !self.editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self.onActivity?() }
         }
-        baseFrames = view.subviews.filter { $0.frame.minY >= 105 }.map { ($0, $0.frame) }
         setStatus("Ready", color: .secondaryLabelColor)
         updateRunButton()
     }
 
     private func addEditor() {
-        let scroll = NSScrollView(frame: NSRect(x: 18, y: 150, width: 324, height: 91))
+        let scroll = NSScrollView(frame: NSRect(x: 18, y: 197, width: 324, height: 116))
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 8
+        scroll.layer?.cornerRadius = 10
         scroll.layer?.borderWidth = 0.5
         scroll.layer?.borderColor = NSColor.separatorColor.cgColor
         scroll.layer?.masksToBounds = true
         scroll.drawsBackground = true
         let fieldBackground = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.97, alpha: 1)
+                ? NSColor(white: 0.145, alpha: 1) : NSColor(white: 0.97, alpha: 1)
         }
         scroll.backgroundColor = fieldBackground
-        editor.frame = NSRect(x: 0, y: 0, width: 324, height: 91)
+        editor.frame = NSRect(x: 0, y: 0, width: 324, height: 116)
         editor.isRichText = false
         editor.isEditable = true
         editor.isSelectable = true
@@ -153,25 +154,14 @@ final class TaskMenu: NSViewController {
         label.textColor = .secondaryLabelColor
         label.alignment = .center
         value.alignment = .center
-        label.frame = NSRect(x: x, y: 33, width: 162, height: 14)
-        value.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        value.frame = NSRect(x: x, y: 13, width: 162, height: 18)
+        label.frame = NSRect(x: x, y: 29, width: 162, height: 14)
+        value.font = .monospacedDigitSystemFont(ofSize: 16, weight: .medium)
+        value.frame = NSRect(x: x, y: 7, width: 162, height: 21)
         view.addSubview(label)
         view.addSubview(value)
     }
 
     func setStatus(_ message: String, color: NSColor) {
-        let measured = (message as NSString).boundingRect(
-            with: NSSize(width: 324, height: 500), options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: NSFont.systemFont(ofSize: 11)])
-        let height = max(28, ceil(measured.height) + 16)
-        let delta = height - 28
-        for (child, frame) in baseFrames { child.frame = frame.offsetBy(dx: 0, dy: delta) }
-        status.frame.size.height = height
-        let size = NSSize(width: Self.size.width, height: Self.size.height + height - 28)
-        view.setFrameSize(size)
-        preferredContentSize = size
-        onSizeChange?(size)
         status.stringValue = message
         status.textColor = color
         status.toolTip = message
@@ -184,6 +174,12 @@ final class TaskMenu: NSViewController {
         sessions.picker.isEnabled = !value
         settings.isEnabled = !value
         updateRunButton()
+    }
+
+    func setActive(_ active: Bool) {
+        run.isHidden = active
+        cancel.isHidden = !active
+        cancel.isEnabled = active
     }
 
     func updateRunButton() {

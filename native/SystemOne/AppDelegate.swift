@@ -9,12 +9,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let runner = TaskRunner()
     private let models = LocalModels()
     private let shortcut = VoiceShortcut()
-    private var phase = Phase.ready
+    private var phase = Phase.ready {
+        didSet {
+            switch phase {
+            case .running, .transcribing: statusActivity.update(.processing)
+            case .recording: statusActivity.update(.listening)
+            case .ready: statusActivity.update(.idle)
+            }
+            content.setActive(phase != .ready)
+        }
+    }
+    private let statusActivity = StatusActivity()
     private var voiceActivation = VoiceActivation()
     private var statusItem: NSStatusItem?
     private var transcriptionTimer: Timer?
     private let handy = HandyCommands()
     private var initialized = false
+    private var hasTaskResult = false
 
     func start() {
         guard !initialized else { return }
@@ -27,16 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         content.loadViewIfNeeded()
-        content.onSizeChange = { [weak self] size in
-            guard let self, self.popover.contentViewController === self.content else { return }
-            self.popover.contentSize = size
-        }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "System One Computer Use")
         item.button?.toolTip = "System One Computer Use"
         item.button?.target = self
         item.button?.action = #selector(toggleMenu)
         statusItem = item
+        if let button = item.button { statusActivity.attach(to: button) }
         content.run.target = self
         content.run.action = #selector(runTask)
         content.voice.target = self
@@ -75,10 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         models.onStatus = { [weak self] event in
             guard let self else { return }
             self.settings.updateModels(event)
-            if let loading = event.models?.first(where: { $0.state == .downloading || $0.state == .loading }), self.phase == .ready || self.phase == .running {
+            if let loading = event.models?.first(where: { $0.state == .downloading || $0.state == .loading }), (self.phase == .ready && !self.hasTaskResult) || self.phase == .running {
                 self.content.setStatus(loading.message, color: .secondaryLabelColor)
-            } else if self.phase == .ready, let decision = event.models?.first(where: { $0.role == .decision }) {
-                self.content.setStatus(decision.message, color: decision.state == .error ? .systemOrange : .secondaryLabelColor)
+            } else if self.phase == .ready && !self.hasTaskResult, let decision = event.models?.first(where: { $0.role == .decision }) {
+                self.content.setStatus(decision.state == .error ? decision.message : "Ready", color: decision.state == .error ? .systemOrange : .secondaryLabelColor)
             }
         }
         models.onError = { [weak self] message in
@@ -134,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = content
         popover.contentSize = content.preferredContentSize
         content.focus()
+        if popover.isShown { models.warm(immediate: true) }
     }
 
     @objc private func saveSettings() {
@@ -171,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func beginVoice(behavior: String) {
-        models.warm()
+        models.warm(immediate: true)
         showTasks(); showMenu()
         content.editor.string = ""; content.editor.needsDisplay = true
         content.updateRunButton()
@@ -215,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard phase == .ready else { return }
         let task = content.editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { content.status.stringValue = "Enter a task first."; return }
+        hasTaskResult = false
         phase = .running
         content.run.isEnabled = false
         content.voice.isEnabled = true
@@ -241,9 +251,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let rate = event.modelActionsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
         statusItem?.button?.toolTip = event.message
         if event.status == .running { return }
+        hasTaskResult = true
         models.release()
         ready()
         if event.status == .complete {
+            statusActivity.complete()
             content.setStatus("Completed · \(event.decisions ?? 0) decisions", color: .systemGreen)
         } else {
             content.setStatus(event.message, color: .systemOrange)
@@ -262,6 +274,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func fail(_ message: String) {
+        hasTaskResult = true
+        if phase == .running { runner.cancel(); models.release() }
         if phase == .recording || phase == .transcribing { invokeHandy("--cancel") }
         transcriptionTimer?.invalidate()
         ready()
@@ -275,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func cancelTask() {
+        hasTaskResult = true
         cancelVoice()
         runner.cancel()
         models.release()
@@ -289,7 +304,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
         popover.contentViewController?.view.window?.makeKey()
-        if popover.contentViewController === content { content.focus() }
+        if popover.contentViewController === content {
+            models.warm(immediate: true)
+            content.focus()
+        }
     }
 
     @objc private func quit() { cancelTask(); NSApp.terminate(nil) }

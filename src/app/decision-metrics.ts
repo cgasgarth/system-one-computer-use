@@ -6,7 +6,7 @@ interface DecisionMetrics {
   readonly medianDecisionMs: number | undefined;
   readonly modelActionsPerSecond: number | undefined;
 }
-type TimedStep = Pick<TaskStep, "decisionMs" | "actionMs" | "elapsedMs">;
+type TimedStep = Pick<TaskStep, "decisionMs" | "actionMs" | "elapsedMs" | "performedAction">;
 function decisionMetrics(steps: readonly TimedStep[]): DecisionMetrics {
   const [first] = steps;
   const last = steps.at(-1);
@@ -24,9 +24,10 @@ function decisionMetrics(steps: readonly TimedStep[]): DecisionMetrics {
     latencies.length % HALF === 0 && lower !== undefined ? (lower + upper) / HALF : upper;
   const firstDecisionStarted = first.elapsedMs - first.decisionMs - first.actionMs;
   const activeMs = last.elapsedMs - firstDecisionStarted;
+  const actions = steps.filter((step) => step.performedAction === true).length;
   return {
     medianDecisionMs,
-    modelActionsPerSecond: activeMs > 0 ? (steps.length * MS_PER_SECOND) / activeMs : undefined,
+    modelActionsPerSecond: activeMs > 0 ? (actions * MS_PER_SECOND) / activeMs : undefined,
   };
 }
 export { decisionMetrics };

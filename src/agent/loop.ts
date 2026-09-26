@@ -41,7 +41,13 @@ function blockedSummary(context: FinishContext): string {
   if (context.steps.every((step) => step.action.kind === "blocked")) {
     return "Stopped before taking an action. Review the task text or dictate it again, then select Start.";
   }
-  if (context.observation.application !== undefined && context.observation.window === undefined) {
+  if (
+    context.observation.application !== undefined &&
+    context.observation.window === undefined &&
+    !context.observation.desktop.windows.some(
+      (window) => window.pid === context.observation.application?.pid,
+    )
+  ) {
     return `${context.observation.application.name} is running but has no controllable window. Open a document or window in that app, then continue this session.`;
   }
   const app = context.observation.window?.app_name;

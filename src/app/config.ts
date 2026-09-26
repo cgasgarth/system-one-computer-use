@@ -2,6 +2,7 @@ import type { ReadonlyDeep } from "type-fest";
 import { z } from "zod";
 import { PlaywrightComputer } from "../computer/playwright/computer.ts";
 import { CuaMcpComputer } from "../computer/native.ts";
+import { DEFAULT_NATIVE_ACCESS } from "../computer/native-access.ts";
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import { SystemOneHttpDecisionModel } from "../models/system-one.ts";
 import type { DecisionModel } from "../models/system-one.ts";
@@ -13,6 +14,7 @@ const endpointSchema = z.url({ protocol: /^https?$/u });
 const optionalKey = z.string().min(1).optional();
 const configSchema = z.object({
   CUA_DRIVER_BIN: z.string().default("cua-driver"),
+  SYSTEM_ONE_NATIVE_BIN: z.string().default(DEFAULT_NATIVE_ACCESS),
   CUA_MODE: driverModeSchema.default("auto"),
   PLAYWRIGHT_MCP_EXTENSION_TOKEN: optionalKey,
   SYSTEM_ONE_API_KEY: optionalKey,
@@ -52,7 +54,7 @@ function createComputer(config: Config, mode: ComputerMode): ManagedComputer {
   if (mode === "browser") {
     return new PlaywrightComputer(config.PLAYWRIGHT_MCP_EXTENSION_TOKEN);
   }
-  return new CuaMcpComputer(config.CUA_DRIVER_BIN);
+  return new CuaMcpComputer(config.CUA_DRIVER_BIN, config.SYSTEM_ONE_NATIVE_BIN);
 }
 
 export { createComputer, createModels, loadConfig };

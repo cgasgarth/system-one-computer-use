@@ -49,7 +49,7 @@ test("stops an owned serving process", async () => {
   const child = await startProcess(
     [process.execPath, "-e", "setInterval(() => {}, 1000)"],
     Bun.env,
-    path.join(directory, "process.log"),
+    { logPath: path.join(directory, "process.log") },
   );
   try {
     await child.stop();

@@ -43,7 +43,7 @@ def main() -> None:
         action_cache="64MiB",
     )
     app = create_app(engine, api_key=os.environ.get("CLM_API_KEY"), ui=False)
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info", access_log=False)
 
 
 if __name__ == "__main__":

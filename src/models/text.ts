@@ -11,7 +11,16 @@ interface TextInput {
   readonly observation: Observation;
   readonly purpose: "text" | "url" | "application";
   readonly applications?: readonly string[];
-  readonly field?: { readonly label: string; readonly value: string };
+  readonly field?: {
+    readonly role: string;
+    readonly label: string;
+    readonly value: string;
+    readonly placeholder?: string;
+    readonly tagName?: string;
+    readonly inputType?: string | null;
+    readonly formRole?: string | null;
+    readonly formMethod?: string | null;
+  };
 }
 interface TextModel {
   readonly generate: (input: TextInput) => Promise<string>;
@@ -21,8 +30,8 @@ const MAX_TOKENS = 1024;
 const PROMPTS = {
   application:
     "Return only the exact installed application name needed for this tool call, from the supplied applications list. No explanation, quotes, or markdown. This is an argument to an already selected open-application tool, not a task plan.",
-  url: "Return only the absolute HTTP or HTTPS URL needed for the current request. Use a search-engine URL if a web search is needed and no destination is known. Return an empty string if this request does not need a browser URL. No explanation or markdown.",
-  text: "Return only the text needed in the specified input field to advance the user's task. Preserve text supplied by the user. No explanation, wrapping quotes or markdown fences. Never generate passwords or authentication credentials. Return an empty string if no appropriate text is available.",
+  url: "Return only the destination URL for the current request. Use the exact URL supplied by the user or an observed link when available. Never invent a path for an item on the current page. Return an empty string if its URL is unknown.",
+  text: "Return only the complete desired value for this input field. Separate the instruction from the content: do not include verbs that tell you to enter or set text unless they are part of the content itself. For a search field, return query terms, not a website URL unless the user explicitly wants that URL as field content. Preserve existing content when the user asks to add to it. Follow the field's placeholder format when provided; placeholders are examples, not existing content. Preserve text supplied by the user. No explanation, wrapping quotes or markdown fences. Never generate passwords or authentication credentials. Return an empty string if no appropriate text is available.",
 };
 class ChatCompletionTextModel implements TextModel {
   private readonly endpoint: string;
@@ -58,7 +67,7 @@ class ChatCompletionTextModel implements TextModel {
               field: input.field,
               applications: input.applications,
               observed: summarizeObservation(input.observation),
-            })}\n\nCurrent request: ${input.task}\n${PROMPTS[input.purpose]}`,
+            })}\n\nCurrent request: ${input.task}\n${PROMPTS[input.purpose]}${input.field === undefined ? "" : `\nThe selected field is ${JSON.stringify(input.field.label)}. Return its value alone. If the request gives values for other fields, selects, checkboxes, or radio buttons, exclude those values. If this field has no requested value, return an empty string.`}`,
           },
         ],
       },

@@ -6,14 +6,31 @@ import type { Action } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { ActionCheck } from "../models/decision-verification.ts";
+import type { OperationDecision } from "../models/action-space.ts";
 
 interface ActionResult {
   readonly output: string;
+  readonly satisfiedInput?: string;
+  readonly performedAction?: boolean;
   readonly unchanged?: UnchangedDestination;
+  readonly verifiedField?: {
+    readonly role: string;
+    readonly label: string;
+    readonly value: string;
+  };
 }
 
 interface TaskStep {
+  readonly satisfiedInput?: string;
+  readonly performedAction?: boolean;
   readonly action: Action;
+  readonly control?: { readonly role: string; readonly label: string };
+  readonly presentedDialog?: boolean;
+  readonly verifiedField?: {
+    readonly role: string;
+    readonly label: string;
+    readonly value: string;
+  };
   readonly decisionMs: number;
   readonly observationMs: number;
   readonly actionMs: number;
@@ -25,7 +42,12 @@ interface TaskStep {
   readonly unchanged?: UnchangedDestination;
   readonly index: number;
   readonly probabilities: ActionProbabilities;
+  readonly candidates?: readonly Action[];
+  readonly operation?: OperationDecision;
+  readonly rejectedOperations?: readonly OperationDecision[];
   readonly completion?: BinaryAnswer;
+  readonly completionTarget?: BinaryAnswer;
+  readonly completionCommit?: BinaryAnswer;
   readonly checks?: readonly ActionCheck[];
 }
 interface TaskResult {

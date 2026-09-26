@@ -15,7 +15,9 @@ test.each(["clm-latest", "jev-latest", "another-system-one-model"])(
         expect(request.headers.get("authorization")).toBe("Bearer test-token");
         captured.resolve(decisionRequestSchema.parse(await request.json()));
         return Response.json({
-          answers: { next_action: { choice: "A1", probabilities: { A0: 0, A1: 1 } } },
+          answers: {
+            next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } },
+          },
         });
       },
       port: 0,
@@ -37,11 +39,11 @@ test.each(["clm-latest", "jev-latest", "another-system-one-model"])(
       });
       const request = await captured.promise;
       expect(request.model).toBe(modelId);
+      expect(request.questions.next_action.instructions).toContain("Open Settings");
       expect(Object.keys(request.questions.next_action.criteria)).toEqual(["A0", "A1"]);
       expect(result.action).toEqual({
-        kind: "finish",
-        reason: "Already complete",
-        summary: "Done",
+        kind: "request_app",
+        reason: "Open an application",
       });
     } finally {
       await server.stop(true);

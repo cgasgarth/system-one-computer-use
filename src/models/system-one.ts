@@ -1,7 +1,13 @@
-import { describeAction } from "../agent/contracts.ts";
+import { actionDescription, actionGroups, targetCorrectionActions } from "./action-space.ts";
+import type { OperationDecision } from "./action-space.ts";
+import { isEditableElement } from "../agent/contracts.ts";
+import { relevantControls, textTargetName } from "../agent/controls.ts";
 import type { Action, ActionChoices, Observation, Window } from "../agent/contracts.ts";
+import type { ClickInspection } from "../computer/types.ts";
 import { requestJson } from "./request.ts";
 import { verificationRequest } from "./decision-verification.ts";
+import { hasPendingDialogDraft } from "./completion-evidence.ts";
+import { verifyCommit } from "./commit-verification.ts";
 import type { ActionCheck } from "./decision-verification.ts";
 import { binaryAnswerSchema, decisionResponseSchema } from "./system-one-schema.ts";
 import type {
@@ -15,12 +21,18 @@ import type {
 
 const TIMEOUT_MS = 10_000;
 const MAX_CONTROLS = 100;
+const LONG_LIST_PRIMARY_CONTROLS = 35;
+const LONG_LIST_SUMMARY_CHARS = 3000;
+const LONG_LIST_HALVES = 2;
+const LONG_LIST_HALF_CHARS = LONG_LIST_SUMMARY_CHARS / LONG_LIST_HALVES;
 const MAX_FIELD_CHARS = 100;
 const MAX_STATE_CHARS = 6000;
 const MIN_STATE_CHARS = 1200;
 const PROBABILITY_TOLERANCE = 0.02;
 const COMPLETION_CLASSES = 2;
 const COMPLETION_THRESHOLD = 0.6;
+const DRAFT_COMPLETION_THRESHOLD = 0.5;
+const ACTION_MATCH_THRESHOLD = 0.8;
 const TEXT_CONTENT = new Set([
   "AXStaticText",
   "AXTextArea",
@@ -35,7 +47,12 @@ interface Decision {
   readonly latencyMs: number;
   readonly probabilities: ActionProbabilities;
   readonly completion?: BinaryAnswer;
+  readonly completionTarget?: BinaryAnswer;
+  readonly completionCommit?: BinaryAnswer;
   readonly checks?: readonly ActionCheck[];
+  readonly operation?: OperationDecision;
+  readonly rejectedOperations?: readonly OperationDecision[];
+  readonly candidates?: readonly Action[];
 }
 
 interface DecisionInput {
@@ -43,6 +60,11 @@ interface DecisionInput {
   readonly observation: Observation;
   readonly actions: ActionChoices;
   readonly context?: string;
+  readonly feedback?: string;
+  readonly completionEvidence?: string;
+  readonly inspectClick?: (
+    action: Extract<Action, { kind: "click_element" }>,
+  ) => Promise<ClickInspection>;
   readonly mode?: "browser" | "desktop" | undefined;
 }
 interface DecisionModel {
@@ -53,6 +75,9 @@ function describeControl(element: Window["elements"][number]): string {
   let value = "";
   if (element.value !== undefined && element.value !== null) {
     value = String(element.value);
+  }
+  if (isEditableElement(element)) {
+    return `Editable text field ${JSON.stringify(textTargetName(element))}: current text ${JSON.stringify(value.slice(0, MAX_FIELD_CHARS))}`;
   }
   const flags = [
     element.enabled === false ? "disabled" : "",
@@ -71,18 +96,35 @@ function describeObservation(observation: Observation, contextLength: number): s
   const current = observation.window;
   if (current === undefined) {
     if (observation.application !== undefined) {
-      return `Selected application: ${observation.application.name}. It is running without a controllable window.\nOther windows: ${windows}`;
+      const available = observation.desktop.windows.some(
+        (window) => window.pid === observation.application?.pid,
+      );
+      return `Selected application: ${observation.application.name}. ${available ? "Choose one of its available windows." : "It is running without a controllable window."}\nAvailable windows: ${windows}`;
     }
     return `Windows: ${windows}\nNo window selected.`;
   }
-  const controls = current.elements
-    .slice(0, MAX_CONTROLS)
+  const allControls = relevantControls(current);
+  const controls = allControls
+    .slice(0, allControls.length > MAX_CONTROLS ? LONG_LIST_PRIMARY_CONTROLS : MAX_CONTROLS)
     .map((element) => describeControl(element))
+    .join("\n");
+  const remaining =
+    allControls.length > MAX_CONTROLS ? allControls.slice(LONG_LIST_PRIMARY_CONTROLS) : [];
+  const laterControls = remaining
+    .filter((element) => (element.actions ?? []).length > 0)
+    .map((element) => `${element.role} ${JSON.stringify(element.label ?? "")}`)
     .join(" | ");
+  const laterSummary =
+    laterControls.length <= LONG_LIST_SUMMARY_CHARS
+      ? laterControls
+      : `${laterControls.slice(0, LONG_LIST_HALF_CHARS)} ... ${laterControls.slice(-LONG_LIST_HALF_CHARS)}`;
   const lines = [
-    `Windows: ${windows}`,
     `Current window: ${current.app_name}: ${current.window_title}`,
+    ...(current.url === undefined ? [] : [`Current URL: ${current.url}`]),
     `Visible controls and values: ${controls.slice(0, Math.max(MIN_STATE_CHARS, MAX_STATE_CHARS - contextLength))}`,
+    ...(remaining.length === 0
+      ? []
+      : [`Further actionable controls (${remaining.length} later rows): ${laterSummary}`]),
   ];
   return lines.join("\n");
 }
@@ -91,6 +133,9 @@ function decisionState(input: DecisionInput): string {
   const state = [`User request: ${input.task}`];
   if (input.context !== undefined && input.context.length > 0) {
     state.push(input.context);
+  }
+  if (input.feedback !== undefined && input.feedback.length > 0) {
+    state.push(input.feedback);
   }
   if (input.mode === undefined) {
     state.push(
@@ -134,11 +179,24 @@ function decision(answer: DecisionAnswer, actions: readonly Action[], latencyMs:
   return { action, latencyMs, probabilities: answer.probabilities };
 }
 
+function finishEligible(
+  complete: boolean,
+  target: BinaryAnswer | undefined,
+  commit: BinaryAnswer | undefined,
+): boolean {
+  return (
+    complete &&
+    (target === undefined ||
+      (target.choice === "A0" && (target.probabilities["A0"] ?? 0) >= ACTION_MATCH_THRESHOLD)) &&
+    (commit === undefined ||
+      (commit.choice === "A1" && (commit.probabilities["A1"] ?? 0) >= ACTION_MATCH_THRESHOLD))
+  );
+}
+
 class SystemOneHttpDecisionModel implements DecisionModel {
   private readonly apiKey: string | undefined;
   private readonly endpoint: string;
   private readonly modelId: string;
-  private displayRequest: { readonly task: string; readonly value: boolean } | undefined;
 
   public constructor(endpoint: string, modelId: string, apiKey?: string) {
     this.endpoint = endpoint;
@@ -146,15 +204,25 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     this.apiKey = apiKey;
   }
 
+  // Completion evidence has independent checks for target and unsubmitted dialog state.
+  // eslint-disable-next-line eslint/complexity
   public async choose(input: DecisionInput): Promise<Decision> {
     const checkCompletion =
       input.observation.window !== undefined || input.observation.application !== undefined;
     const start = performance.now();
     const completion = checkCompletion ? await this.checkCompletion(input) : undefined;
-    if (
+    const pendingDraft = hasPendingDialogDraft(input.observation.window);
+    const complete =
       completion?.choice === "A0" &&
-      (completion.probabilities["A0"] ?? 0) >= COMPLETION_THRESHOLD
-    ) {
+      (completion.probabilities["A0"] ?? 0) >=
+        (pendingDraft ? DRAFT_COMPLETION_THRESHOLD : COMPLETION_THRESHOLD);
+    const completionTarget =
+      complete && (input.context?.length ?? 0) > 0
+        ? await this.checkCompletionTarget(input)
+        : undefined;
+    const completionCommit =
+      complete && pendingDraft ? await this.checkCompletionCommit(input) : undefined;
+    if (completion !== undefined && finishEligible(complete, completionTarget, completionCommit)) {
       const action = input.actions.find((candidate) => candidate.kind === "finish");
       if (action === undefined) {
         throw new Error("The completion decision has no Finish option");
@@ -162,35 +230,121 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       return {
         action,
         completion,
+        ...(completionTarget === undefined ? {} : { completionTarget }),
+        ...(completionCommit === undefined ? {} : { completionCommit }),
         probabilities: completion.probabilities,
         latencyMs: performance.now() - start,
       };
     }
-    const actions = checkCompletion
+    const available = checkCompletion
       ? input.actions.filter((action) => action.kind !== "finish")
       : input.actions;
-    const payload = await this.request({
+    const selected = await this.chooseAvailable(
+      input,
+      completionTarget !== undefined &&
+        (completionTarget.choice === "A1" ||
+          (completionTarget.probabilities["A0"] ?? 0) < ACTION_MATCH_THRESHOLD)
+        ? targetCorrectionActions({
+            actions: available,
+            observation: input.observation,
+          })
+        : available,
+      start,
+    );
+    return {
+      ...selected,
+      ...(completion === undefined ? {} : { completion }),
+      ...(completionTarget === undefined ? {} : { completionTarget }),
+      ...(completionCommit === undefined ? {} : { completionCommit }),
+    };
+  }
+
+  private async chooseAvailable(
+    input: DecisionInput,
+    available: readonly Action[],
+    started: number,
+  ): Promise<Decision> {
+    let remaining = available;
+    const rejectedOperations: OperationDecision[] = [];
+    while (remaining.length > 0) {
+      // Each retry excludes the rejected operation before asking the model again.
+      // eslint-disable-next-line no-await-in-loop
+      const { actions, operation } = await this.operationActions(input, remaining);
+      // eslint-disable-next-line no-await-in-loop
+      const payload = await this.request({
+        model: this.modelId,
+        state: decisionState(input),
+        questions: {
+          next_action: {
+            type: "choice",
+            instructions: `Which action best advances this goal: ${input.task}`,
+            criteria: criteriaFor(
+              actions.map((action) => actionDescription(action, input.observation)),
+            ),
+          },
+        },
+      });
+      // eslint-disable-next-line no-await-in-loop
+      const selected = await this.selectAction(input, {
+        actions,
+        answer: payload.answers.next_action,
+        started,
+      });
+      if (selected !== undefined) {
+        return {
+          ...selected,
+          candidates: actions,
+          rejectedOperations,
+          ...(operation === undefined ? {} : { operation }),
+        };
+      }
+      if (operation !== undefined) {
+        rejectedOperations.push(operation);
+      }
+      remaining = remaining.filter((action) => !actions.includes(action));
+    }
+    throw new Error("No available action passed the model's checks for the current screen.");
+  }
+
+  private async operationActions(
+    input: DecisionInput,
+    actions: readonly Action[],
+  ): Promise<{ readonly actions: readonly Action[]; readonly operation?: OperationDecision }> {
+    const groups = actionGroups(actions);
+    if (
+      input.observation.window === undefined ||
+      !actions.some(
+        (action) => action.kind === "click_element" || action.kind === "compose_text",
+      ) ||
+      groups.length <= 1
+    ) {
+      return { actions };
+    }
+    const descriptions = groups.map((group) => group.description);
+    const response = await this.request({
       model: this.modelId,
       state: decisionState(input),
       questions: {
         next_action: {
           type: "choice",
-          instructions: "Which tool call should the computer agent make next?",
-          criteria: criteriaFor(actions.map((action) => describeAction(action))),
+          instructions: "Which operation is needed next to fulfill the user request?",
+          criteria: criteriaFor(descriptions),
         },
       },
     });
-    const selected = await this.selectAction(input, {
-      actions,
-      answer: payload.answers.next_action,
-      started: start,
-    });
-    return {
-      ...selected,
-      ...(completion === undefined ? {} : { completion }),
-    };
+    const answer = response.answers.next_action;
+    if (!validProbabilities(answer.probabilities, groups.length)) {
+      throw new Error("System One returned an invalid operation distribution");
+    }
+    const group = groups.find((_entry, index) => `A${index}` === answer.choice);
+    if (group === undefined) {
+      throw new Error("System One selected an unavailable operation");
+    }
+    return { actions: group.actions, operation: { options: descriptions, answer } };
   }
 
+  // Candidate checks include a separate persistent-effect gate before execution.
+  // eslint-disable-next-line eslint/max-statements
   private async selectAction(
     input: DecisionInput,
     selection: {
@@ -198,7 +352,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       readonly answer: DecisionAnswer;
       readonly started: number;
     },
-  ): Promise<Decision> {
+  ): Promise<Decision | undefined> {
     const { actions, answer, started } = selection;
     const initial = decision(answer, actions, performance.now() - started);
     const ranked = actions
@@ -209,7 +363,11 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       ...ranked.filter((entry) => entry.action !== initial.action).map((entry) => entry.action),
     ];
     const checks: ActionCheck[] = [];
-    for (const action of candidates) {
+    const observable =
+      input.observation.window !== undefined || input.observation.application !== undefined;
+    for (const action of candidates.filter(
+      (candidate) => candidate.kind !== "finish" || observable,
+    )) {
       const request = verificationRequest(action, input, this.modelId);
       if (request === undefined) {
         return { ...initial, action, checks, latencyMs: performance.now() - started };
@@ -222,28 +380,40 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         throw new Error("System One returned an invalid action verification");
       }
       checks.push({ action, answer: check });
-      if (check.choice === "A0") {
-        return { ...initial, action, checks, latencyMs: performance.now() - started };
+      if (
+        check.choice === "A0" &&
+        (action.kind !== "click_element" ||
+          (check.probabilities["A0"] ?? 0) >= ACTION_MATCH_THRESHOLD)
+      ) {
+        // The ordinary action match does not establish that a persistent click is authorized.
+        // eslint-disable-next-line no-await-in-loop
+        const commit = await verifyCommit({
+          action,
+          input,
+          model: this.modelId,
+          judge: async (query) => this.judge(query),
+        });
+        checks.push(...commit.checks);
+        if (commit.allowed) {
+          return { ...initial, action, checks, latencyMs: performance.now() - started };
+        }
       }
     }
-    throw new Error(
-      "The model rejected every available action. Update the request or select another surface.",
-    );
+    return undefined;
   }
 
   private async checkCompletion(input: DecisionInput): Promise<BinaryAnswer> {
     const { window } = input.observation;
-    const displayOnly = await this.isDisplayRequest(input.task);
-    const values =
-      window?.elements
-        .filter(
-          (element) =>
-            (element.value !== undefined && element.value !== null && element.value !== "") ||
-            element.selected === true ||
-            TEXT_CONTENT.has(element.role),
-        )
-        .map((element) => describeControl(element))
-        .join(" | ") ?? "";
+
+    const values = (window === undefined ? [] : relevantControls(window))
+      .filter(
+        (element) =>
+          (element.value !== undefined && element.value !== null && element.value !== "") ||
+          element.selected === true ||
+          TEXT_CONTENT.has(element.role),
+      )
+      .map((element) => describeControl(element))
+      .join(" | ");
     const state = [
       `User request: ${input.task}`,
       `Observed result: ${window?.app_name ?? input.observation.application?.name} is open.`,
@@ -251,7 +421,20 @@ class SystemOneHttpDecisionModel implements DecisionModel {
         ? "No controllable window is available."
         : `Window title: ${window.window_title}.`,
       ...(window?.url === undefined ? [] : [`Current URL: ${window.url}`]),
-      ...(displayOnly ? [] : [`Control values: ${values.slice(0, MAX_STATE_CHARS)}`]),
+      `Control values: ${values.slice(0, MAX_STATE_CHARS)}`,
+      ...(input.context === undefined
+        ? []
+        : [`Previous session context (reference only): ${input.context}`]),
+      ...(input.completionEvidence === undefined
+        ? []
+        : [`Executed actions in this request: ${input.completionEvidence}`]),
+      ...(window?.elements.some((element) =>
+        ["AXPopover", "AXSheet", "AXDialog"].includes(element.role),
+      ) === true
+        ? [
+            "A dialog or popover is still open. Its text fields can contain unsubmitted input. Verify the requested creation, saving, or submission before declaring completion.",
+          ]
+        : []),
     ].join("\n");
     const response = await this.request({
       model: this.modelId,
@@ -259,7 +442,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       questions: {
         next_action: {
           type: "choice",
-          instructions: "Has the user request been completed?",
+          instructions: `Has this user request been completed: ${input.task}?`,
           criteria: {
             A0: "true: The request is complete.",
             A1: "false: The request is not complete.",
@@ -274,32 +457,66 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     return answer;
   }
 
-  private async isDisplayRequest(task: string): Promise<boolean> {
-    if (this.displayRequest?.task === task) {
-      return this.displayRequest.value;
-    }
+  private async checkCompletionTarget(input: DecisionInput): Promise<BinaryAnswer> {
+    const { window } = input.observation;
+    const contents =
+      window?.elements.map((element) => describeControl(element)).join(" | ") ??
+      "No window selected.";
     const response = await this.request({
       model: this.modelId,
-      state: `User request: ${task}`,
+      state: [
+        `User request: ${input.task}`,
+        `Previous session context: ${input.context ?? ""}`,
+        `Executed actions in this request: ${input.completionEvidence ?? ""}`,
+        `Current window: ${window?.window_title ?? input.observation.application?.name ?? "None"}`,
+        `Current content: ${contents.slice(0, MAX_STATE_CHARS)}`,
+      ].join("\n"),
       questions: {
         next_action: {
           type: "choice",
           instructions:
-            "Does this request only ask to open or display something that already exists?",
+            "Does the current page or document match the user's intended target, considering the current request and previous session context?",
+          criteria: { A0: "Yes", A1: "No" },
+        },
+      },
+    });
+    const answer = binaryAnswerSchema.parse(response.answers.next_action);
+    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
+      throw new Error("System One returned an invalid target verification");
+    }
+    return answer;
+  }
+
+  private async checkCompletionCommit(input: DecisionInput): Promise<BinaryAnswer> {
+    const controls =
+      input.observation.window?.elements.map((element) => describeControl(element)).join(" | ") ??
+      "";
+    const response = await this.request({
+      model: this.modelId,
+      state: [
+        `User request: ${input.task}`,
+        `Current open dialog: ${controls.slice(0, MAX_STATE_CHARS)}`,
+        `Prior task context: ${input.context ?? ""}`,
+        `Executed actions in this request: ${input.completionEvidence ?? ""}`,
+        "Text shown in an open dialog can be an unsubmitted draft. Do not infer a saved result from field contents alone.",
+      ].join("\n"),
+      questions: {
+        next_action: {
+          type: "choice",
+          instructions:
+            "Does the user's requested final result require a committed change beyond the values currently shown in this open dialog?",
           criteria: {
-            A0: "true: Opening or displaying the requested item satisfies the request.",
-            A1: "false: The request requires further work beyond opening or displaying an item.",
+            A0: "Yes. The user requested a created, saved, or submitted result that is not yet observed.",
+            A1: "No. The user requested this dialog or an unsubmitted draft as the final state.",
           },
         },
       },
     });
     const answer = binaryAnswerSchema.parse(response.answers.next_action);
     if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
-      throw new Error("System One returned an invalid task classification");
+      throw new Error("System One returned an invalid commit verification");
     }
-    const value = answer.choice === "A0";
-    this.displayRequest = { task, value };
-    return value;
+    return answer;
   }
 
   private async request(body: DecisionRequest): Promise<DecisionResponse> {
@@ -311,6 +528,15 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       schema: decisionResponseSchema,
       timeoutMs: TIMEOUT_MS,
     });
+  }
+
+  private async judge(request: DecisionRequest): Promise<BinaryAnswer> {
+    const response = await this.request(request);
+    const answer = binaryAnswerSchema.parse(response.answers.next_action);
+    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
+      throw new Error("System One returned an invalid commit verification");
+    }
+    return answer;
   }
 }
 

@@ -1,5 +1,6 @@
 import type { Observation } from "../../agent/contracts.ts";
 import type { Session } from "./schema.ts";
+import { relevantControls } from "../../agent/controls.ts";
 
 const SNAPSHOT_CHARS = 4000;
 const REQUEST_CHARS = 500;
@@ -16,10 +17,11 @@ function summarizeObservation(observation: Observation): string {
     app: window.app_name,
     title: window.window_title,
     url: window.url,
-    controls: window.elements.map((element) => ({
+    controls: relevantControls(window).map((element) => ({
       role: element.role,
       label: element.label,
       value: element.value,
+      href: element.href,
     })),
   }).slice(0, SNAPSHOT_CHARS);
 }
@@ -28,6 +30,6 @@ function sessionContext(session: Session): string {
   if (turn === undefined) {
     return "";
   }
-  return `Previous request (historical context only): ${JSON.stringify(turn.task.slice(0, REQUEST_CHARS))}\nThe current request takes priority. Use history only to resolve references in the current request.`;
+  return `Previous request (historical context only): ${JSON.stringify(turn.task.slice(0, REQUEST_CHARS))}\nPrevious target (historical, not evidence of the current state): ${JSON.stringify(session.surface)}\nThe current request takes priority. Use history only to resolve references in the current request.`;
 }
 export { summarizeObservation, sessionContext };

@@ -1,5 +1,5 @@
 import type { Action, ActionChoices, Observation } from "./contracts.ts";
-import { actionKey, stateKey } from "./state-key.ts";
+import { actionKey, stateKey, textFieldKey } from "./state-key.ts";
 
 const UNCHANGED_ATTEMPTS = 2;
 const REMEMBERED_STATES = 128;
@@ -16,6 +16,7 @@ type UnchangedDestination =
     };
 
 class Progress {
+  private readonly satisfiedInputs = new Set<string>();
   private readonly urls = new Set<string>();
   private readonly applications = new Set<string>();
   private readonly documents = new Map<
@@ -61,7 +62,10 @@ class Progress {
     }
   }
 
-  public record(destination: UnchangedDestination | undefined): void {
+  public record(destination: UnchangedDestination | undefined, satisfiedInput?: string): void {
+    if (satisfiedInput !== undefined) {
+      this.satisfiedInputs.add(satisfiedInput);
+    }
     if (destination?.kind === "document") {
       this.documents.set(destination.applicationPid, destination);
     }
@@ -74,6 +78,12 @@ class Progress {
   }
 
   private redundant(action: Action, observation: Observation): boolean {
+    if (action.kind === "compose_text") {
+      const key = textFieldKey(observation, action.element_token);
+      if (key !== undefined && this.satisfiedInputs.has(key)) {
+        return true;
+      }
+    }
     if (action.kind === "refresh" && (this.failure?.count ?? 0) >= UNCHANGED_ATTEMPTS) {
       return true;
     }
@@ -160,6 +170,7 @@ class Progress {
     if (
       window === undefined &&
       observation.application !== undefined &&
+      !observation.desktop.windows.some((entry) => entry.pid === observation.application?.pid) &&
       this.applications.has(observation.application.name)
     ) {
       completed.push(

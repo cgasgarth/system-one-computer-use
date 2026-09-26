@@ -46,6 +46,7 @@ final class TaskRunner {
         child.currentDirectoryURL = URL(fileURLWithPath: root)
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = Bundle.main.object(forInfoDictionaryKey: "ToolSearchPath") as? String
+        environment["SYSTEM_ONE_NATIVE_BIN"] = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/NativeAccess").path
         child.environment = environment
         let output = Pipe()
         let stdin = Pipe()

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import type { Action, Desktop, Observation } from "./contracts.ts";
+import type { Action, Desktop, Observation, Window } from "./contracts.ts";
+import { isEditableElement } from "./contracts.ts";
+import { textTargetName } from "./controls.ts";
+import { textFieldKey } from "./state-key.ts";
+import { restoreSurface } from "../app/sessions/targets.ts";
 import type { ActionResult, TaskOptions } from "./types.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { Computer } from "../computer/types.ts";
@@ -10,12 +14,52 @@ interface InputContext {
   readonly options: TaskOptions;
   readonly computer: Readonly<Computer>;
 }
+async function verifyFieldValue(
+  computer: Readonly<Computer>,
+  expected: {
+    readonly pid: number;
+    readonly windowId: number;
+    readonly field: Window["elements"][number];
+    readonly text: string;
+  },
+): Promise<{
+  readonly key?: string;
+  readonly field: { readonly role: string; readonly label: string; readonly value: string };
+}> {
+  const written = await computer.window(expected.pid, expected.windowId);
+  const { field, text } = expected;
+  const matching = written.elements.filter(
+    (entry) =>
+      entry.role === field.role &&
+      entry.value === text &&
+      (entry.label === field.label || (field.label === field.value && entry.label === text)),
+  );
+  if (matching.length !== 1) {
+    throw new Error(
+      "The field did not show the requested value after writing. Inspect it before retrying.",
+    );
+  }
+  const [verified] = matching;
+  if (verified === undefined) {
+    throw new Error("The verified field is unavailable after writing.");
+  }
+  const key = textFieldKey(
+    { desktop: { apps: [], windows: [] }, window: written },
+    verified.element_token,
+  );
+  return {
+    ...(key === undefined ? {} : { key }),
+    field: { role: verified.role, label: verified.label ?? "", value: text },
+  };
+}
+// Text entry verifies the selected field before and after its single write.
+// eslint-disable-next-line eslint/max-statements
 async function enterText({
   action,
   observation,
   options,
   computer,
-}: InputContext): Promise<string> {
+}: InputContext): Promise<ActionResult> {
   if (action.kind !== "compose_text") {
     throw new Error("Expected a text input action");
   }
@@ -25,6 +69,7 @@ async function enterText({
   if (element === undefined) {
     throw new Error("The selected input is no longer available");
   }
+  const fieldMetadata = await computer.inspectField?.(action);
   const text = await options.text.generate({
     task: options.task,
     context: options.context ?? "",
@@ -32,7 +77,13 @@ async function enterText({
     tool: action.reason,
     observation,
     purpose: "text",
-    field: { label: element.label ?? element.role, value: String(element.value ?? "") },
+    field: {
+      role: element.role,
+      label: textTargetName(element),
+      value: String(element.value ?? ""),
+      ...fieldMetadata,
+      ...(element.placeholder === undefined ? {} : { placeholder: element.placeholder }),
+    },
   });
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
@@ -44,8 +95,17 @@ async function enterText({
       entry.role === element.role && entry.label === element.label && entry.value === element.value,
   );
   const [field] = matches;
-  if (matches.length !== 1 || field === undefined) {
-    throw new Error("The input changed while text was generated. Observe it again before typing.");
+  if (matches.length !== 1 || field === undefined || !isEditableElement(field)) {
+    throw new Error(
+      "The selected input changed or no longer accepts text. Observe it again before typing.",
+    );
+  }
+  if (field.value === text) {
+    const satisfiedInput = textFieldKey({ ...observation, window: fresh }, field.element_token);
+    return {
+      output: "The field already contains the requested text.",
+      ...(satisfiedInput === undefined ? {} : { satisfiedInput }),
+    };
   }
   await computer.typeText({
     kind: "type_text",
@@ -55,7 +115,18 @@ async function enterText({
     text,
     reason: action.reason,
   });
-  return `Entered ${JSON.stringify(text)}`;
+  const verified = await verifyFieldValue(computer, {
+    pid: fresh.pid,
+    windowId: fresh.window_id,
+    field,
+    text,
+  });
+  return {
+    output: `Entered ${JSON.stringify(text)}`,
+    performedAction: true,
+    verifiedField: verified.field,
+    ...(verified.key === undefined ? {} : { satisfiedInput: verified.key }),
+  };
 }
 async function openUrl(context: InputContext): Promise<ActionResult> {
   const { options, computer, observation } = context;
@@ -88,7 +159,7 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
     };
   }
   await computer.navigate(url);
-  return { output: `Opened ${url}` };
+  return { output: `Opened ${url}`, performedAction: true };
 }
 interface OpenedApplication {
   readonly name: string;
@@ -116,15 +187,6 @@ async function openApplication(context: InputContext): Promise<OpenedApplication
   }
   const before = await computer.desktop();
   const current = observation.window;
-  const selected = observation.application;
-  if (selected?.name === name && before.apps.some((app) => app.pid === selected.pid)) {
-    return {
-      name,
-      application: selected,
-      target: current === undefined ? undefined : { pid: current.pid, windowId: current.window_id },
-      unchanged: { kind: "application", name },
-    };
-  }
   if (
     current?.app_name === name &&
     before.windows.some(
@@ -142,13 +204,19 @@ async function openApplication(context: InputContext): Promise<OpenedApplication
   const application = desktop.apps.find((app) => app.name === name);
   const windows = desktop.windows.filter((window) => window.app_name === name);
   const [window] = windows;
+  const previous = options.previousSurface;
+  const restored =
+    previous?.kind === "desktop" && previous.app === name
+      ? await restoreSurface(computer, previous)
+      : undefined;
   return {
     name,
     ...(application === undefined ? {} : { application }),
     target:
-      windows.length === 1 && window !== undefined
+      restored ??
+      (windows.length === 1 && window !== undefined
         ? { pid: window.pid, windowId: window.window_id }
-        : undefined,
+        : undefined),
   };
 }
 export { enterText, openUrl, openApplication };

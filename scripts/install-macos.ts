@@ -13,6 +13,7 @@ const PRIVATE_FILE_MODE = 0o600;
 const sources = [
   "main",
   "AppDelegate",
+  "StatusActivity",
   "TaskMenu",
   "TaskRunner",
   "VoiceShortcut",
@@ -101,6 +102,18 @@ if (!(await Bun.file(environment).exists())) {
   await chmod(environment, PRIVATE_FILE_MODE);
 }
 await command(["xcrun", "swiftc", "-swift-version", "6", "-O", ...sources, "-o", binary]);
+await command([
+  "xcrun",
+  "swiftc",
+  "-swift-version",
+  "6",
+  "-O",
+  ...["main", "WindowEvents", "WritableFields"].map((name) =>
+    path.join(root, "native", "NativeAccess", `${name}.swift`),
+  ),
+  "-o",
+  path.join(contents, "MacOS", "NativeAccess"),
+]);
 const plist = path.join(contents, "Info.plist");
 await Bun.write(plist, JSON.stringify(info));
 await command(["plutil", "-convert", "xml1", plist]);

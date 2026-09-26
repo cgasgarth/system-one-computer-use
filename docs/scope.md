@@ -32,14 +32,21 @@ not upload to YouTube; the user deleted the previous draft.
 ## Native interaction
 
 Use an anchored native menu-bar dropdown, with a separate Settings page inside
-it. There is no web launcher or detached task window. Default to Any; use model
-planning to select the driver, with Chrome and macOS as optional overrides.
+it. There is no web launcher or detached task window. Default to Auto; let the
+decision model select the driver, with Chrome and macOS as optional overrides.
 Start and stop Handy voice tasks with Command–Option–C by default. Support user
 shortcut changes, saved default targets, and model connection settings.
 
-Show live mean System One latency, measured decisions per second, and total task
-time. Keep a persistent Playwright MCP connection in the user's Chrome profile,
+Show median decision latency and successful tool actions per second. Failed
+attempts, waits, and internal decisions do not count as tool actions. Keep a persistent Playwright MCP connection in the user's Chrome profile,
 reuse its configured extension token, and close the connection Welcome page.
 Use the latest Playwright MCP release. Respect its per-client tab groups.
 Validate task behavior, menu interaction, settings persistence, cancellation,
 and the voice handoff with concrete evidence and report unverified limits.
+
+Each desktop request must resolve its application before exposing controls from
+a saved window. Preserve session context for follow-ups, but do not treat the
+previous target as the destination of a new request. Scope native controls to
+active dialogs and popovers. Text generation supplies a complete field value;
+set that value, read it back, and treat an unchanged value as a no-op. Use the
+accessibility operations reported by the control, including Confirm.

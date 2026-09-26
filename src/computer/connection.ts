@@ -9,7 +9,7 @@ import type { ClickAction, KeyAction, TypeAction } from "./types.ts";
 import { CuaError } from "./errors.ts";
 
 const ERROR_DETAIL_LIMIT = 800;
-const MAX_ELEMENTS = 150;
+const MAX_ELEMENTS = 1000;
 const MIN_WINDOW_WIDTH = 120;
 const MIN_WINDOW_HEIGHT = 60;
 const acceptedStatus = z
@@ -35,8 +35,6 @@ const unavailableWindowSchema = z.object({
   window_id: z.number().int(),
 });
 const observedWindowSchema = z.union([windowSchema, unavailableWindowSchema]);
-const WINDOW_ATTEMPTS = 15;
-const WINDOW_SETTLE_MS = 100;
 const cursorDisabledSchema = z.object({ enabled: z.literal(false), session: z.string() });
 const sessionSchema = z.object({ active: z.literal(true), session: z.string() });
 const endedSessionSchema = z.object({ active: z.literal(false), session: z.string() });
@@ -83,7 +81,12 @@ class CuaConnection {
         .filter((item) => item.type === "text")
         .map((item) => item.text)
         .join(" ");
-      throw new CuaError(`Cua ${request.name} failed: ${detail.slice(0, ERROR_DETAIL_LIMIT)}`);
+      throw new CuaError(
+        `Cua ${request.name} failed: ${detail.slice(0, ERROR_DETAIL_LIMIT)}`,
+        detail.includes("(same_pid_keyboard_ambiguity)")
+          ? "keyboard_target_ambiguous"
+          : "operation_failed",
+      );
     }
     const parsed = resultStatus.and(schema).safeParse(result.structuredContent);
     if (!parsed.success) {
@@ -162,7 +165,7 @@ class CuaConnection {
   }
 
   public async window(pid: number, windowId: number): Promise<Window> {
-    return this.readWindow(pid, windowId, WINDOW_ATTEMPTS);
+    return this.readWindow(pid, windowId);
   }
   public async focusWindow(pid: number, windowId: number): Promise<void> {
     await this.invoke(
@@ -187,7 +190,7 @@ class CuaConnection {
     return state.apps.some((app) => app.pid === pid && app.active && app.running);
   }
 
-  private async readWindow(pid: number, windowId: number, attempts: number): Promise<Window> {
+  private async readWindow(pid: number, windowId: number): Promise<Window> {
     const state = await this.invoke(
       {
         name: "get_window_state",
@@ -204,17 +207,22 @@ class CuaConnection {
     if (!("degraded_reason" in state)) {
       return state;
     }
-    if (!state.degraded_reason.startsWith("ax_window_unresolved") || attempts <= 1) {
-      throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
-    }
-    await Bun.sleep(WINDOW_SETTLE_MS);
-    return this.readWindow(pid, windowId, attempts - 1);
+    throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
   }
 
   public async click(action: ClickAction): Promise<void> {
     const { element_token, pid, window_id } = action;
     await this.invoke(
-      { arguments: { element_token, pid, window_id, session: this.session }, name: "click" },
+      {
+        arguments: {
+          element_token,
+          pid,
+          window_id,
+          session: this.session,
+          action: action.operation ?? "press",
+        },
+        name: "click",
+      },
       resultStatus,
     );
   }
@@ -223,8 +231,8 @@ class CuaConnection {
     const { element_token, pid, text, window_id } = action;
     await this.invoke(
       {
-        arguments: { element_token, pid, text, window_id, session: this.session },
-        name: "type_text",
+        arguments: { element_token, pid, value: text, window_id, session: this.session },
+        name: "set_value",
       },
       resultStatus,
     );
@@ -232,15 +240,26 @@ class CuaConnection {
 
   public async pressKey(action: KeyAction): Promise<void> {
     const { key, modifiers, pid, window_id } = action;
-    await this.invoke(
-      modifiers.length === 0
-        ? { arguments: { key, pid, window_id, session: this.session }, name: "press_key" }
-        : {
-            arguments: { keys: [...modifiers, key], pid, window_id, session: this.session },
-            name: "hotkey",
-          },
-      resultStatus,
-    );
+    const name = modifiers.length === 0 ? "press_key" : "hotkey";
+    const args = {
+      pid,
+      window_id,
+      session: this.session,
+      ...(modifiers.length === 0 ? { key } : { keys: [...modifiers, key] }),
+    };
+    try {
+      await this.invoke({ name, arguments: args }, resultStatus);
+    } catch (error) {
+      if (!(error instanceof CuaError) || error.code !== "keyboard_target_ambiguous") {
+        throw error;
+      }
+      // CUA explicitly refuses ambiguous background delivery. Its foreground
+      // Mode verifies the exact target window and restores prior focus afterward.
+      await this.invoke(
+        { name, arguments: { ...args, delivery_mode: "foreground" } },
+        resultStatus,
+      );
+    }
   }
 }
 

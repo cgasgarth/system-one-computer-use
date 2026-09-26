@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { decisionMetrics } from "../src/app/decision-metrics.ts";
 
 const TIMINGS = [
-  { decisionMs: 100, actionMs: 200, elapsedMs: 5300 },
-  { decisionMs: 1000, actionMs: 200, elapsedMs: 6600 },
-  { decisionMs: 200, actionMs: 200, elapsedMs: 7100 },
+  { performedAction: true, decisionMs: 100, actionMs: 200, elapsedMs: 5300 },
+  { performedAction: true, decisionMs: 1000, actionMs: 200, elapsedMs: 6600 },
+  { performedAction: true, decisionMs: 200, actionMs: 200, elapsedMs: 7100 },
 ];
 const ODD_MEDIAN = 200;
 const EVEN_MEDIAN = 550;
@@ -21,4 +21,16 @@ test("leaves metrics unset until a decision completes", () => {
     medianDecisionMs: undefined,
     modelActionsPerSecond: undefined,
   });
+});
+
+test("reports zero tool throughput for cached decisions whose tools failed", () => {
+  const failed = TIMINGS.map((step) => ({
+    actionMs: step.actionMs,
+    elapsedMs: step.elapsedMs,
+    decisionMs: 1,
+    performedAction: false,
+  }));
+  const metrics = decisionMetrics(failed);
+  expect(metrics.medianDecisionMs).toBe(1);
+  expect(metrics.modelActionsPerSecond).toBe(0);
 });
