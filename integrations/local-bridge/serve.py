@@ -306,18 +306,30 @@ def load_text(model_path: str):
             context.stop()
         text = []
         finish_reason = "stop"
+        usage = {
+            "prompt_tokens": len(context.prompt),
+            "prompt_tokens_details": {
+                "cached_tokens": max(0, context.prompt_cache_count),
+            },
+        }
         try:
             for token in stream:
                 if cancelled.is_set():
                     context.stop()
-                    return {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}
+                    return {
+                        "choices": [{"message": {"content": ""}, "finish_reason": "stop"}],
+                        "usage": usage,
+                    }
                 if token.state == "normal":
                     text.append(token.text)
                 if token.finish_reason is not None:
                     finish_reason = token.finish_reason
         finally:
             context.stop()
-        return {"choices": [{"message": {"content": "".join(text)}, "finish_reason": finish_reason}]}
+        return {
+            "choices": [{"message": {"content": "".join(text)}, "finish_reason": finish_reason}],
+            "usage": usage,
+        }
 
     return answer, generator.stop_and_join
 

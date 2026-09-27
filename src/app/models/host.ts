@@ -3,10 +3,11 @@ import type { ModelPreferences } from "./catalog.ts";
 import { hasNewerArtifacts, latestManifest, readManifest } from "./artifacts.ts";
 import type { RuntimePaths } from "./commands.ts";
 import { ModelSlot } from "./slot.ts";
-import { writePreferences } from "./preferences.ts";
+import { modelName, writePreferences } from "./preferences.ts";
 import { prepareSocketDirectory, socketPaths } from "./sockets.ts";
 import type { SocketPaths } from "./sockets.ts";
 import { forwardRequest } from "./forward.ts";
+import { TextPrefill } from "./text-prefill.ts";
 
 const IDLE_MS = 300_000;
 interface HostOptions {
@@ -34,6 +35,7 @@ class ModelHost {
   private updates: readonly UpdateStatus[] = [];
   private readonly updateAbort = new AbortController();
   private readonly data: string;
+  private readonly textPrefill: TextPrefill;
   public constructor(options: HostOptions) {
     this.data = options.paths.data;
     this.preferences = options.preferences;
@@ -56,6 +58,7 @@ class ModelHost {
         this.snapshot();
       },
     });
+    this.textPrefill = new TextPrefill({ socketPath: this.sockets.text });
   }
   public snapshot(): void {
     if (this.closed) {
@@ -82,6 +85,7 @@ class ModelHost {
   }
   public async configure(preferences: Readonly<ModelPreferences>): Promise<void> {
     this.assertOpen();
+    this.textPrefill.cancel();
     clearTimeout(this.timer);
     try {
       this.preferences = preferences;
@@ -123,6 +127,14 @@ class ModelHost {
       this.assertOpen();
       warmed = true;
       console.log(JSON.stringify({ event: "warmed" }));
+      if (
+        this.text.selection.source === "local" &&
+        !this.held &&
+        this.activeRequests === 0 &&
+        !this.updating
+      ) {
+        void this.textPrefill.start(this.text.generation, modelName(this.text.selection));
+      }
     } finally {
       if (!warmed) {
         this.prewarming = false;
@@ -132,6 +144,7 @@ class ModelHost {
   }
   public async prepare(requestId: string): Promise<void> {
     this.assertOpen();
+    this.textPrefill.cancel();
     const wasHeld = this.held;
     this.held = true;
     this.prewarming = false;
@@ -188,12 +201,7 @@ class ModelHost {
     this.snapshot();
   }
   public async updateModel(role: "decision" | "text"): Promise<void> {
-    this.assertOpen();
-    if (this.held || this.activeRequests > 0 || this.updating) {
-      throw new Error("Stop the current task before updating a model.");
-    }
-    this.updating = true;
-    clearTimeout(this.timer);
+    this.reserveUpdate();
     try {
       const slot = this[role];
       if (slot.selection.source !== "local") {
@@ -214,6 +222,15 @@ class ModelHost {
       this.updating = false;
       this.schedule();
     }
+  }
+  private reserveUpdate(): void {
+    this.assertOpen();
+    if (this.held || this.activeRequests > 0 || this.updating) {
+      throw new Error("Stop the current task before updating a model.");
+    }
+    this.textPrefill.cancel();
+    this.updating = true;
+    clearTimeout(this.timer);
   }
   private schedule(): void {
     clearTimeout(this.timer);
@@ -237,6 +254,7 @@ class ModelHost {
     if (this.held || this.activeRequests > 0) {
       return;
     }
+    this.textPrefill.cancel();
     try {
       await this.decision.unload();
       await this.text.unload();
@@ -254,6 +272,7 @@ class ModelHost {
     if (this.updating) {
       throw new Error("A model update is in progress. Retry the request after it finishes.");
     }
+    this.textPrefill.cancel();
     this.activeRequests += 1;
     clearTimeout(this.timer);
     try {
@@ -281,6 +300,7 @@ class ModelHost {
     }
     this.closed = true;
     this.updateAbort.abort();
+    this.textPrefill.cancel();
     clearTimeout(this.timer);
     this.closing = this.closeSlots();
     await this.closing;

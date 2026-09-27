@@ -60,6 +60,7 @@ class ModelSlot {
   private closed = false;
   private state: LoadState = "unloaded";
   private message = "Not loaded";
+  private loadedGeneration = 0;
   private readonly role: ModelRole;
   public readonly socketPath: string;
   private readonly paths: RuntimePaths;
@@ -82,6 +83,9 @@ class ModelSlot {
   }
   public status(): SlotStatus {
     return { role: this.role, selection: this.selection, state: this.state, message: this.message };
+  }
+  public get generation(): number {
+    return this.loadedGeneration;
   }
   private update(state: LoadState, message: string): void {
     this.state = state;
@@ -183,6 +187,7 @@ class ModelSlot {
     );
     this.abort.signal.throwIfAborted();
     this.assertOpen();
+    this.loadedGeneration += 1;
     this.update("ready", `${model.name} is ready`);
   }
   private async download(
