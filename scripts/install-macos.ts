@@ -15,6 +15,8 @@ const runtime = path.join(contents, "Resources", "runtime");
 const data = path.join(os.homedir(), "Library", "Application Support", "SystemOneComputerUse");
 const PRIVATE_FILE_MODE = 0o600;
 const SHA1_IDENTITY = /^[0-9a-f]{40}$/iu;
+const MINIMUM_MACOS = "15.0";
+const swiftTarget = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macosx${MINIMUM_MACOS}`;
 const sources = [
   "main",
   "AppDelegate",
@@ -39,6 +41,7 @@ const info = {
   CFBundleShortVersionString: "0.1.0",
   CFBundleVersion: "1",
   LSUIElement: true,
+  LSMinimumSystemVersion: MINIMUM_MACOS,
   NSHighResolutionCapable: true,
   AppDataPath: data,
   BunPath: path.join(installedApp, "Contents", "MacOS", "bun"),
@@ -103,7 +106,7 @@ async function signedProbe(identity: string, temporary: string, version: string)
   const source = path.join(temporary, `${version}.swift`);
   const executable = path.join(temporary, version);
   await Bun.write(source, `print(${JSON.stringify(version)})\n`);
-  await command(["xcrun", "swiftc", source, "-o", executable]);
+  await command(["xcrun", "swiftc", "-target", swiftTarget, source, "-o", executable]);
   await command([
     "codesign",
     "--force",
@@ -212,10 +215,23 @@ async function prepareRuntime(): Promise<void> {
 }
 
 async function buildSignedApp(selectedIdentity: string): Promise<void> {
-  await command(["xcrun", "swiftc", "-swift-version", "6", "-O", ...sources, "-o", binary]);
   await command([
     "xcrun",
     "swiftc",
+    "-target",
+    swiftTarget,
+    "-swift-version",
+    "6",
+    "-O",
+    ...sources,
+    "-o",
+    binary,
+  ]);
+  await command([
+    "xcrun",
+    "swiftc",
+    "-target",
+    swiftTarget,
     "-swift-version",
     "6",
     "-O",

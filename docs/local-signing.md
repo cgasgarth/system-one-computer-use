@@ -32,3 +32,5 @@ The first move from the old ad hoc signature to a certificate signature can
 require a one-time Accessibility approval in macOS Settings. Later rebuilds
 must use the **same** identity and bundle identifier. The installer accepts
 only a valid fingerprint supplied for that run; it never signs ad hoc.
+
+The installer sets an explicit macOS 15.0 deployment target for the app, helper, and signing probes. This prevents a newer toolchain default or shell setting from producing an app that requires a later macOS version than the build machine.

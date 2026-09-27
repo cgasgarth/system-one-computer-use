@@ -262,3 +262,11 @@ Observed outcomes with Kev 4B:
 The latest file run used six steps in 17.6 seconds. CUA 0.28.2 reported AXOpen errors despite folder/file transitions taking effect; those errors remain in the trace. The harness re-observed the result and verified the file URL before completion. This does not establish that all native actions are reliable. The test used an owned two-second generated clip and did not open personal media.
 
 CLI evaluations now prepare unloaded models before their task timer, matching the app's preparation stage. An earlier zero-step timeout was a cold-model preparation failure in the evaluation runner. Task timings exclude weight loading and are not cold-start benchmarks. Raw traces remain under ignored `runs/qa/recovery/` and `runs/recovery/`.
+
+#### Installed-app verification
+
+The signed installed build completed `Open https://en.wikipedia.org/wiki/Chicago in Chrome.` in two decisions (9.9 seconds) and `Open the Optimus player app for me` in two decisions (1.6 seconds). These requests were submitted through the native task dropdown. The saved traces report the matching final Chrome URL and native app/window. System One and CUA Accessibility remained Granted; CUA Screen Recording remained Granted after replacement.
+
+The final browser fixture reruns completed edit/save in four steps (2.5 seconds, one exact stored write) and an unsaved draft in two steps (1.0 second, zero writes). The full source gate passed 151 tests, strict type-aware lint, the 600-line limit, formatting, and Swift/native checks. These checks cover the listed flows; arbitrary canvas and multi-app workflows remain unvalidated.
+
+An installed-launch check caught a Swift toolchain default targeting macOS 28 on a macOS 27 host. The installer now pins macOS 15.0 for all native binaries and sets the matching bundle minimum. The rebuilt signed app launched successfully. Temporary local web pages and the generated clip were cleaned up; Chrome blocked closing one blank tab while another extension UI was active.
