@@ -356,6 +356,9 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     ...(decision.rejectedOperations === undefined
       ? {}
       : { rejectedOperations: decision.rejectedOperations }),
+    ...(decision.rejectedActions === undefined
+      ? {}
+      : { rejectedActions: decision.rejectedActions }),
     ...(decision.checks === undefined ? {} : { checks: decision.checks }),
     observation: summarizeObservation(observation),
     ...(finishSurface?.decision === undefined ? {} : { terminalDecision: finishSurface.decision }),

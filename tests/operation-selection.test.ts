@@ -52,7 +52,9 @@ test("selects an operation before a compatible target and records both distribut
     },
   });
   try {
-    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test", {
+      maxChoices: 3,
+    }).choose({
       task: "Write hello",
       mode: "desktop",
       actions,

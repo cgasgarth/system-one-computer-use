@@ -107,6 +107,9 @@ test.each([false, true])(
         ) {
           return rankedAnswer("A1", ["A0", "A1"]);
         }
+        if (question.startsWith("Which action best advances")) {
+          return rankedAnswer("A0", Object.keys(body.questions.next_action.criteria));
+        }
         throw new Error(`Unexpected question: ${question}`);
       },
     });
