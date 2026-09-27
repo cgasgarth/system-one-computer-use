@@ -9,6 +9,7 @@ import type {
   TypeAction,
 } from "../types.ts";
 import { PlaywrightConnection } from "./connection.ts";
+import type { PlaywrightConnectionOptions } from "./connection.ts";
 import { parseSnapshot, selectedOption } from "./snapshot.ts";
 import { closeConnectionPage, isConnectionPage } from "./tabs.ts";
 
@@ -124,11 +125,13 @@ function browserKey(key: string): string {
 
 class PlaywrightComputer implements ManagedComputer {
   private readonly connection: PlaywrightConnection;
+  private readonly mode: "extension" | "isolated";
   private title = "Current Chrome tab";
   private prepared: Promise<void> | undefined = undefined;
 
-  public constructor(token?: string) {
-    this.connection = new PlaywrightConnection(token);
+  public constructor(options: PlaywrightConnectionOptions = {}) {
+    this.mode = options.mode ?? "extension";
+    this.connection = new PlaywrightConnection(options);
   }
 
   public async close(): Promise<void> {
@@ -137,8 +140,10 @@ class PlaywrightComputer implements ManagedComputer {
 
   public async desktop(): Promise<Desktop> {
     await this.connection.ready();
-    this.prepared ??= closeConnectionPage(this.connection);
-    await this.prepared;
+    if (this.mode === "extension") {
+      this.prepared ??= closeConnectionPage(this.connection);
+      await this.prepared;
+    }
     return {
       apps: [{ bundle_id: "com.google.Chrome", name: "Google Chrome", pid: 0 }],
       windows: [{ app_name: "Google Chrome", pid: 0, title: this.title, window_id: 0 }],

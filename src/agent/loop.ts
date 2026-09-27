@@ -1,11 +1,19 @@
 import { z } from "zod";
 import type { Observation, Surface } from "./contracts.ts";
 import type { TaskOptions, TaskResult, TaskStep } from "./types.ts";
+import type { ComputerMode } from "../computer/types.ts";
 import { SurfaceSession } from "./surface.ts";
 import { performTurn } from "./turn.ts";
 import { Progress } from "./progress.ts";
 
 const validationIssues = z.array(z.object({ message: z.string() })).nonempty();
+function initialSurface(options: Readonly<TaskOptions>): ComputerMode | undefined {
+  const available = options.availableSurfaces ?? (["browser", "desktop"] as const);
+  if (options.preferredSurface !== undefined && !available.includes(options.preferredSurface)) {
+    throw new Error("The preferred tool surface is unavailable in this run.");
+  }
+  return options.preferredSurface ?? (available.length === 1 ? available[0] : undefined);
+}
 async function bookmark(
   options: TaskOptions,
   surfaces: Readonly<SurfaceSession>,
@@ -81,17 +89,18 @@ async function finish(context: FinishContext): Promise<TaskResult> {
   };
 }
 async function runTask(options: TaskOptions): Promise<TaskResult> {
+  const initial = initialSurface(options);
   const started = performance.now();
   const steps: TaskStep[] = [];
   const surfaces = new SurfaceSession();
   const progress = new Progress();
   let lastError = "";
-  if (options.preferredSurface !== undefined) {
+  if (initial !== undefined) {
     try {
       await surfaces.select(
-        options.preferredSurface,
-        options.computer(options.preferredSurface),
-        options.previousSurface,
+        initial,
+        options.computer(initial),
+        options.previousSurface?.kind === initial ? options.previousSurface : undefined,
       );
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Could not restore the selected surface";

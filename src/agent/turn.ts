@@ -112,7 +112,19 @@ async function selectSurface({ options, surfaces, action }: TurnContext): Promis
   if (action.kind !== "select_surface") {
     throw new Error("Expected a surface selection");
   }
-  await surfaces.select(action.surface, options.computer(action.surface), options.previousSurface);
+  if (
+    options.availableSurfaces !== undefined &&
+    !options.availableSurfaces.includes(action.surface)
+  ) {
+    throw new Error("The selected tool surface is unavailable in this run.");
+  }
+  const saved =
+    options.previousSurface !== undefined &&
+    (options.availableSurfaces === undefined ||
+      options.availableSurfaces.includes(options.previousSurface.kind))
+      ? options.previousSurface
+      : undefined;
+  await surfaces.select(action.surface, options.computer(action.surface), saved);
   return { output: `Selected ${action.surface} tools` };
 }
 async function act(context: TurnContext): Promise<ActionResult> {
@@ -185,6 +197,9 @@ function chooseInput(
       observation,
       observationFailed,
       applications: options.applications,
+      ...(options.availableSurfaces === undefined
+        ? {}
+        : { availableSurfaces: options.availableSurfaces }),
     }),
     observation,
   );
@@ -209,6 +224,7 @@ function chooseInput(
     ...(inspectClick === undefined ? {} : { inspectClick }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.onDecisionRequest === undefined ? {} : { onRequest: options.onDecisionRequest }),
+    ...(options.onDecisionWire === undefined ? {} : { onWire: options.onDecisionWire }),
     mode: surfaces.mode,
   };
 }

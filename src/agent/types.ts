@@ -1,6 +1,7 @@
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import type { ActionProbabilities } from "../models/system-one-schema.ts";
 import type { Decision, DecisionModel, DecisionRequestEvent } from "../models/system-one.ts";
+import type { DecisionWireEvent } from "../models/decision-request.ts";
 import type { TextModel } from "../models/text.ts";
 import type { Action, Surface } from "./contracts.ts";
 import type { UnchangedDestination } from "./progress.ts";
@@ -67,10 +68,12 @@ interface TaskOptions {
   readonly task: string;
   readonly context?: string;
   readonly preferredSurface?: ComputerMode;
+  readonly availableSurfaces?: readonly [ComputerMode, ...ComputerMode[]];
   readonly previousSurface?: Surface;
   readonly signal?: Readonly<AbortSignal>;
   readonly onStep?: (step: TaskStep) => void | Promise<void>;
   readonly onStage?: (event: TaskStageEvent) => void | Promise<void>;
   readonly onDecisionRequest?: (event: DecisionRequestEvent) => void;
+  readonly onDecisionWire?: (event: DecisionWireEvent) => void;
 }
 export type { TaskStageEvent, TaskStep, TaskResult, TaskOptions, ActionResult };

@@ -76,6 +76,38 @@ test("rejects an invalid external probability distribution", async () => {
     await server.stop(true);
   }
 });
+test("observes the exact typed request before transport without changing a choice", async () => {
+  const wire = Promise.withResolvers<DecisionRequest>();
+  const sent = Promise.withResolvers<DecisionRequest>();
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      sent.resolve(decisionRequestSchema.parse(await request.json()));
+      return Response.json({
+        answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } } },
+      });
+    },
+  });
+  try {
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
+      task: "Open the requested app",
+      observation: { desktop: { apps: [], windows: [] } },
+      actions: [
+        { kind: "request_app", name: "Notes", reason: "Open Notes" },
+        { kind: "blocked", reason: "Blocked" },
+      ],
+      onWire(event) {
+        expect(event.phase).toBe("target");
+        wire.resolve(event.body);
+        throw new Error("An observer cannot veto a decision.");
+      },
+    });
+    expect(await wire.promise).toEqual(await sent.promise);
+    expect(result.action.kind).toBe("request_app");
+  } finally {
+    await server.stop(true);
+  }
+});
 
 test("keeps semantic action text stable when Cua handles change", () => {
   const action: Action = {

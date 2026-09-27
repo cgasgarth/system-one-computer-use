@@ -59,7 +59,11 @@ function createModels(config: Config): Models {
 
 function createComputer(config: Config, mode: ComputerMode): ManagedComputer {
   if (mode === "browser") {
-    return new PlaywrightComputer(config.PLAYWRIGHT_MCP_EXTENSION_TOKEN);
+    return new PlaywrightComputer(
+      config.PLAYWRIGHT_MCP_EXTENSION_TOKEN === undefined
+        ? {}
+        : { extensionToken: config.PLAYWRIGHT_MCP_EXTENSION_TOKEN },
+    );
   }
   return new CuaMcpComputer(config.CUA_DRIVER_BIN, config.SYSTEM_ONE_NATIVE_BIN);
 }

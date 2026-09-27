@@ -30,6 +30,11 @@ interface DecisionRequestContext {
   readonly signal?: Readonly<AbortSignal>;
   readonly beforeRequest?: () => void;
   readonly onRequest?: (event: DecisionRequestEvent) => void;
+  readonly onWire?: (event: DecisionWireEvent) => void;
+}
+interface DecisionWireEvent {
+  readonly phase: DecisionRequestPhase;
+  readonly body: DecisionRequest;
 }
 interface DecisionCall {
   readonly context: DecisionRequestContext;
@@ -50,6 +55,11 @@ function summarize(answer: DecisionAnswer): AnswerSummary {
 async function requestDecision(call: Readonly<DecisionCall>): Promise<DecisionResponse> {
   call.context.signal?.throwIfAborted();
   call.context.beforeRequest?.();
+  try {
+    call.context.onWire?.({ phase: call.phase, body: call.body });
+  } catch {
+    // A read-only observer must not change the decision request.
+  }
   const candidateCount = Object.keys(call.body.questions.next_action.criteria).length;
   const questionCount = Object.keys(call.body.questions).length;
   const started = performance.now();
@@ -96,4 +106,9 @@ async function requestDecision(call: Readonly<DecisionCall>): Promise<DecisionRe
 }
 
 export { requestDecision };
-export type { DecisionRequestContext, DecisionRequestEvent, DecisionRequestPhase };
+export type {
+  DecisionRequestContext,
+  DecisionRequestEvent,
+  DecisionRequestPhase,
+  DecisionWireEvent,
+};

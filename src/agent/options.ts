@@ -1,4 +1,5 @@
 import type { Action, ActionChoices, Observation, Surface, Window } from "./contracts.ts";
+import type { ComputerMode } from "../computer/types.ts";
 import { isEditableElement, validateActions } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
 import { normalizedHttpUrl, taskUrls } from "./url-addresses.ts";
@@ -13,6 +14,7 @@ const MAX_REASON = 280;
 const SINGLE_LINE_INPUT_ROLES = new Set(["AXTextField", "textbox", "searchbox"]);
 const CHOICE_ROLES = new Set(["AXPopUpButton", "AXList", "combobox", "listbox", "option"]);
 const DIALOG_ROLES = new Set(["AXDialog", "AXSheet", "AXPopover", "dialog", "alertdialog"]);
+const DEFAULT_SURFACES = ["browser", "desktop"] as const;
 interface OptionContext {
   readonly task?: string;
   readonly previousSurface?: Surface;
@@ -20,11 +22,12 @@ interface OptionContext {
   readonly mode: "browser" | "desktop" | undefined;
   readonly observation: Observation;
   readonly applications: readonly string[];
+  readonly availableSurfaces?: readonly [ComputerMode, ...ComputerMode[]];
   readonly observationFailed?: boolean;
 }
-function switches(mode: OptionContext["mode"]): Action[] {
+function switches(mode: OptionContext["mode"], available: readonly ComputerMode[]): Action[] {
   const actions: Action[] = [];
-  if (mode !== "browser") {
+  if (mode !== "browser" && available.includes("browser")) {
     actions.push({
       kind: "select_surface",
       surface: "browser",
@@ -32,7 +35,7 @@ function switches(mode: OptionContext["mode"]): Action[] {
         "Use Google Chrome browser tools to browse websites, search the web, and control browser tabs.",
     });
   }
-  if (mode !== "desktop") {
+  if (mode !== "desktop" && available.includes("desktop")) {
     actions.push({
       kind: "select_surface",
       surface: "desktop",
@@ -250,7 +253,10 @@ function surfaceOptions(context: OptionContext): Action[] {
   return actions;
 }
 function options(context: OptionContext): ActionChoices {
-  const actions = [...switches(context.mode), ...surfaceOptions(context)];
+  const actions = [
+    ...switches(context.mode, context.availableSurfaces ?? DEFAULT_SURFACES),
+    ...surfaceOptions(context),
+  ];
   if (context.mode !== undefined) {
     actions.push({
       kind: "refresh",

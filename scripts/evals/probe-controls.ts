@@ -5,7 +5,9 @@ import { startWorkspace } from "./workspace.ts";
 
 const config = loadConfig();
 const workspace = startWorkspace();
-const connection = new PlaywrightConnection(config.PLAYWRIGHT_MCP_EXTENSION_TOKEN);
+const connection = new PlaywrightConnection({
+  extensionToken: config.PLAYWRIGHT_MCP_EXTENSION_TOKEN,
+});
 const evaluation =
   "(element) => ({tagName: element.tagName, type: element.type ?? null, formAssociated: !!element.form, formAction: element.form?.action ?? null, formMethod: element.form?.method ?? null})";
 const submitInspection =

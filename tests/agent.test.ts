@@ -41,6 +41,55 @@ test("offers both surfaces and terminal choices before opening a browser", () =>
     "blocked",
   ]);
 });
+test("browser-only runs never offer or open desktop tools", async () => {
+  const { computer: browser } = computerFixture();
+  const used: string[] = [];
+  const result = await runTask({
+    task: "Inspect the current page",
+    applications: [],
+    availableSurfaces: ["browser"],
+    computer(mode) {
+      used.push(mode);
+      if (mode !== "browser") {
+        throw new Error("Desktop tools are unavailable in this run.");
+      }
+      return browser;
+    },
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        expect(input.actions.some((action) => action.kind === "select_surface")).toBe(false);
+        return pick(input, "finish");
+      },
+    },
+  });
+  expect(result.status).toBe("complete");
+  expect(used.every((mode) => mode === "browser")).toBe(true);
+  expect(used.length).toBeGreaterThan(0);
+});
+test("rejects an unavailable preferred surface before opening a driver", async () => {
+  let opened = false;
+  await expectFailure(
+    runTask({
+      task: "Inspect the browser",
+      applications: [],
+      availableSurfaces: ["browser"],
+      preferredSurface: "desktop",
+      computer() {
+        opened = true;
+        return computerFixture().computer;
+      },
+      text: textFixture(),
+      decision: {
+        async choose() {
+          throw new Error("A decision must not start.");
+        },
+      },
+    }),
+    "preferred tool surface is unavailable",
+  );
+  expect(opened).toBe(false);
+});
 test("selects browser tools before a separate URL decision", async () => {
   const { computer: desktop } = computerFixture();
   let navigations = 0;

@@ -5,7 +5,9 @@ import { startWorkspace } from "./workspace.ts";
 
 const config = loadConfig();
 const workspace = startWorkspace();
-const connection = new PlaywrightConnection(config.PLAYWRIGHT_MCP_EXTENSION_TOKEN);
+const connection = new PlaywrightConnection({
+  extensionToken: config.PLAYWRIGHT_MCP_EXTENSION_TOKEN,
+});
 function snapshotOnly(output: string): string {
   return output.slice(output.indexOf("### Snapshot"));
 }
