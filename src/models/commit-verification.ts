@@ -77,7 +77,12 @@ const STATUS_ROLES = new Set(["status", "alert", "AXStatus", "AXAlert"]);
 function observedStatus(window: Window | undefined): string {
   const statuses = window?.elements
     .filter((element) => STATUS_ROLES.has(element.role))
-    .map((element) => `${element.role} ${JSON.stringify(element.value ?? element.label ?? "")}`)
+    .map((element) => {
+      const parts = [element.label, element.value]
+        .filter((value) => value !== undefined && value !== null && String(value).length > 0)
+        .map(String);
+      return `${element.role} ${[...new Set(parts)].map((value) => JSON.stringify(value)).join(" ")}`;
+    })
     .join(" | ");
   return statuses === undefined || statuses.length === 0
     ? "No status or alert observed."

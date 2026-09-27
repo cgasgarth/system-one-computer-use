@@ -133,6 +133,13 @@ test("grounds a repeated Save check in the observed receipt and prior tool retur
     elements: [
       ...window.elements,
       { element_index: 2, element_token: "receipt", role: "status", value: "Draft saved." },
+      {
+        element_index: 3,
+        element_token: "named-receipt",
+        role: "status",
+        label: "Saved to account",
+        value: "",
+      },
     ],
   };
   const result = await verifyCommit({
@@ -148,6 +155,7 @@ test("grounds a repeated Save check in the observed receipt and prior tool retur
       if (phase === "commit-authorization") {
         expect(request.state).toContain("https://example.test/editor?saved=1");
         expect(request.state).toContain("Draft saved.");
+        expect(request.state).toContain("Saved to account");
         expect(request.state).toContain("Activate Save: tool returned; effect needs observation");
         return no;
       }
