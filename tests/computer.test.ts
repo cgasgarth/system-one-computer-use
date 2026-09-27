@@ -5,7 +5,6 @@ import {
   selectedOption,
   snapshotElements,
 } from "../src/computer/playwright/snapshot.ts";
-import { settingsSchema } from "../src/app/settings-schema.ts";
 import { isConnectionPage, parseTabs } from "../src/computer/playwright/tabs.ts";
 import {
   applySelectMetadata,
@@ -150,19 +149,6 @@ test("validates the observed page URL before it can complete a task", () => {
   expect(window.url).toBe("https://example.com/");
   expect(window.elements[0]?.label).toBe("Learn more");
   expect(() => parseSnapshot("### Error\nConnection failed")).toThrow();
-});
-
-test("settings accept provider-neutral HTTP endpoints and reject invalid URLs", () => {
-  const settings = {
-    decisionUrl: "http://127.0.0.1:8700/v1/systemone",
-    decisionModel: "any-system-one-model",
-    textUrl: "http://127.0.0.1:8080/v1/chat/completions",
-    textModel: "small-text",
-  };
-  expect(settingsSchema.parse(settings)).toEqual(settings);
-  expect(settingsSchema.safeParse({ ...settings, textUrl: "file:///tmp/model" }).success).toBe(
-    false,
-  );
 });
 
 test("identifies the Playwright connection tab without matching other pages", () => {

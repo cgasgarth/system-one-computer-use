@@ -177,7 +177,6 @@ async function prepareRuntime(): Promise<void> {
     "--outdir",
     runtime,
     path.join(root, "src/app/worker.ts"),
-    path.join(root, "src/app/settings.ts"),
     path.join(root, "src/app/models/daemon.ts"),
     path.join(root, "src/app/permission-status.ts"),
   ]);
