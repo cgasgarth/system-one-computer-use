@@ -1,6 +1,8 @@
 # Decision preset benchmark
 
-## Current result
+## Bounded result for action policy `5aa775e`
+
+The installed source now includes the later page-action pager at `0d8f22e`. The full seven-preset cohort has **not** been repeated on that build. The table below applies to the earlier policy and fixture source recorded in its run manifest. Do not treat it as a success rate for the installed build.
 
 The current one-trial comparison ran seven decision presets on the same four disposable browser tasks. Each preset used the same Qwen 3.5 2B text writer, model artifacts, task text, browser action scope, and localhost fixture origin. All **28/28 trials** finished. There were no driver errors, unintended writes, failed model loads, or cleanup errors.
 
