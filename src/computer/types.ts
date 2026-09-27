@@ -1,5 +1,4 @@
-import type { Surface } from "../app/sessions/schema.ts";
-import type { Action, Desktop, Window } from "../agent/contracts.ts";
+import type { Action, Desktop, Surface, Window } from "../agent/contracts.ts";
 import { z } from "zod";
 
 const computerModeSchema = z.enum(["browser", "desktop"]);

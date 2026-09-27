@@ -4,7 +4,8 @@ import lockfile from "proper-lockfile";
 import type { ReadonlyDeep } from "type-fest";
 import type { z } from "zod";
 import { SESSION_COUNT, indexSchema, sessionSchema } from "./schema.ts";
-import type { Session, SessionSelection, Surface } from "./schema.ts";
+import type { Session, SessionSelection } from "./schema.ts";
+import type { Surface } from "../../agent/contracts.ts";
 
 const REUSE_MS = 3_600_000;
 const TITLE_LENGTH = 60;

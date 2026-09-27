@@ -1,7 +1,7 @@
 import type { Observation } from "../agent/contracts.ts";
 import { textResponseSchema } from "./text-schema.ts";
 import { requestJson } from "./request.ts";
-import { summarizeObservation } from "../app/sessions/context.ts";
+import { summarizeObservation } from "../agent/observation.ts";
 
 interface TextContext {
   readonly task: string;

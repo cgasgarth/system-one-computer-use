@@ -1,13 +1,38 @@
 import type { Computer, ManagedComputer } from "../computer/types.ts";
-import type { Action, Desktop, Observation } from "./contracts.ts";
-import type { Surface } from "../app/sessions/schema.ts";
-import { restoreSurface } from "../app/sessions/targets.ts";
+import type { Action, Desktop, Observation, Surface } from "./contracts.ts";
 import { WindowUnavailableError } from "../computer/window-unavailable.ts";
 import { textFieldKey } from "./state-key.ts";
 
 interface Target {
   readonly pid: number;
   readonly windowId: number;
+}
+async function restoreSurface(
+  computer: Readonly<Pick<ManagedComputer, "desktop" | "restore">>,
+  surface: Surface,
+): Promise<{ readonly pid: number; readonly windowId: number } | undefined> {
+  if (surface.kind === "browser") {
+    if (computer.restore === undefined) {
+      throw new Error("This driver cannot restore the saved browser tab");
+    }
+    await computer.restore(surface);
+    return undefined;
+  }
+  const desktop = await computer.desktop();
+  const exact = desktop.windows.find(
+    (window) =>
+      window.pid === surface.pid &&
+      window.window_id === surface.windowId &&
+      window.app_name === surface.app,
+  );
+  const candidates = desktop.windows.filter(
+    (window) => window.app_name === surface.app && window.title === surface.title,
+  );
+  const target = exact ?? (candidates.length === 1 ? candidates[0] : undefined);
+  if (target !== undefined) {
+    return { pid: target.pid, windowId: target.window_id };
+  }
+  return undefined;
 }
 class SurfaceSession {
   public mode: "browser" | "desktop" | undefined;
@@ -195,4 +220,4 @@ async function executeInput(
     }
   }
 }
-export { SurfaceSession, executeInput };
+export { SurfaceSession, executeInput, restoreSurface };

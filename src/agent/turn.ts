@@ -6,7 +6,7 @@ import type { SurfaceSession } from "./surface.ts";
 import { executeInput } from "./surface.ts";
 import { enterText, openApplication, openUrl } from "./input.ts";
 import { options as actionOptions } from "./options.ts";
-import { summarizeObservation } from "../app/sessions/context.ts";
+import { summarizeObservation } from "./observation.ts";
 import { progressStateKey, stateKey } from "./state-key.ts";
 import type { Decision, DecisionInput } from "../models/system-one.ts";
 

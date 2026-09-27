@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { Observation } from "./contracts.ts";
+import type { Observation, Surface } from "./contracts.ts";
 import type { TaskOptions, TaskResult, TaskStep } from "./types.ts";
-import type { Surface } from "../app/sessions/schema.ts";
 import { SurfaceSession } from "./surface.ts";
 import { performTurn } from "./turn.ts";
 import { Progress } from "./progress.ts";

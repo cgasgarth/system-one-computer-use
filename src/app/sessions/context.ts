@@ -1,30 +1,7 @@
-import type { Observation } from "../../agent/contracts.ts";
 import type { Session } from "./schema.ts";
-import { relevantControls } from "../../agent/controls.ts";
 
-const SNAPSHOT_CHARS = 4000;
 const REQUEST_CHARS = 500;
 const PREVIOUS_TURN = -2;
-function summarizeObservation(observation: Observation): string {
-  const { window } = observation;
-  if (window === undefined) {
-    return observation.desktop.windows
-      .map((entry) => `${entry.app_name}: ${entry.title}`)
-      .join("\n")
-      .slice(0, SNAPSHOT_CHARS);
-  }
-  return JSON.stringify({
-    app: window.app_name,
-    title: window.window_title,
-    url: window.url,
-    controls: relevantControls(window).map((element) => ({
-      role: element.role,
-      label: element.label,
-      value: element.value,
-      href: element.href,
-    })),
-  }).slice(0, SNAPSHOT_CHARS);
-}
 function sessionContext(session: Session): string {
   const turn = session.turns.at(PREVIOUS_TURN);
   if (turn === undefined) {
@@ -32,4 +9,4 @@ function sessionContext(session: Session): string {
   }
   return `Previous request (historical context only): ${JSON.stringify(turn.task.slice(0, REQUEST_CHARS))}\nPrevious target (historical, not evidence of the current state): ${JSON.stringify(session.surface)}\nThe current request takes priority. Use history only to resolve references in the current request.`;
 }
-export { summarizeObservation, sessionContext };
+export { sessionContext };

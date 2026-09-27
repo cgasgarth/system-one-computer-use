@@ -1,8 +1,7 @@
-import type { Action, ActionChoices, Observation, Window } from "./contracts.ts";
+import type { Action, ActionChoices, Observation, Surface, Window } from "./contracts.ts";
 import { isEditableElement, validateActions } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
 import { normalizedHttpUrl, taskUrls } from "./url-addresses.ts";
-import type { Surface } from "../app/sessions/schema.ts";
 
 const OPERATIONS = [
   { capability: "AXPress", operation: "press", verb: "Activate" },

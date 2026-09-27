@@ -5,7 +5,7 @@ import { textTargetName } from "./controls.ts";
 import { targetContainerContext } from "./target-context.ts";
 import { taskUrls } from "./url-addresses.ts";
 import { textFieldKey, windowScopeKey } from "./state-key.ts";
-import { restoreSurface } from "../app/sessions/targets.ts";
+import { restoreSurface } from "./surface.ts";
 import type { ActionResult, TaskOptions } from "./types.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { Computer } from "../computer/types.ts";

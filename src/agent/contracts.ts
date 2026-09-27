@@ -2,6 +2,17 @@ import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 
 const MAX_MENU_DEPTH = 16;
+const surfaceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("browser"), url: z.string(), title: z.string() }),
+  z.strictObject({
+    kind: z.literal("desktop"),
+    pid: z.number().int(),
+    windowId: z.number().int(),
+    app: z.string(),
+    title: z.string(),
+  }),
+]);
+type Surface = ReadonlyDeep<z.infer<typeof surfaceSchema>>;
 
 const desktopSchema = z.object({
   apps: z.array(
@@ -247,7 +258,8 @@ export {
   describeAction,
   desktopSchema,
   isEditableElement,
+  surfaceSchema,
   validateActions,
   windowSchema,
 };
-export type { Action, ActionChoices, Desktop, Observation, Window };
+export type { Action, ActionChoices, Desktop, Observation, Surface, Window };

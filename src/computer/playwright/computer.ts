@@ -1,7 +1,6 @@
-import type { Surface } from "../../app/sessions/schema.ts";
 import { z } from "zod";
 import { browserBookmark, restoreBrowser } from "./bookmark.ts";
-import type { Action, Desktop, Window } from "../../agent/contracts.ts";
+import type { Action, Desktop, Surface, Window } from "../../agent/contracts.ts";
 import type {
   ClickAction,
   ClickInspection,

@@ -1,5 +1,5 @@
 import type { PlaywrightConnection } from "./connection.ts";
-import type { Surface } from "../../app/sessions/schema.ts";
+import type { Surface } from "../../agent/contracts.ts";
 import { parseTabs } from "./tabs.ts";
 import { parseSnapshot } from "./snapshot.ts";
 
