@@ -29,13 +29,35 @@ Julia's native API accepts 2–20 choices. The decision adapter pages larger tar
 
 Files remain on disk. These options control residency in memory. The model runtime's own request and embedding caches are available while its process remains loaded.
 
-Typing in the task field or starting Handy dictation requests warm-up of both models. Draft warm-up has a five-minute idle grace period, even with the unload-after-task policy. Once an actual task ends, that policy unloads immediately. Repeated edits share the current model load.
+Opening the task menu, typing in the task field, or starting Handy dictation requests warm-up of both models. Draft warm-up has a five-minute idle grace period, even with the unload-after-task policy. Once an actual task ends, that policy unloads immediately. Repeated edits share the current model load.
+
+## Prompt cache preparation
+
+After local models load, the app sends one background request for each of the text model's three exact system prompts: URL, general text, and search. Each request uses a fixed `Ready.` input and at most one output token. The output is discarded. No draft, voice transcript, screen data, or computer action is involved.
+
+These requests let MLX store reusable system-prefix states through its normal generation worker. Real text requests use the same prompt bytes. Preparation runs once per loaded text process; a new process can prepare again. Starting a task or changing, updating, unloading, or closing models cancels unfinished preparation. A failed preparation leaves the task able to use an empty cache. It does not prevent Ready or delay task dispatch.
+
+MLX's cache is bounded and can evict entries. A prepared prefix is not a permanent cache hit. The local text response reports actual reused prompt tokens in `usage.prompt_tokens_details.cached_tokens`. This measures model cache reuse, not a stored response.
+
+Kev's current cache matches the complete encoded task and screen state. An incomplete task or a dummy system prompt cannot seed a later decision. The app loads Kev early and makes the real decision when its input is ready. These warm-up paths do not change decision prompts or action policy.
+
+### Bounded cache measurement
+
+With Qwen 3.5 2B 4-bit already loaded, five paired requests per prompt type gave the following results. The checkpoint was `674aaa7240b91e8012fcad5d791b7dfe5ba90207`, with MLX 0.32.2 and mlx-lm 0.31.3. Each pair used an empty cache or a cache seeded through the normal generator. All 15 output pairs matched.
+
+| Text prompt | Empty-cache median | Prepared-cache median | Reused tokens |
+| ----------- | -----------------: | --------------------: | ------------: |
+| URL         |           233.1 ms |              188.0 ms |           192 |
+| General     |           204.4 ms |              160.7 ms |           165 |
+| Search      |           210.3 ms |              163.2 ms |           187 |
+
+Preparation itself took about 0.50 seconds across all three prompts. It moves work before Start; it does not remove that work. Immediately after preparation, active Metal memory increased by about 179 MB and the cache reported about 218 MB across 10 entries. These are small, local text-generation measurements, not task-completion speed or decision-quality results. Later requests can evict cached entries.
 
 ## External endpoints
 
 Choose **Use an endpoint…** for either model role, enter the full inference URL and model ID, then save. Decision endpoints use the System One protocol; text endpoints use Chat Completions. Existing `SYSTEM_ONE_API_KEY` and `TEXT_MODEL_API_KEY` environment settings are forwarded as bearer credentials by the harness.
 
-The app does not stop or unload external servers.
+The app does not stop or unload external servers or send them speculative prompt-preparation requests.
 
 ## Process ownership and data
 

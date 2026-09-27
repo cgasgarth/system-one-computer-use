@@ -89,7 +89,7 @@ Select a model in Settings to download and load it. Fresh installs default to Ke
 
 Choose whether to keep models loaded, unload after five idle minutes, or unload after each task. Quitting the app stops its model processes. See [model management](docs/models.md) for runtime requirements, endpoints, memory behavior and logs.
 
-Editing the task field or starting dictation starts model loading before submission. Draft warm-up holds models for five idle minutes, including under the unload-after-task policy. It does not start computer actions.
+Opening the task menu, editing the task field, or starting dictation loads models before submission. The local text model also prepares its exact system prompts in the background. A task cancels unfinished prompt preparation. Draft warm-up holds models for five idle minutes, including under the unload-after-task policy. It does not start computer actions or send the draft to a model.
 
 ## Model services
 
