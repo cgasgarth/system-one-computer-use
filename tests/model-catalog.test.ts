@@ -117,5 +117,6 @@ test("serves all local models with the uv-managed Python after uv downloads", ()
     ]);
     expect(command.serve[0]).toBe(`${paths.data}/runtimes/${project}/bin/python3`);
     expect(command.serve[1]).toBe(`${paths.integrations}/local-bridge/serve.py`);
+    expect(command.download).toContain("--reinstall-package");
   }
 });

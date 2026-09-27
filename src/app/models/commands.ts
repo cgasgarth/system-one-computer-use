@@ -129,7 +129,17 @@ function commands(input: Readonly<CommandInput>): ModelCommand {
   const base: CommandBase = {
     input,
     project,
-    prefix: [paths.uv, "run", "--project", project, "--frozen", "--no-editable", "python"],
+    prefix: [
+      paths.uv,
+      "run",
+      "--project",
+      project,
+      "--frozen",
+      "--no-editable",
+      "--reinstall-package",
+      `system-one-${projectName(model)}`,
+      "python",
+    ],
     serve: [
       path.join(runtime, "bin", "python3"),
       path.join(paths.integrations, "local-bridge", "serve.py"),

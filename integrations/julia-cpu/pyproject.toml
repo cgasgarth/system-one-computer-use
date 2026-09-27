@@ -15,5 +15,8 @@ dependencies = [
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/julia_runtime"]

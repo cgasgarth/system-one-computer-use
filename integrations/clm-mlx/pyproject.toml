@@ -19,5 +19,8 @@ dependencies = [
 [tool.uv.sources]
 clm = { git = "https://github.com/Contrastive-LM/CLM", rev = "7956937c58ed5839c06ddc4dc6b6b61c3a3e4094" }
 
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/clm_mlx"]
