@@ -126,6 +126,73 @@ test("allows Save after a requested field change is observed", async () => {
   expect(authorizationState).toContain('button "Save"');
   expect(authorizationState).toContain('current value "Draft"');
 });
+test("grounds a repeated Save check in the observed receipt and prior tool return", async () => {
+  const savedWindow: Window = {
+    ...window,
+    url: "https://example.test/editor?saved=1",
+    elements: [
+      ...window.elements,
+      { element_index: 2, element_token: "receipt", role: "status", value: "Draft saved." },
+    ],
+  };
+  const result = await verifyCommit({
+    action,
+    input: {
+      task: "Save the draft once",
+      observation: { desktop: desktopFixture(), window: savedWindow },
+      actions: [action],
+      recentActions: [{ action, result: "returned" }],
+    },
+    model: "test",
+    async judge(request, phase) {
+      if (phase === "commit-authorization") {
+        expect(request.state).toContain("https://example.test/editor?saved=1");
+        expect(request.state).toContain("Draft saved.");
+        expect(request.state).toContain("Activate Save: tool returned; effect needs observation");
+        return no;
+      }
+      return yes;
+    },
+  });
+  expect(result.allowed).toBe(false);
+  expect(result.checks.map((check) => check.phase)).toEqual([
+    "commit-classification",
+    "commit-authorization",
+  ]);
+});
+test("permits a distinct requested second write after an observed Save", async () => {
+  const publish = { ...action, element_token: "publish", reason: "Activate Publish" };
+  const publishWindow: Window = {
+    ...window,
+    url: "https://example.test/editor?saved=1",
+    elements: [
+      ...window.elements,
+      {
+        element_index: 2,
+        element_token: "publish",
+        role: "button",
+        label: "Publish",
+        actions: ["AXPress"],
+      },
+      { element_index: 3, element_token: "receipt", role: "status", value: "Draft saved." },
+    ],
+  };
+  const result = await verifyCommit({
+    action: publish,
+    input: {
+      task: "Save the draft, then publish it",
+      observation: { desktop: desktopFixture(), window: publishWindow },
+      actions: [publish],
+      recentActions: [{ action, result: "returned" }],
+    },
+    model: "test",
+    async judge(_request, phase) {
+      return phase === "field-readiness" ? no : yes;
+    },
+  });
+  expect(result.allowed).toBe(true);
+  expect(result.checks.at(-1)?.phase).toBe("field-readiness");
+});
 
 test("authorization binds duplicate Save controls to their observed rows", async () => {
   const rows: Window = {

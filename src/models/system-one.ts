@@ -38,6 +38,10 @@ interface DecisionInput extends DecisionRequestContext {
   readonly actions: ActionChoices;
   readonly context?: string;
   readonly feedback?: string;
+  readonly recentActions?: readonly {
+    readonly action: Action;
+    readonly result: "returned" | "error" | "unchanged";
+  }[];
   readonly inspectClick?: (
     action: Extract<Action, { kind: "click_element" }>,
   ) => Promise<ClickInspection>;

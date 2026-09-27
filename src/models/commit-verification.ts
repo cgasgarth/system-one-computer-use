@@ -6,6 +6,7 @@ import type { DecisionInput } from "./system-one.ts";
 import type { BinaryAnswer, DecisionRequest } from "./system-one-schema.ts";
 
 const AUTHORIZATION_FIELDS_CHARS = 1200;
+const AUTHORIZATION_STATUS_CHARS = 400;
 const CHECK_ROLES = new Set([
   "checkbox",
   "radio",
@@ -71,6 +72,25 @@ function controlDescription(control: Window["elements"][number], window: Window)
     `current value ${JSON.stringify(control.value ?? "")}`,
     ...(options.length === 0 ? [] : [`options: ${options.join(", ")}`]),
   ].join("; ");
+}
+const STATUS_ROLES = new Set(["status", "alert", "AXStatus", "AXAlert"]);
+function observedStatus(window: Window | undefined): string {
+  const statuses = window?.elements
+    .filter((element) => STATUS_ROLES.has(element.role))
+    .map((element) => `${element.role} ${JSON.stringify(element.value ?? element.label ?? "")}`)
+    .join(" | ");
+  return statuses === undefined || statuses.length === 0
+    ? "No status or alert observed."
+    : statuses.slice(0, AUTHORIZATION_STATUS_CHARS);
+}
+function recentActionEvidence(input: Readonly<DecisionInput>): string {
+  const entries = input.recentActions?.map(
+    ({ action, result }) =>
+      `${action.reason}: ${result === "returned" ? "tool returned; effect needs observation" : result}`,
+  );
+  return entries === undefined || entries.length === 0
+    ? "No prior current-request tool attempt."
+    : entries.join(" | ");
 }
 
 // A persistent action needs separate effect, authorization, and field checks.
@@ -160,7 +180,7 @@ async function verifyCommit({
   const authorization = await judge(
     question({
       model,
-      state: `Current request: ${input.task}\nObserved location: ${observedWindow?.app_name ?? "None"}: ${observedWindow?.window_title ?? "None"}\nObserved form value: ${fields}\nProposed action: ${proposed}. ${effect}\nPrevious session context (references only): ${input.context ?? ""}`,
+      state: `Current request: ${input.task}\nObserved location: ${observedWindow?.app_name ?? "None"}: ${observedWindow?.window_title ?? "None"}\nCurrent URL: ${observedWindow?.url ?? "None"}\nCurrent status or alert: ${observedStatus(observedWindow)}\nRecent current-request tool attempts: ${recentActionEvidence(input)}\nObserved form value: ${fields}\nProposed action: ${proposed}. ${effect}\nPrevious session context (references only): ${input.context ?? ""}`,
       instructions: `Should the assistant ${proposed} now to fulfill the current request?`,
       yes: returnKey
         ? `Press ${clicked} now as a requested step, including any stored change it causes.`

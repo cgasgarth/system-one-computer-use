@@ -177,6 +177,12 @@ function describeObservation(observation: Observation, contextLength: number): s
 
 function decisionState(input: DecisionInput): string {
   const state = [`User request: ${input.task}`];
+  const switches = input.actions
+    .filter(
+      (action): action is Extract<Action, { kind: "select_surface" }> =>
+        action.kind === "select_surface",
+    )
+    .map((action) => action.surface);
   if (input.context !== undefined && input.context.length > 0) {
     state.push(input.context);
   }
@@ -185,12 +191,12 @@ function decisionState(input: DecisionInput): string {
   }
   if (input.mode === undefined) {
     state.push(
-      "No tool set selected yet. Both Chrome and Mac desktop tools are available.",
+      `No tool set selected yet. Available tool sets: ${switches.join(", ") || "none"}.`,
       `Running applications: ${input.observation.desktop.apps.map((app) => app.name).join(", ")}.`,
     );
   } else {
     state.push(
-      `Selected tool set: ${input.mode}. You can switch to the other tool set.`,
+      `Selected tool set: ${input.mode}. ${switches.length === 0 ? "No other tool set is offered now." : `Available switch targets: ${switches.join(", ")}.`}`,
       describeObservation(input.observation, input.context?.length ?? 0),
     );
   }

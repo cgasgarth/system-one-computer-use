@@ -153,3 +153,24 @@ test("the action decision keeps a middle constraint in the full current request"
   });
   expect(state).toContain(task);
 });
+test("tool-set descriptions name only surfaces offered in this decision", () => {
+  const browser = {
+    kind: "select_surface",
+    surface: "browser",
+    reason: "Use browser tools",
+  } as const;
+  const initial = decisionState({
+    task: "Inspect a page",
+    observation: { desktop: desktopFixture() },
+    actions: [browser, finish],
+  });
+  expect(initial).toContain("Available tool sets: browser.");
+  expect(initial).not.toContain("Both Chrome and Mac");
+  const selected = decisionState({
+    task: "Inspect a page",
+    mode: "browser",
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    actions: [finish],
+  });
+  expect(selected).toContain("No other tool set is offered now.");
+});
