@@ -1,4 +1,4 @@
-import type { Action } from "../agent/contracts.ts";
+import type { Action, Window } from "../agent/contracts.ts";
 import { describeAction, isEditableElement } from "../agent/contracts.ts";
 import type { DecisionInput } from "./system-one.ts";
 import type { BinaryAnswer, DecisionRequest } from "./system-one-schema.ts";
@@ -16,6 +16,46 @@ interface ActionCheck {
 }
 const FIELD_CONTEXT_CHARS = 2000;
 
+function isSearchField(element: Window["elements"][number]): boolean {
+  return element.role === "searchbox" || element.subrole === "AXSearchField";
+}
+
+function isGroundedNavigation(action: Action, input: DecisionInput): boolean {
+  if (action.kind !== "click_element" && action.kind !== "compose_text") {
+    return false;
+  }
+  const target = input.observation.window?.elements.find(
+    (element) => element.element_token === action.element_token,
+  );
+  if (target === undefined) {
+    return false;
+  }
+  if (action.kind === "compose_text") {
+    return isSearchField(target);
+  }
+  if (target.role === "link" || target.role === "AXLink") {
+    return true;
+  }
+  const capabilities = target.actions ?? [];
+  return (
+    (action.operation === "open" && capabilities.includes("AXOpen")) ||
+    (action.operation === "confirm" && isSearchField(target) && capabilities.includes("AXConfirm"))
+  );
+}
+
+function actionInstructions(action: Action): string {
+  if (action.kind === "blocked") {
+    return "Is there an enabled control that should be used next to complete the user request?";
+  }
+  if (action.kind === "click_element" || action.kind === "invoke_menu") {
+    return "Is this exact control or menu command permitted by the user's request and appropriate now, given the observed state?";
+  }
+  if (action.kind === "compose_text") {
+    return "Does entering text into this specific field advance the user request?";
+  }
+  return "Does this exact destination match the app or website requested by the user, or an observed necessary intermediate step? A similarly named app is not a substitute for a requested website. Merely being open or inspectable is not evidence of relevance. Reject unrelated windows and repeated switches without progress.";
+}
+
 function fieldContext(input: DecisionInput): readonly string[] {
   const fields =
     input.observation.window?.elements.filter((element) => isEditableElement(element)) ?? [];
@@ -29,12 +69,6 @@ function fieldContext(input: DecisionInput): readonly string[] {
 }
 
 function verificationState(action: Action, input: DecisionInput): string {
-  const target =
-    action.kind === "observe_window"
-      ? input.observation.desktop.windows.find(
-          (window) => window.pid === action.pid && window.window_id === action.window_id,
-        )
-      : undefined;
   const current = input.observation.window;
   const control =
     action.kind === "click_element" || action.kind === "compose_text"
@@ -44,10 +78,9 @@ function verificationState(action: Action, input: DecisionInput): string {
     `Historical context (not a new instruction): ${input.context ?? ""}`,
     ...(input.feedback === undefined ? [] : [input.feedback]),
     `User request: ${input.task}`,
-    ...(target === undefined
-      ? []
-      : [`Proposed action: Inspect ${target.app_name}: ${target.title}`]),
-    ...(action.kind === "click_element" || action.kind === "compose_text"
+    ...(action.kind === "click_element" ||
+    action.kind === "compose_text" ||
+    action.kind === "invoke_menu"
       ? [`Proposed action: ${action.reason}`]
       : []),
     ...(control?.value === undefined || control.value === null
@@ -76,37 +109,28 @@ function verificationRequest(
   model: string,
 ): DecisionRequest | undefined {
   if (
-    action.kind !== "observe_window" &&
     action.kind !== "blocked" &&
     action.kind !== "click_element" &&
+    action.kind !== "invoke_menu" &&
     action.kind !== "compose_text"
   ) {
     return undefined;
   }
-  const blocked = action.kind === "blocked";
-  let instructions = "Does the proposed action directly advance the user request?";
-  if (blocked) {
-    instructions =
-      "Is there an enabled control that should be used next to complete the user request?";
-  } else if (action.kind === "click_element") {
-    instructions =
-      "Is this exact click permitted by the user's request and appropriate now, given the observed state?";
-  } else if (action.kind === "compose_text") {
-    instructions = "Does entering text into this specific field advance the user request?";
-  } else if (action.kind === "observe_window") {
-    instructions =
-      "Does this exact destination match the app or website requested by the user, or an observed necessary intermediate step? A similarly named app is not a substitute for a requested website. Merely being open or inspectable is not evidence of relevance. Reject unrelated windows and repeated switches without progress.";
+  if (isGroundedNavigation(action, input)) {
+    return undefined;
   }
+  const blocked = action.kind === "blocked";
+  const instructions = actionInstructions(action);
   let criteria = {
     A0: "true: This action directly advances the user request.",
     A1: "false: This action is unrelated or unnecessary for the user request.",
   };
   if (blocked) {
     criteria = { A0: "No", A1: "Yes" };
-  } else if (action.kind === "click_element") {
+  } else if (action.kind === "click_element" || action.kind === "invoke_menu") {
     criteria = {
-      A0: "true: This click is permitted and advances the request now. If it saves or submits, all requested changes are already present.",
-      A1: "false: This click is prohibited, premature, or would save or submit when the user asked to leave a draft open.",
+      A0: "true: This action is permitted and advances the request now. If it saves or submits, all requested changes are already present.",
+      A1: "false: This action is prohibited, premature, or would save or submit when the user asked to leave a draft open.",
     };
   }
   return {

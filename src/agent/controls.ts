@@ -2,6 +2,9 @@ import { isEditableElement } from "./contracts.ts";
 import type { Window } from "./contracts.ts";
 
 function textTargetName(element: Window["elements"][number]): string {
+  if (element.role === "searchbox" || element.subrole === "AXSearchField") {
+    return "search field";
+  }
   const label = element.label?.trim() ?? "";
   if (
     element.role === "AXTextArea" &&

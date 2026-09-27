@@ -82,7 +82,7 @@ test("accepts a fresh snapshot of the unchanged input document", async () => {
   const original = windowFixture();
   const elements: Window["elements"][number][] = [];
   for (const element of original.elements) {
-    elements.push({ ...element, element_token: "fresh:1" });
+    elements.push({ ...element });
   }
   const fixture = inputFixture(original, {
     ...original,
@@ -92,6 +92,73 @@ test("accepts a fresh snapshot of the unchanged input document", async () => {
   const result = await fixture.run();
   expect(fixture.typed).toEqual(["Alex"]);
   expect(result.verifiedField?.value).toBe("Alex");
+});
+
+test("rejects a replacement field with the same label and value when frames are absent", async () => {
+  const original = windowFixture();
+  const replacement: Window = {
+    ...original,
+    snapshot_id: "replacement",
+    elements: original.elements.map((element) => ({ ...element, element_token: "other:1" })),
+  };
+  const fixture = inputFixture(original, replacement);
+  await expectFailure(fixture.run(), "selected input changed");
+  expect(fixture.typed).toEqual([]);
+});
+
+test("verifies a native search write when its AX label becomes the query", async () => {
+  const { computer, typed } = computerFixture();
+  const search = {
+    element_index: 1,
+    element_token: "search:1",
+    role: "AXTextField",
+    subrole: "AXSearchField",
+    label: "Search",
+    value: "",
+    editable: true,
+    frame: { x: 10, y: 20, w: 180, h: 28 },
+  };
+  const window: Window = { ...windowFixture(), elements: [search] };
+  const bound: ManagedComputer = {
+    ...computer,
+    async window() {
+      const value = typed.at(-1) ?? "";
+      return {
+        ...window,
+        elements: [{ ...search, element_token: "search:fresh", label: value || "Search", value }],
+      };
+    },
+  };
+  const result = await enterText({
+    action: {
+      kind: "compose_text",
+      pid: window.pid,
+      window_id: window.window_id,
+      element_token: search.element_token,
+      reason: "Type text into search field",
+    },
+    observation: { desktop: desktopFixture(), window },
+    computer: bound,
+    options: {
+      task: "Open Playback Test.mp4 in the selected folder",
+      applications: [],
+      computer: () => bound,
+      text: {
+        async generate(input) {
+          expect(input.field?.kind).toBe("search");
+          return "Playback Test.mp4";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(typed).toEqual(["Playback Test.mp4"]);
+  expect(result.verifiedField?.value).toBe("Playback Test.mp4");
+  expect(result.satisfiedInput).toBeDefined();
 });
 
 test("keeps satisfied inputs scoped to their document", () => {
@@ -173,4 +240,176 @@ test("explains an unavailable URL text helper", async () => {
     }),
     "Could not get a web address",
   );
+});
+
+test("normalizes a domain named in the current request", async () => {
+  const { computer } = computerFixture();
+  const opened: string[] = [];
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
+  await openUrl({
+    action: { kind: "request_url", reason: "Open the requested page" },
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    computer: browser,
+    options: {
+      task: "Open example.test in Chrome",
+      applications: [],
+      computer: () => browser,
+      text: {
+        async generate() {
+          return "example.test";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(opened).toEqual(["https://example.test"]);
+});
+
+test("corrects a host that joined an action word to the requested domain", async () => {
+  const { computer } = computerFixture();
+  const opened: string[] = [];
+  const corrections: string[] = [];
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
+  await openUrl({
+    action: { kind: "request_url", reason: "Open the requested page" },
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    computer: browser,
+    options: {
+      task: "Open example.test in Chrome",
+      applications: [],
+      computer: () => browser,
+      text: {
+        async generate(input) {
+          if (input.purpose === "url" && input.correction !== undefined) {
+            corrections.push(input.correction);
+            return "https://example.test";
+          }
+          return "https://openexample.test";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(corrections).toHaveLength(1);
+  expect(opened).toEqual(["https://example.test"]);
+});
+
+test("uses a site homepage when an unobserved article path was invented", async () => {
+  const { computer } = computerFixture();
+  const opened: string[] = [];
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
+  await openUrl({
+    action: { kind: "request_url", reason: "Open the requested page" },
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    computer: browser,
+    options: {
+      task: "Open the reference site's article about maps",
+      applications: [],
+      computer: () => browser,
+      text: {
+        async generate() {
+          return "https://reference.example/wiki/Maps";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(opened).toEqual(["https://reference.example"]);
+});
+
+test("preserves an explicit full URL path and rejects another host", async () => {
+  const { computer } = computerFixture();
+  const opened: string[] = [];
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
+  await openUrl({
+    action: { kind: "request_url", reason: "Open the requested page" },
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    computer: browser,
+    options: {
+      task: "Open https://example.test/library/page",
+      applications: [],
+      computer: () => browser,
+      text: {
+        async generate(input) {
+          return input.purpose === "url" && input.correction !== undefined
+            ? "https://example.test/library/page"
+            : "https://other.test";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(opened).toEqual(["https://example.test/library/page"]);
+});
+
+test("does not drop an exact URL path to its homepage", async () => {
+  const expectedRequests = 2;
+  const { computer } = computerFixture();
+  const opened: string[] = [];
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
+  let requests = 0;
+  await openUrl({
+    action: { kind: "request_url", reason: "Open the supplied URL" },
+    observation: { desktop: desktopFixture(), window: windowFixture() },
+    computer: browser,
+    options: {
+      task: "Open https://example.test/library/page",
+      applications: [],
+      computer: () => browser,
+      text: {
+        async generate() {
+          requests += 1;
+          return requests === 1 ? "https://example.test/" : "https://example.test/library/page";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(requests).toBe(expectedRequests);
+  expect(opened).toEqual(["https://example.test/library/page"]);
 });

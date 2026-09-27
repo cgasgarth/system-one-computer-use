@@ -1,3 +1,4 @@
+import { prepareModels } from "./prepare.ts";
 import { createComputer, createModels, loadConfig } from "../../src/app/config.ts";
 import { runTask } from "../../src/agent/loop.ts";
 import type { Window } from "../../src/agent/contracts.ts";
@@ -406,6 +407,7 @@ async function executeCase(scenario: BrowserCase): Promise<boolean> {
 }
 let failed = false;
 try {
+  await prepareModels(config);
   await browser.desktop();
   const initial = await browser.window(0, 0);
   if (initial.url !== "about:blank") {

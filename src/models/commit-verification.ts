@@ -6,6 +6,7 @@ import type { BinaryAnswer, DecisionRequest } from "./system-one-schema.ts";
 
 const COMMIT_CONFIDENCE = 0.9;
 const MISSING_CHANGE_CONFIDENCE = 0.55;
+const AUTHORIZATION_FIELDS_CHARS = 1200;
 const CHECK_ROLES = new Set([
   "checkbox",
   "radio",
@@ -79,19 +80,36 @@ async function verifyCommit({
   readonly judge: Judge;
 }): Promise<{ readonly allowed: boolean; readonly checks: readonly ActionCheck[] }> {
   const control = target(action, input.observation.window);
-  if (action.kind !== "click_element" || control === undefined) {
+  const menu =
+    action.kind === "invoke_menu"
+      ? input.observation.window?.menus?.filter(
+          (item) => JSON.stringify(item.path) === JSON.stringify(action.path),
+        )
+      : undefined;
+  if (action.kind !== "click_element" && action.kind !== "invoke_menu") {
     return { allowed: true, checks: [] };
   }
-  const clicked = `${control.role} ${JSON.stringify(control.label ?? "")}`;
-  const inspected = await input.inspectClick?.(action);
+  if (
+    (action.kind === "click_element" && control === undefined) ||
+    (action.kind === "invoke_menu" && (menu?.length !== 1 || menu[0]?.enabled !== true))
+  ) {
+    return { allowed: false, checks: [] };
+  }
+  const clicked =
+    action.kind === "invoke_menu"
+      ? `menu ${JSON.stringify(action.path.join(" > "))}`
+      : `${control?.role ?? "control"} ${JSON.stringify(control?.label ?? "")}`;
+  const inspected =
+    action.kind === "click_element" ? await input.inspectClick?.(action) : undefined;
   const classification =
     inspected?.kind === "form_submit"
       ? ({ choice: "A0", probabilities: { A0: 1, A1: 0 } } as const)
       : await judge(
           question({
             model,
-            state: `Observed control: ${clicked}. Current dialog: ${input.observation.window?.elements.some((element) => ["dialog", "alertdialog", "AXDialog", "AXSheet", "AXPopover"].includes(element.role)) === true ? "open" : "closed"}.`,
-            instructions: "Would this exact click commit a persistent data change now?",
+            state: `Observed action: ${clicked}. Current window: ${input.observation.window?.app_name ?? "None"}: ${input.observation.window?.window_title ?? "None"}. Current dialog: ${input.observation.window?.elements.some((element) => ["dialog", "alertdialog", "AXDialog", "AXSheet", "AXPopover"].includes(element.role)) === true ? "open" : "closed"}.`,
+            instructions:
+              "Would this exact control or menu command commit a persistent data change now?",
             yes: "Yes. It saves, creates, sends, submits, deletes, or changes stored data now.",
             no: "No. It only opens, chooses, navigates, or closes a view without a persistent data change.",
           }),
@@ -107,13 +125,25 @@ async function verifyCommit({
   if (classification.choice === "A1") {
     return { allowed: true, checks };
   }
+  const observedWindow = input.observation.window;
+  const fields =
+    observedWindow === undefined
+      ? "No form controls observed."
+      : formControls(observedWindow)
+          .map((field) => controlDescription(field, observedWindow))
+          .join(" | ")
+          .slice(0, AUTHORIZATION_FIELDS_CHARS);
+  const effect =
+    inspected?.kind === "form_submit"
+      ? "Its observed effect is to submit and store this form."
+      : "This action was classified as potentially changing stored data.";
   const authorization = await judge(
     question({
       model,
-      state: `User request: ${input.task}. Previous session context for references only: ${input.context ?? ""}.`,
-      instructions: "May this request make a persistent data change now?",
-      yes: "Yes. The user requested a created, saved, sent, submitted, deleted, or otherwise stored change.",
-      no: "No. The user requested only a view, an open draft, a discarded draft, or another state with no stored change.",
+      state: `Current request: ${input.task}\nObserved location: ${observedWindow?.app_name ?? "None"}: ${observedWindow?.window_title ?? "None"}\nObserved form value: ${fields}\nProposed action: activate ${clicked}. ${effect}\nPrevious session context (references only): ${input.context ?? ""}`,
+      instructions: `Should the assistant activate ${clicked} now to fulfill the current request?`,
+      yes: `Activate ${clicked} now as a requested step and store the observed form values; a later requested step may undo this change.`,
+      no: `Do not activate ${clicked} now; this stored result is not requested or is premature.`,
     }),
   );
   checks.push({ action, answer: authorization, phase: "commit-authorization" });

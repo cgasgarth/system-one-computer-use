@@ -16,6 +16,7 @@ const DEFAULT_NATIVE_ACCESS = path.join(
 );
 const TIMEOUT_MS = 5000;
 const ERROR_CHARS = 400;
+const MAX_LABEL_LENGTH = 200;
 const eventSchema = z.discriminatedUnion("event", [
   z.object({ event: z.literal("ready") }),
   z.object({ event: z.enum(["available", "created", "unavailable", "timeout"]) }),
@@ -30,12 +31,25 @@ const fieldsSchema = z.object({
       role: z.enum(["AXTextArea", "AXTextField", "AXComboBox"]),
       frame: windowSchema.shape.elements.element.shape.frame.unwrap(),
       editable: z.boolean(),
+      subrole: z.string().optional(),
       value: z.string().optional(),
       placeholder: z.string().optional(),
       focused: z.boolean().optional(),
     }),
   ),
+  labels: z.array(
+    z.object({
+      role: z.enum(["AXRow", "AXCell"]),
+      frame: windowSchema.shape.elements.element.shape.frame.unwrap(),
+      label: z.string().min(1).max(MAX_LABEL_LENGTH),
+    }),
+  ),
 });
+const menuReportSchema = z.strictObject({
+  pid: z.number().int().positive(),
+  menus: windowSchema.shape.menus.unwrap(),
+});
+const documentSchema = z.strictObject({ url: z.url().optional() });
 interface WindowWait {
   readonly binary: string;
   readonly application: string;
@@ -123,4 +137,54 @@ async function readWritableFields(
   return fieldsSchema.parse(JSON.parse(output));
 }
 
-export { DEFAULT_NATIVE_ACCESS, readWritableFields, waitForNativeWindow };
+async function readNativeMenus(binary: string, pid: number): Promise<NonNullable<Window["menus"]>> {
+  const child = Bun.spawn([binary, "menus", String(pid)], {
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: TIMEOUT_MS,
+  });
+  const [code, output, error] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (code !== 0) {
+    throw new CuaError(error.trim().slice(0, ERROR_CHARS) || "Could not inspect native menus.");
+  }
+  const report = menuReportSchema.parse(JSON.parse(output));
+  if (report.pid !== pid) {
+    throw new CuaError("Native menu inspection returned another application.");
+  }
+  return report.menus;
+}
+
+async function readNativeDocument(binary: string, window: Window): Promise<string | undefined> {
+  const root = window.elements.find((element) => element.role === "AXWindow")?.frame;
+  if (root === undefined) {
+    throw new CuaError("The window bounds are unavailable for checking its document URL.");
+  }
+  const child = Bun.spawn([binary, "document", String(window.pid), JSON.stringify(root)], {
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: TIMEOUT_MS,
+  });
+  const [code, output, error] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (code !== 0) {
+    throw new CuaError(
+      error.trim().slice(0, ERROR_CHARS) || "Could not inspect native document URL.",
+    );
+  }
+  return documentSchema.parse(JSON.parse(output)).url;
+}
+
+export {
+  DEFAULT_NATIVE_ACCESS,
+  readNativeDocument,
+  readNativeMenus,
+  readWritableFields,
+  waitForNativeWindow,
+};

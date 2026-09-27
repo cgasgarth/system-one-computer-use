@@ -16,7 +16,6 @@ test("selects an operation before a compatible target and records both distribut
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const question = body.questions.next_action.instructions;
-      const answer = { choice: "A0", probabilities: { A0: 1 } };
       if (question.startsWith("Has this")) {
         return Response.json({
           answers: { next_action: { choice: "A1", probabilities: { A0: 0, A1: 1 } } },
@@ -35,8 +34,13 @@ test("selects an operation before a compatible target and records both distribut
           answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } } },
         });
       }
-      expect(Object.values(body.questions.next_action.criteria)).toEqual(["Enter message"]);
-      return Response.json({ answers: { next_action: answer } });
+      expect(Object.values(body.questions.next_action.criteria)).toEqual([
+        "Enter message",
+        "None of these targets; choose another operation without taking an action.",
+      ]);
+      return Response.json({
+        answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } } },
+      });
     },
   });
   try {
@@ -48,7 +52,7 @@ test("selects an operation before a compatible target and records both distribut
     });
     expect(result.action.kind).toBe("compose_text");
     expect(result.operation?.answer.choice).toBe("A0");
-    expect(result.candidates).toEqual([actions[0]]);
+    expect(result.candidates).toEqual(actions.filter((action) => action.kind === "compose_text"));
   } finally {
     await server.stop(true);
   }

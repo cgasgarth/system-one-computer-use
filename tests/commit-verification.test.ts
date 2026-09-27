@@ -101,6 +101,7 @@ test("rejects Save while a requested field change is missing", async () => {
 });
 
 test("allows Save after a requested field change is observed", async () => {
+  let authorizationState = "";
   const result = await verifyCommit({
     action,
     input: {
@@ -110,6 +111,9 @@ test("allows Save after a requested field change is observed", async () => {
     },
     model: "test",
     async judge(request) {
+      if (request.questions.next_action.instructions.startsWith("Should the assistant activate")) {
+        authorizationState = request.state;
+      }
       return request.questions.next_action.instructions.startsWith("Is a user-requested")
         ? no
         : yes;
@@ -117,4 +121,7 @@ test("allows Save after a requested field change is observed", async () => {
   });
   expect(result.allowed).toBe(true);
   expect(result.checks.at(-1)?.answer.choice).toBe("A1");
+  expect(authorizationState).toContain("Current request: Set Name to Draft and save");
+  expect(authorizationState).toContain('button "Save"');
+  expect(authorizationState).toContain('current value "Draft"');
 });

@@ -11,12 +11,62 @@ import type { Computer } from "../computer/types.ts";
 const webUrlSchema = z.url({ protocol: /^https?$/u });
 const bareDomainSchema = z.hostname().refine((name) => name.includes("."));
 const CORRECTION_CHARS = 200;
+const FRAME_TOLERANCE = 1;
 
 interface InputContext {
   readonly action: Action;
   readonly observation: Observation;
   readonly options: TaskOptions;
   readonly computer: Readonly<Computer>;
+}
+function sameFieldIdentity(
+  selected: Window["elements"][number],
+  candidate: Window["elements"][number],
+): boolean {
+  if (selected.role !== candidate.role) {
+    return false;
+  }
+  const first = selected.frame;
+  const second = candidate.frame;
+  const stableTarget =
+    first === undefined || second === undefined
+      ? selected.element_token === candidate.element_token
+      : Math.abs(first.x - second.x) < FRAME_TOLERANCE &&
+        Math.abs(first.y - second.y) < FRAME_TOLERANCE &&
+        Math.abs(first.w - second.w) < FRAME_TOLERANCE &&
+        Math.abs(first.h - second.h) < FRAME_TOLERANCE;
+  if (selected.subrole === "AXSearchField" || selected.role === "searchbox") {
+    return candidate.subrole === selected.subrole && stableTarget;
+  }
+  return (
+    stableTarget &&
+    (candidate.label === selected.label ||
+      (selected.label === selected.value && candidate.label === candidate.value))
+  );
+}
+async function generateFieldText(
+  context: InputContext,
+  action: Extract<Action, { kind: "compose_text" }>,
+  element: Window["elements"][number],
+): Promise<string> {
+  const metadata = await context.computer.inspectField?.(action);
+  return context.options.text.generate({
+    task: context.options.task,
+    context: context.options.context ?? "",
+    tool: action.reason,
+    observation: context.observation,
+    purpose: "text",
+    field: {
+      kind:
+        element.role === "searchbox" || element.subrole === "AXSearchField" ? "search" : "general",
+      role: element.role,
+      ...(element.subrole === undefined ? {} : { subrole: element.subrole }),
+      label: textTargetName(element),
+      value: String(element.value ?? ""),
+      ...metadata,
+      ...(element.placeholder === undefined ? {} : { placeholder: element.placeholder }),
+    },
+  });
 }
 async function verifyFieldValue(
   computer: Readonly<Computer>,
@@ -25,18 +75,19 @@ async function verifyFieldValue(
     readonly windowId: number;
     readonly field: Window["elements"][number];
     readonly text: string;
+    readonly scope: string;
   },
 ): Promise<{
   readonly key?: string;
   readonly field: { readonly role: string; readonly label: string; readonly value: string };
 }> {
   const written = await computer.window(expected.pid, expected.windowId);
+  if (windowScopeKey(written) !== expected.scope) {
+    throw new Error("The document changed after text was entered. Inspect it before retrying.");
+  }
   const { field, text } = expected;
   const matching = written.elements.filter(
-    (entry) =>
-      entry.role === field.role &&
-      entry.value === text &&
-      (entry.label === field.label || (field.label === field.value && entry.label === text)),
+    (entry) => entry.value === text && sameFieldIdentity(field, entry),
   );
   if (matching.length !== 1) {
     throw new Error(
@@ -74,21 +125,7 @@ async function enterText({
   if (selectedWindow === undefined || element === undefined) {
     throw new Error("The selected input is no longer available");
   }
-  const fieldMetadata = await computer.inspectField?.(action);
-  const text = await options.text.generate({
-    task: options.task,
-    context: options.context ?? "",
-    tool: action.reason,
-    observation,
-    purpose: "text",
-    field: {
-      role: element.role,
-      label: textTargetName(element),
-      value: String(element.value ?? ""),
-      ...fieldMetadata,
-      ...(element.placeholder === undefined ? {} : { placeholder: element.placeholder }),
-    },
-  });
+  const text = await generateFieldText({ action, observation, options, computer }, action, element);
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
     throw new Error("No suitable text was supplied for this field");
@@ -100,8 +137,7 @@ async function enterText({
     );
   }
   const matches = fresh.elements.filter(
-    (entry) =>
-      entry.role === element.role && entry.label === element.label && entry.value === element.value,
+    (entry) => entry.value === element.value && sameFieldIdentity(element, entry),
   );
   const [field] = matches;
   if (matches.length !== 1 || field === undefined || !isEditableElement(field)) {
@@ -129,6 +165,7 @@ async function enterText({
     windowId: fresh.window_id,
     field,
     text,
+    scope: windowScopeKey(fresh),
   });
   return {
     output: `Entered ${JSON.stringify(text)}`,
@@ -150,29 +187,90 @@ function normalizedWebUrl(text: string): string | undefined {
   const normalized = webUrlSchema.safeParse(`https://${domain.data}`);
   return normalized.success ? normalized.data : undefined;
 }
+function addressTokens(task: string): string[] {
+  return task
+    .split(/\s+/u)
+    .flatMap((token) => [token, token.replaceAll(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")]);
+}
+function explicitTaskDomain(task: string): string | undefined {
+  const domains = new Set(
+    addressTokens(task).flatMap((token) => {
+      const full = webUrlSchema.safeParse(token);
+      if (full.success) {
+        return [new URL(full.data).hostname];
+      }
+      const bare = bareDomainSchema.safeParse(token);
+      return bare.success ? [bare.data.toLowerCase()] : [];
+    }),
+  );
+  return domains.size === 1 ? domains.values().next().value : undefined;
+}
+function explicitTaskUrl(task: string): string | undefined {
+  const urls = new Set(
+    addressTokens(task).flatMap((token) => {
+      const parsed = webUrlSchema.safeParse(token);
+      return parsed.success ? [new URL(parsed.data).href] : [];
+    }),
+  );
+  return urls.size === 1 ? urls.values().next().value : undefined;
+}
+function taskContainsUrl(url: string, task: string): boolean {
+  const target = new URL(url).href;
+  return addressTokens(task).some((token) => {
+    const parsed = webUrlSchema.safeParse(token);
+    return parsed.success && new URL(parsed.data).href === target;
+  });
+}
+function observedExactUrl(url: string, observation: Observation): boolean {
+  const candidates = [
+    observation.window?.url,
+    ...(observation.window?.elements.map((element) => element.href) ?? []),
+  ];
+  return candidates.some((candidate) => {
+    const parsed = webUrlSchema.safeParse(candidate);
+    return parsed.success && new URL(parsed.data).href === new URL(url).href;
+  });
+}
+function groundedWebUrl(url: string | undefined, context: InputContext): string | undefined {
+  if (url === undefined) {
+    return undefined;
+  }
+  const target = new URL(url);
+  const explicitUrl = explicitTaskUrl(context.options.task);
+  if (explicitUrl !== undefined && target.href !== explicitUrl) {
+    return undefined;
+  }
+  const explicitDomain = explicitTaskDomain(context.options.task);
+  if (explicitDomain !== undefined && target.hostname !== explicitDomain) {
+    return undefined;
+  }
+  if (target.pathname === "/" && target.search.length === 0 && target.hash.length === 0) {
+    return url;
+  }
+  return taskContainsUrl(url, context.options.task) || observedExactUrl(url, context.observation)
+    ? url
+    : target.origin;
+}
 async function generateWebAddress(context: InputContext, correction?: string): Promise<string> {
   const { options, observation } = context;
-  return options.text
-    .generate({
+  try {
+    return await options.text.generate({
       task: options.task,
       context: options.context ?? "",
       tool: context.action.reason,
       observation,
       purpose: "url",
       ...(correction === undefined ? {} : { correction }),
-    })
-    .catch((error: unknown) => {
-      throw new Error(
-        "Could not get a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
-        { cause: error },
-      );
     });
-}
-async function openUrl(context: InputContext): Promise<ActionResult> {
-  const { options, computer, observation } = context;
-  if (computer.navigate === undefined) {
-    throw new Error("Website navigation requires Chrome tools");
+  } catch (error) {
+    throw new Error(
+      "Could not get a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
+      { cause: error },
+    );
   }
+}
+async function resolveWebAddress(context: InputContext): Promise<string> {
+  const { options } = context;
   const text = await generateWebAddress(context);
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
@@ -180,23 +278,35 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
       "The text helper found no URL for the current request. Choose another tool or request the missing information.",
     );
   }
-  let url = normalizedWebUrl(text);
-  if (url === undefined) {
-    const correction = `Your previous output ${JSON.stringify(text.slice(0, CORRECTION_CHARS))} was not a complete HTTP or HTTPS URL or a bare domain. Correct only this URL argument for the current request. Return one address with no quotes or explanation; return an empty string if unknown.`;
-    const corrected = await generateWebAddress(context, correction);
-    options.signal?.throwIfAborted();
-    if (corrected.trim().length === 0) {
-      throw new Error(
-        "The text helper could not identify a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
-      );
-    }
-    url = normalizedWebUrl(corrected);
+  const direct = groundedWebUrl(normalizedWebUrl(text), context);
+  if (direct !== undefined) {
+    return direct;
   }
+  const explicitDomain = explicitTaskDomain(options.task);
+  const explicitUrl = explicitTaskUrl(options.task);
+  const correction = `Your previous output ${JSON.stringify(text.slice(0, CORRECTION_CHARS))} did not give a grounded web address for the current request.${explicitUrl === undefined ? "" : ` The request gives exact URL ${JSON.stringify(explicitUrl)}; preserve its path.`}${explicitDomain === undefined ? "" : ` The request names domain ${JSON.stringify(explicitDomain)}; use that exact host, without adjoining action words.`} Return only one complete HTTP or HTTPS URL. Do not invent an unobserved page path. Return an empty string if unknown.`;
+  const corrected = await generateWebAddress(context, correction);
+  options.signal?.throwIfAborted();
+  if (corrected.trim().length === 0) {
+    throw new Error(
+      "The text helper could not identify a web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
+    );
+  }
+  const url = groundedWebUrl(normalizedWebUrl(corrected), context);
   if (url === undefined) {
     throw new Error(
       "The text helper did not return a valid web address. Provide a full HTTP or HTTPS URL, or choose another tool.",
     );
   }
+  return url;
+}
+async function openUrl(context: InputContext): Promise<ActionResult> {
+  const { options, computer, observation } = context;
+  if (computer.navigate === undefined) {
+    throw new Error("Website navigation requires Chrome tools");
+  }
+  const url = await resolveWebAddress(context);
+  options.signal?.throwIfAborted();
   const current = await computer.window(
     observation.window?.pid ?? 0,
     observation.window?.window_id ?? 0,

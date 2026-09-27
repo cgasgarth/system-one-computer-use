@@ -1,3 +1,4 @@
+import { prepareModels } from "./prepare.ts";
 import { createComputer, createModels, loadConfig } from "../../src/app/config.ts";
 import { runTask } from "../../src/agent/loop.ts";
 import type { Window } from "../../src/agent/contracts.ts";
@@ -100,6 +101,7 @@ const models = createModels(config);
 const browser = readOnlyWikipedia(createComputer(config, "browser"));
 const trace: TaskStep[] = [];
 try {
+  await prepareModels(config);
   await browser.desktop();
   const initial = await browser.window(0, 0);
   if (initial.url !== "about:blank") {

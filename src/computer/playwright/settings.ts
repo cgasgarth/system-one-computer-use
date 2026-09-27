@@ -27,4 +27,25 @@ async function extensionToken(configured: string | undefined): Promise<string> {
   );
 }
 
-export { extensionToken };
+async function chromeExecutable(): Promise<string | undefined> {
+  const configured = Bun.env["PLAYWRIGHT_MCP_EXECUTABLE_PATH"];
+  if (configured !== undefined) {
+    return z.string().min(1).parse(configured);
+  }
+  if (process.platform !== "darwin") {
+    return undefined;
+  }
+  const relative = "Google Chrome.app/Contents/MacOS/Google Chrome";
+  const candidates = [
+    path.join("/Applications", relative),
+    path.join(os.homedir(), "Applications", relative),
+  ];
+  const installed = await Promise.all(
+    candidates.map(async (candidate) =>
+      (await Bun.file(candidate).exists()) ? candidate : undefined,
+    ),
+  );
+  return installed.find((candidate) => candidate !== undefined);
+}
+
+export { chromeExecutable, extensionToken };

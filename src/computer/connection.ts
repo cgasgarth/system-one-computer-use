@@ -5,8 +5,9 @@ import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 import { desktopSchema, windowSchema } from "../agent/contracts.ts";
 import type { Desktop, Window } from "../agent/contracts.ts";
-import type { ClickAction, KeyAction, TypeAction } from "./types.ts";
+import type { ClickAction, KeyAction, MenuAction, TypeAction } from "./types.ts";
 import { CuaError } from "./errors.ts";
+import { WindowUnavailableError } from "./window-unavailable.ts";
 
 const ERROR_DETAIL_LIMIT = 800;
 const MAX_ELEMENTS = 1000;
@@ -187,7 +188,7 @@ class CuaConnection {
     if (!("degraded_reason" in state)) {
       return state;
     }
-    throw new CuaError(`Cannot read this window: ${state.degraded_reason}`);
+    throw new WindowUnavailableError(`Cannot read this window: ${state.degraded_reason}`);
   }
 
   public async click(action: ClickAction): Promise<void> {
@@ -202,6 +203,21 @@ class CuaConnection {
           action: action.operation ?? "press",
         },
         name: "click",
+      },
+      resultStatus,
+    );
+  }
+
+  public async invokeMenu(action: MenuAction): Promise<void> {
+    await this.invoke(
+      {
+        name: "invoke_menu",
+        arguments: {
+          pid: action.pid,
+          window_id: action.window_id,
+          path: action.path,
+          session: this.session,
+        },
       },
       resultStatus,
     );

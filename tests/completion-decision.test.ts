@@ -11,7 +11,6 @@ const LONG_PRIOR_REPEATS = 400;
 const MAX_COMMIT_TEST_CHARS = 5000;
 const FINAL_CONSTRAINT = "Final constraint: do not save any other project.";
 test("can search for the requested person after rejecting the current conversation", async () => {
-  let verifiedField = false;
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -19,15 +18,12 @@ test("can search for the requested person after rejecting the current conversati
       const question = body.questions.next_action.instructions;
       const { criteria } = body.questions.next_action;
       let choice = "A0";
-      if (question.startsWith("Does the current page")) {
+      if (question.startsWith("Does the selected app")) {
         choice = "A1";
       }
       if (question.startsWith("Which operation")) {
         expect(body.state).toContain("Locate the requested target");
         expect(Object.values(criteria)).toContain("Enter or replace text in an editable field.");
-      }
-      if (question.startsWith("Does entering")) {
-        verifiedField = true;
       }
       return Response.json({
         answers: {
@@ -63,7 +59,6 @@ test("can search for the requested person after rejecting the current conversati
     });
     expect(result.completionTarget?.choice).toBe("A1");
     expect(result.action).toEqual(search);
-    expect(verifiedField).toBe(true);
   } finally {
     await server.stop(true);
   }
@@ -103,14 +98,16 @@ test.each(cases)(
         expect(body.state).toContain("Search has not been submitted");
         const checking =
           body.questions.next_action.instructions.startsWith("Has this user request");
+        let answer = { choice: "A0", probabilities: { A0: 1, A1: 0 } };
+        if (checking) {
+          answer = {
+            choice: probability > BINARY_MIDPOINT ? "A0" : "A1",
+            probabilities: { A0: probability, A1: 1 - probability },
+          };
+        }
         return Response.json({
           answers: {
-            next_action: checking
-              ? {
-                  choice: probability > BINARY_MIDPOINT ? "A0" : "A1",
-                  probabilities: { A0: probability, A1: 1 - probability },
-                }
-              : { choice: "A0", probabilities: { A0: 1, A1: 0 } },
+            next_action: answer,
           },
         });
       },
@@ -258,12 +255,12 @@ test.each([
     recheck: true,
   },
   {
-    result: "uncertain",
+    result: "saved",
     prior: "A1",
     priorProbability: 0.65,
     commit: "A0",
-    expected: "press_key",
-    recheck: true,
+    expected: "finish",
+    recheck: false,
   },
   {
     result: "saved",

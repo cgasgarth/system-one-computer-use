@@ -22,6 +22,7 @@ function windowFixture(): Window {
         element_index: 1,
         element_token: "s1:1",
         role: "AXTextField",
+        subrole: "AXSearchField",
         label: "Search",
         value: "",
         actions: ["AXPress", "AXSetValue"],

@@ -24,4 +24,19 @@ if arguments.count == 2, arguments[1] == "permissions" {
         try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
         exit(1)
     }
+} else if arguments.count == 4, arguments[1] == "document", let pid = Int32(arguments[2]), pid > 0 {
+    do {
+        let expected = try JSONDecoder().decode(FieldFrame.self, from: Data(arguments[3].utf8))
+        let response = try WritableFields.document(pid: pid, expected: expected)
+        try FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(response))
+    } catch {
+        let message: String
+        if case NativeAccessError.message(let detail) = error { message = detail }
+        else { message = "Could not inspect the native document URL." }
+        try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
+        exit(1)
+    }
+} else if arguments.count == 3, arguments[1] == "menus", let pid = Int32(arguments[2]), pid > 0 {
+    let response = MenuItems.read(pid: pid)
+    try? FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(response))
 } else { exit(2) }

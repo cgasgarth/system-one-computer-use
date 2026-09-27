@@ -66,7 +66,7 @@ The app keeps one connection across tasks. Drag an existing tab into the
 tab closes after a usable tab is attached. Other clients' tabs remain outside
 this connection.
 
-Session context is saved on disk. Browser continuation restores a unique saved URL within the connected tab group and verifies it before use. After a worker restart, the extension creates a new group: move the saved tab into that group to continue. Duplicate URLs require a new session or removing the ambiguity. Native window handles are checked against a fresh desktop listing.
+Session context is saved on disk. Browser continuation restores a unique saved URL within the connected tab group and verifies it before use. If the saved tab is missing or ambiguous, the driver creates a blank task tab. It does not select an unrelated tab. On macOS, the adapter uses the installed Chrome executable to establish the extension connection; `PLAYWRIGHT_MCP_EXECUTABLE_PATH` can specify another Chrome location. Native window transitions get one bounded rediscovery within the same process; ambiguous windows return to model selection.
 
 Playwright MCP is installed from npm's latest release and locked in `bun.lock`.
 The browser adapter uses that release's `target` references for clicks and typing.
@@ -148,9 +148,9 @@ The loop remembers recent state/action pairs. Repeated controls in the same stat
 
 Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. Native text areas need an explicit writable capability before they become typing targets; some native editors need more driver support. Browser text areas expose that capability through Playwright.
 
-The same decision model checks proposed window selections and blocked stops. If it rejects a candidate, the harness checks the next ranked action. Previous requests remain available for follow-ups; old failure messages are not presented as current failures.
+Actions are grouped by operation, with native menus grouped by their observed top-level menu. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
 
-The completion check first classifies whether the task only asks to open or show an existing item. Those tasks use the observed app, window title, and URL; other tasks also include visible text and field values. The 0.6 completion threshold is a policy setting, not a calibrated measure of task accuracy.
+Completion uses the observed app, window title, URL, and field values. Inline editors and dialogs get a separate check for an unobserved saved or submitted result, so matching text alone does not prove a save. If the screen changes before Finish, completion is checked again against the fresh observation. Primary score cutoffs are policy settings, not calibrated accuracy estimates; secondary target and saved-result checks use their selected answers.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.

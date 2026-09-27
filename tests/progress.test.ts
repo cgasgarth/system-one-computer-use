@@ -24,7 +24,22 @@ test("navigates once, reports an already reached URL, and offers another decisio
   const computer: ManagedComputer = {
     ...base,
     async window() {
-      return { ...windowFixture(), url };
+      const window = windowFixture();
+      return {
+        ...window,
+        url,
+        elements: [
+          ...window.elements,
+          {
+            element_index: 2,
+            element_token: "destination",
+            role: "AXLink",
+            label: "Destination",
+            href: DESTINATION,
+            actions: ["AXPress"],
+          },
+        ],
+      };
     },
     async navigate(target) {
       navigations.push(target);

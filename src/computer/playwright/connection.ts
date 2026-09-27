@@ -4,7 +4,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { ReadonlyDeep } from "type-fest";
 import { fileURLToPath } from "node:url";
 import { CuaError } from "../errors.ts";
-import { extensionToken } from "./settings.ts";
+import { chromeExecutable, extensionToken } from "./settings.ts";
 
 const CLI = fileURLToPath(new URL("cli.js", import.meta.resolve("@playwright/mcp/package.json")));
 
@@ -19,6 +19,7 @@ class PlaywrightConnection {
 
   private async connect(): Promise<void> {
     const token = await extensionToken(this.token);
+    const executable = await chromeExecutable();
     await this.client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -32,7 +33,11 @@ class PlaywrightConnection {
           "--output-dir",
           "runs/playwright",
         ],
-        env: { ...Bun.env, PLAYWRIGHT_MCP_EXTENSION_TOKEN: token },
+        env: {
+          ...Bun.env,
+          PLAYWRIGHT_MCP_EXTENSION_TOKEN: token,
+          ...(executable === undefined ? {} : { PLAYWRIGHT_MCP_EXECUTABLE_PATH: executable }),
+        },
         stderr: "pipe",
       }),
     );

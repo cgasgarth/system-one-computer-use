@@ -8,6 +8,7 @@ import { enterText, openApplication, openUrl } from "./input.ts";
 import { options as actionOptions } from "./options.ts";
 import { summarizeObservation } from "../app/sessions/context.ts";
 import { stateKey } from "./state-key.ts";
+import type { Decision, DecisionInput } from "../models/system-one.ts";
 
 const HISTORY_CHARS = 2000;
 const RECENT_STEPS = 6;
@@ -217,45 +218,22 @@ async function outcome(context: TurnContext): Promise<ActionResult | { readonly 
     return { error: error instanceof Error ? error.message : "Tool failed" };
   }
 }
-async function verifyFinishSurface(
+function chooseInput(
   input: TurnInput,
-  observation: Observation,
-): Promise<{ readonly error?: string; readonly observation?: Observation }> {
-  try {
-    const fresh = await input.surfaces.observe(input.options.computer);
-    input.options.signal?.throwIfAborted();
-    return stateKey(fresh) === stateKey(observation)
-      ? {}
-      : {
-          error: "The screen changed before Finish. Observe the current result and choose again.",
-          observation: fresh,
-        };
-  } catch (error) {
-    input.options.signal?.throwIfAborted();
-    return {
-      error: `Could not verify the screen before Finish: ${error instanceof Error ? error.message : "Observation failed"}`,
-    };
-  }
-}
-// Trace fields record each independent model check and tool result.
-// eslint-disable-next-line eslint/complexity, eslint/max-statements, eslint/max-lines-per-function
-async function performTurn(input: TurnInput): Promise<TurnResult> {
+  snapshot: {
+    readonly observation: Observation;
+    readonly lastError: string;
+    readonly observationFailed: boolean;
+  },
+): DecisionInput {
   const { options, surfaces, history } = input;
-  options.signal?.throwIfAborted();
-  const observing = performance.now();
-  const { observation, lastError, observationError } = await observe(input);
-  const observationMs = performance.now() - observing;
-  if (observationError === undefined) {
-    input.progress.observe(observation);
-  } else {
-    input.progress.observeFailure(observationError);
-  }
+  const { observation, lastError, observationFailed } = snapshot;
   const actions = input.progress.choices(
     actionOptions({
       mode: surfaces.mode,
       needsApplication: surfaces.needsApplication && options.applications.length > 0,
       observation,
-      observationFailed: observationError !== undefined,
+      observationFailed,
       applications: options.applications,
     }),
     observation,
@@ -264,12 +242,17 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     .slice(-RECENT_STEPS)
     .map((step) => `${describeAction(step.action)} -> ${step.error ?? step.output ?? "No result"}`)
     .join("\n");
-  const context = `${turnFeedback(lastError)}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
+  const last = history.at(-1);
+  const changedAfterError =
+    last?.error !== undefined && last.observation !== summarizeObservation(observation)
+      ? "The screen changed after the last tool reported an error. Its effect is uncertain, not necessarily absent. Check the current result before repeating the action."
+      : "";
+  const context = `${turnFeedback(lastError)}\n${changedAfterError}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
   const executed = completionEvidence(history, observation);
   const priorCommit = history.findLast((step) => step.completionCommit !== undefined);
   const chosenComputer = surfaces.mode === undefined ? undefined : options.computer(surfaces.mode);
   const inspectClick = chosenComputer?.inspectClick.bind(chosenComputer);
-  const decision = await options.decision.choose({
+  return {
     task: options.task,
     observation,
     actions,
@@ -287,7 +270,79 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
         }),
     ...(inspectClick === undefined ? {} : { inspectClick }),
     mode: surfaces.mode,
-  });
+  };
+}
+async function verifyFinishSurface(
+  input: TurnInput,
+  observation: Observation,
+): Promise<{
+  readonly error?: string;
+  readonly observation?: Observation;
+  readonly decision?: Decision;
+}> {
+  try {
+    const fresh = await input.surfaces.observe(input.options.computer);
+    input.options.signal?.throwIfAborted();
+    if (stateKey(fresh) === stateKey(observation)) {
+      return {};
+    }
+    const decision = await input.options.decision.choose(
+      chooseInput(input, {
+        observation: fresh,
+        lastError: input.lastError,
+        observationFailed: false,
+      }),
+    );
+    input.options.signal?.throwIfAborted();
+    const confirmed =
+      decision.action.kind === "finish"
+        ? await input.surfaces.observe(input.options.computer)
+        : fresh;
+    input.options.signal?.throwIfAborted();
+    return {
+      observation: confirmed,
+      decision,
+      ...(decision.action.kind === "finish" && stateKey(confirmed) === stateKey(fresh)
+        ? {}
+        : {
+            error:
+              "The screen changed before Finish. The fresh result is not complete; choose the next action.",
+          }),
+    };
+  } catch (error) {
+    input.options.signal?.throwIfAborted();
+    return {
+      error: `Could not verify the screen before Finish: ${error instanceof Error ? error.message : "Observation failed"}`,
+    };
+  }
+}
+function nextError(step: TaskStep, lastError: string): string {
+  const performed =
+    step.performedAction === true &&
+    step.action.kind !== "select_surface" &&
+    step.action.kind !== "request_app";
+  return step.error ?? (performed ? "" : lastError);
+}
+// Trace fields record each independent model check and tool result.
+// eslint-disable-next-line eslint/complexity
+async function performTurn(input: TurnInput): Promise<TurnResult> {
+  const { options, surfaces, history } = input;
+  options.signal?.throwIfAborted();
+  const observing = performance.now();
+  const { observation, lastError, observationError } = await observe(input);
+  const observationMs = performance.now() - observing;
+  if (observationError === undefined) {
+    input.progress.observe(observation);
+  } else {
+    input.progress.observeFailure(observationError);
+  }
+  const decision = await options.decision.choose(
+    chooseInput(input, {
+      observation,
+      lastError,
+      observationFailed: observationError !== undefined,
+    }),
+  );
   options.signal?.throwIfAborted();
   const acting = performance.now();
   const finishSurface =
@@ -306,9 +361,9 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     action: decision.action,
     ...(control === undefined ? {} : { control }),
     presentedDialog: dialogVisible(observation),
-    decisionMs: decision.latencyMs,
+    decisionMs: decision.latencyMs + (finishSurface?.decision?.latencyMs ?? 0),
     observationMs,
-    actionMs: performance.now() - acting,
+    actionMs: Math.max(0, performance.now() - acting - (finishSurface?.decision?.latencyMs ?? 0)),
     elapsedMs: performance.now() - input.started,
     index: history.length + 1,
     probabilities: decision.probabilities,
@@ -326,6 +381,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
       : { completionCommit: decision.completionCommit }),
     ...(decision.checks === undefined ? {} : { checks: decision.checks }),
     observation: summarizeObservation(observation),
+    ...(finishSurface?.decision === undefined ? {} : { terminalDecision: finishSurface.decision }),
     ...(finishSurface?.observation === undefined
       ? {}
       : { terminalObservation: summarizeObservation(finishSurface.observation) }),
@@ -337,18 +393,10 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   if (observationError === undefined) {
     input.progress.attempted(step.action, observation);
   }
-  const terminal =
-    decision.action.kind === "finish" ||
-    decision.action.kind === "blocked" ||
-    decision.action.kind === "refresh";
-  const taskAction =
-    step.performedAction === true &&
-    step.action.kind !== "select_surface" &&
-    step.action.kind !== "request_app";
   return {
     step,
-    observation,
-    lastError: step.error ?? (terminal || !taskAction ? lastError : ""),
+    observation: finishSurface?.observation ?? observation,
+    lastError: nextError(step, lastError),
   };
 }
 export { performTurn };

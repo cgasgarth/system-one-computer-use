@@ -22,9 +22,42 @@ test("asks the text provider for field content with the task and session context
         context: "previous request",
         observation: { desktop: desktopFixture(), window: windowFixture() },
         purpose: "text",
-        field: { role: "textbox", label: "Search", value: "" },
+        field: { kind: "general", role: "textbox", label: "Search", value: "" },
       }),
     ).toBe("Alex");
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("asks for only an item query in an observed search field", async () => {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = textRequestSchema.parse(await request.json());
+      expect(body.messages[0]?.content).toContain("shortest search query");
+      expect(body.messages[1]?.content).toContain("AXSearchField");
+      return Response.json({
+        choices: [{ message: { content: "Playback Test.mp4" }, finish_reason: "stop" }],
+      });
+    },
+  });
+  try {
+    const model = new ChatCompletionTextModel(server.url.href, "writer");
+    const result = await model.generate({
+      task: "Open Playback Test.mp4 in a folder on my Desktop using the player",
+      context: "",
+      observation: { desktop: desktopFixture(), window: windowFixture() },
+      purpose: "text",
+      field: {
+        kind: "search",
+        role: "AXTextField",
+        subrole: "AXSearchField",
+        label: "search field",
+        value: "",
+      },
+    });
+    expect(result).toBe("Playback Test.mp4");
   } finally {
     await server.stop(true);
   }

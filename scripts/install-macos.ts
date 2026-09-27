@@ -219,7 +219,7 @@ async function buildSignedApp(selectedIdentity: string): Promise<void> {
     "-swift-version",
     "6",
     "-O",
-    ...["main", "WindowEvents", "WritableFields"].map((name) =>
+    ...["main", "WindowEvents", "WritableFields", "MenuItems"].map((name) =>
       path.join(root, "native", "NativeAccess", `${name}.swift`),
     ),
     "-o",

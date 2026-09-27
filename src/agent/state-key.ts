@@ -22,7 +22,14 @@ function textFieldKey(observation: Observation, token: string): string | undefin
   const ordinal = window.elements
     .filter((element) => element.role === field.role && textTargetName(element) === name)
     .findIndex((element) => element.element_token === token);
-  return JSON.stringify([windowScopeKey(window), field.role, name, ordinal, field.value]);
+  return JSON.stringify([
+    windowScopeKey(window),
+    field.role,
+    field.subrole,
+    name,
+    ordinal,
+    field.value,
+  ]);
 }
 
 function fingerprint(observation: Observation, includeTransient: boolean): string {
@@ -46,14 +53,17 @@ function fingerprint(observation: Observation, includeTransient: boolean): strin
             window: window.window_id,
             title: window.window_title,
             url: window.url,
+            menus: window.menus,
             elements: window.elements.map((element) => ({
               role: element.role,
+              subrole: element.subrole,
               label: element.label,
               href: element.href,
               value: element.value,
               selected: element.selected,
               enabled: element.enabled,
-              ...(includeTransient ? { focused: element.focused, frame: element.frame } : {}),
+              focused: includeTransient ? element.focused : undefined,
+              frame: includeTransient ? element.frame : undefined,
             })),
           },
     ),
@@ -77,6 +87,9 @@ function actionKey(action: Action, observation: Observation): string | undefined
   }
   if (action.kind === "observe_window") {
     return JSON.stringify([action.kind, action.pid, action.window_id]);
+  }
+  if (action.kind === "invoke_menu") {
+    return JSON.stringify([action.kind, action.pid, action.window_id, action.path]);
   }
   if (action.kind === "press_key") {
     return JSON.stringify([action.kind, action.key, action.modifiers.toSorted()]);
@@ -105,6 +118,7 @@ function actionKey(action: Action, observation: Observation): string | undefined
     action.kind,
     action.kind === "click_element" ? (action.operation ?? "press") : undefined,
     target.role,
+    target.subrole,
     target.label,
     target.href,
     ordinal,

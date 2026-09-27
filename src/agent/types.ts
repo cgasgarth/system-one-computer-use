@@ -1,12 +1,12 @@
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import type { ActionProbabilities, BinaryAnswer } from "../models/system-one-schema.ts";
-import type { DecisionModel } from "../models/system-one.ts";
+import type { Decision, DecisionModel } from "../models/system-one.ts";
 import type { TextModel } from "../models/text.ts";
 import type { Action } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { ActionCheck } from "../models/decision-verification.ts";
-import type { OperationDecision } from "../models/action-space.ts";
+import type { OperationDecision } from "../models/decision-context.ts";
 
 interface ActionResult {
   readonly output: string;
@@ -37,6 +37,7 @@ interface TaskStep {
   readonly elapsedMs: number;
   readonly observation: string;
   readonly terminalObservation?: string;
+  readonly terminalDecision?: Decision;
   readonly observationError?: string;
   readonly output?: string;
   readonly error?: string;

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 
+const MAX_MENU_DEPTH = 16;
+
 const desktopSchema = z.object({
   apps: z.array(
     z.object({ bundle_id: z.string().optional(), name: z.string(), pid: z.number().int() }),
@@ -18,12 +20,23 @@ const desktopSchema = z.object({
 const windowSchema = z.object({
   url: z.url().optional(),
   app_name: z.string(),
+  menus: z
+    .array(
+      z.object({
+        path: z.array(z.string().min(1)).min(1).max(MAX_MENU_DEPTH),
+        label: z.string().min(1),
+        enabled: z.boolean(),
+        shortcut: z.string().optional(),
+      }),
+    )
+    .optional(),
   elements: z.array(
     z.object({
       element_index: z.number().int(),
       parent_index: z.number().int().nullable().optional(),
       element_token: z.string(),
       role: z.string(),
+      subrole: z.string().optional(),
       label: z.string().optional(),
       placeholder: z.string().optional(),
       href: z.url().optional(),
@@ -66,6 +79,12 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),
   z.strictObject({ kind: z.literal("observe_window"), ...target, reason }),
   z.strictObject({
+    kind: z.literal("invoke_menu"),
+    ...target,
+    path: z.array(z.string().min(1)).min(1).max(MAX_MENU_DEPTH),
+    reason,
+  }),
+  z.strictObject({
     kind: z.literal("click_element"),
     operation: z.enum(["press", "pick", "confirm", "open"]).optional(),
     ...target,
@@ -94,6 +113,13 @@ type ActionChoices = readonly [Action, ...Action[]];
 type ElementAction = Extract<Action, { kind: "click_element" | "compose_text" | "type_text" }>;
 const TEXT_INPUT_ROLES = new Set(["AXTextField", "textbox", "searchbox", "combobox", "spinbutton"]);
 function isEditableElement(element: Window["elements"][number]): boolean {
+  if (
+    element.role === "AXTextField" &&
+    (element.actions ?? []).includes("AXOpen") &&
+    element.focused !== true
+  ) {
+    return false;
+  }
   if (element.editable !== undefined) {
     return element.editable && element.enabled !== false;
   }
@@ -154,6 +180,13 @@ function validateActions(actions: readonly Action[], observation: Observation): 
     if (action.kind === "press_key") {
       return true;
     }
+    if (action.kind === "invoke_menu") {
+      const matches =
+        observation.window.menus?.filter(
+          (menu) => JSON.stringify(menu.path) === JSON.stringify(action.path),
+        ) ?? [];
+      return matches.length === 1 && matches[0]?.enabled === true;
+    }
     return validElement(action, observation.window);
   });
 }
@@ -179,6 +212,9 @@ function describeAction(action: Action): string {
       return action.reason;
     }
     case "observe_window": {
+      return action.reason;
+    }
+    case "invoke_menu": {
       return action.reason;
     }
     case "click_element": {

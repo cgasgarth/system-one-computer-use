@@ -242,3 +242,23 @@ A dedicated local certificate was subsequently installed in the login keychain w
 The later Chrome request failed to restore its saved tab, received invalid URL arguments, and then switched between unrelated windows until the user stopped it. Recovery changes now use a blank tab when the saved URL is missing or ambiguous, require a complete URL with a single correction attempt, retain errors and recent actions in model context, and track repeated window destinations across source windows. Operation selection retains alternative tools, and window checks explicitly distinguish requested websites from similarly named applications. Focus and geometry changes do not reset the repeated-action state.
 
 At the user's explicit request, no tests, static checks, or task demonstrations were run for these recovery changes. Their effect on model task success is unverified.
+
+### General navigation and outcome recovery
+
+The same 14 frozen decision requests produced 7 expected choices with CLM 8B q4 and 13 with Kev 4B. Both missed one Create-project effect question. Corpus SHA-256: `7b13e24e9ea5505d5f641d674af37cd01a53f03cb2834d51d162fb6118e97ebd`. These are development decisions, not an overall task-accuracy score. Three native cases were excluded from the paired comparison because source changed between their runs. `scripts/evals/provider-compare.ts` records this distinction.
+
+General fixes address missing native menu and row capabilities, search-field identity, exact URL arguments, unrelated operation fallbacks, and completion checks that vetoed correct results. Native window replacement has a single bounded rediscovery. Native document URLs are read from the exact Accessibility window, not inferred from its title. Source changes contain no application-name or website-name task routing.
+
+Observed outcomes with Kev 4B:
+
+| Task                                       | Result evidence                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| Edit and save a local browser document     | Completed with the exact new text and one stored write                    |
+| Fill an unsaved browser draft              | Completed with the requested value, dialog open, zero stored writes       |
+| Browser result changes before Finish       | Rejected the stale result and returned to the requested document          |
+| Open a local video from a different folder | Completed through observed native controls; exact final file URL verified |
+| Open a native app with older task context  | Completed in the requested app                                            |
+
+The latest file run used six steps in 17.6 seconds. CUA 0.28.2 reported AXOpen errors despite folder/file transitions taking effect; those errors remain in the trace. The harness re-observed the result and verified the file URL before completion. This does not establish that all native actions are reliable. The test used an owned two-second generated clip and did not open personal media.
+
+CLI evaluations now prepare unloaded models before their task timer, matching the app's preparation stage. An earlier zero-step timeout was a cold-model preparation failure in the evaluation runner. Task timings exclude weight loading and are not cold-start benchmarks. Raw traces remain under ignored `runs/qa/recovery/` and `runs/recovery/`.

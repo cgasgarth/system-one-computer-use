@@ -2,6 +2,7 @@ import type { Computer, ManagedComputer } from "../computer/types.ts";
 import type { Action, Desktop, Observation } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import { restoreSurface } from "../app/sessions/targets.ts";
+import { WindowUnavailableError } from "../computer/window-unavailable.ts";
 
 interface Target {
   readonly pid: number;
@@ -23,6 +24,40 @@ class SurfaceSession {
   public selectApplication(application: Desktop["apps"][number] | undefined): void {
     this.application = application;
     this.needsApplication = false;
+  }
+  private async readTarget(
+    computer: Readonly<ManagedComputer>,
+    observation: Observation,
+    target: Target,
+  ): Promise<Observation> {
+    try {
+      return { ...observation, window: await computer.window(target.pid, target.windowId) };
+    } catch (error) {
+      if (!(error instanceof WindowUnavailableError)) {
+        throw error;
+      }
+    }
+    // Window replacement can precede its Accessibility tree. Rediscover once;
+    // Multiple candidates must go back to the decision model for selection.
+    this.setTarget(undefined);
+    const desktop = await computer.desktop();
+    const application = desktop.apps.find((app) => app.pid === target.pid);
+    const fresh: Observation = { desktop, ...(application === undefined ? {} : { application }) };
+    const windows = desktop.windows.filter((window) => window.pid === target.pid);
+    const [replacement] = windows;
+    if (windows.length !== 1 || replacement === undefined) {
+      return fresh;
+    }
+    try {
+      const window = await computer.window(replacement.pid, replacement.window_id);
+      this.setTarget({ pid: replacement.pid, windowId: replacement.window_id });
+      return { ...fresh, window };
+    } catch (error) {
+      if (!(error instanceof WindowUnavailableError)) {
+        throw error;
+      }
+      return fresh;
+    }
   }
   public async observe(
     getComputer: (mode: "browser" | "desktop") => ManagedComputer,
@@ -57,11 +92,14 @@ class SurfaceSession {
         (window) => window.pid === target.pid && window.window_id === target.windowId,
       )
     ) {
-      return {
-        desktop,
-        ...(application === undefined ? {} : { application }),
-        window: await computer.window(target.pid, target.windowId),
-      };
+      return this.readTarget(
+        computer,
+        {
+          desktop,
+          ...(application === undefined ? {} : { application }),
+        },
+        target,
+      );
     }
     this.setTarget(undefined);
     return { desktop, ...(application === undefined ? {} : { application }) };
@@ -92,6 +130,13 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
     }
     case "press_key": {
       await computer.pressKey(action);
+      break;
+    }
+    case "invoke_menu": {
+      if (computer.invokeMenu === undefined) {
+        throw new Error("This driver cannot invoke native menu commands");
+      }
+      await computer.invokeMenu(action);
       break;
     }
     case "navigate": {

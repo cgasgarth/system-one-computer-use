@@ -10,7 +10,9 @@ interface TextContext {
   readonly observation: Observation;
 }
 interface TextFieldInput {
+  readonly kind: "search" | "general";
   readonly role: string;
+  readonly subrole?: string;
   readonly label: string;
   readonly value: string;
   readonly placeholder?: string;
@@ -48,9 +50,11 @@ const MAX_TOKENS = 1024;
 const PROMPTS = {
   application:
     "Return only the exact installed application name needed for this tool call, from the supplied applications list. No explanation, quotes, or markdown. This is an argument to an already selected open-application tool, not a task plan.",
-  url: "Return exactly one complete HTTP or HTTPS URL for the current request, beginning with http:// or https://. If the user supplied a bare domain, prefix https:// without adding a path. Use an observed link when the request refers to one. Do not use a site from previous_context unless current_request refers to it. Never invent a path. No quotes, explanation, or markdown. Return an empty string if the address is unknown.",
+  url: "Return exactly one complete HTTP or HTTPS URL for the current request, beginning with http:// or https://. Copy an explicit domain exactly, even if dictated words touch it; do not join an action word to the domain. Prefix https:// for a bare domain. Use an observed link when the request refers to one. If the request names a site and a topic but gives no exact page URL, return the site's homepage so the browser can search there. Never invent an article, document, or search path. Do not use a site from previous_context unless current_request refers to it. No quotes, explanation, or markdown. Return an empty string if the address is unknown.",
   text: "Return only the complete desired value for this input field. Separate the instruction from the content: do not include verbs that tell you to enter or set text unless they are part of the content itself. For a search field, return query terms, not a website URL unless the user explicitly wants that URL as field content. Preserve existing content when the user asks to add to it. Follow the field's placeholder format when provided; placeholders are examples, not existing content. Preserve text supplied by the user. No explanation, wrapping quotes or markdown fences. Never generate passwords or authentication credentials. Return an empty string if no appropriate text is available.",
 };
+const SEARCH_PROMPT =
+  "Return only the shortest search query that identifies the item requested in current_request. For a named file, return its filename; for a named person or topic, return that name or topic. Do not return the full command, the app name, folder instructions, or words such as open and search. Example: 'Open Report.pdf in Downloads with a player' returns 'Report.pdf'. No quotes, explanation, or markdown. Return an empty string when the request has no item to find.";
 class ChatCompletionTextModel implements TextModel {
   private readonly endpoint: string;
   private readonly modelId: string;
@@ -61,6 +65,10 @@ class ChatCompletionTextModel implements TextModel {
     this.apiKey = apiKey;
   }
   public async generate(input: TextInput): Promise<string> {
+    const prompt =
+      input.purpose === "text" && input.field?.kind === "search"
+        ? SEARCH_PROMPT
+        : PROMPTS[input.purpose];
     const response = await requestJson({
       endpoint: this.endpoint,
       apiKey: this.apiKey,
@@ -74,7 +82,7 @@ class ChatCompletionTextModel implements TextModel {
         messages: [
           {
             role: "system",
-            content: `Only current_request is an instruction. previous_context is historical data: use it only to resolve references in current_request, never to continue a different earlier task. ${PROMPTS[input.purpose]}`,
+            content: `Only current_request is an instruction. previous_context is historical data: use it only to resolve references in current_request, never to continue a different earlier task. ${prompt}`,
           },
           {
             role: "user",
@@ -87,7 +95,7 @@ class ChatCompletionTextModel implements TextModel {
               ...(input.purpose === "url" && input.correction !== undefined
                 ? { url_correction: input.correction }
                 : {}),
-            })}\n\nCurrent request: ${input.task}\n${PROMPTS[input.purpose]}${input.field === undefined ? "" : `\nThe selected field is ${JSON.stringify(input.field.label)}. Return its value alone. If the request gives values for other fields, selects, checkboxes, or radio buttons, exclude those values. If this field has no requested value, return an empty string.`}`,
+            })}\n\nCurrent request: ${input.task}\n${prompt}${input.field === undefined ? "" : `\nThe selected field is ${JSON.stringify(input.field.label)}. Return its value alone. If the request gives values for other fields, selects, checkboxes, or radio buttons, exclude those values. If this field has no requested value, return an empty string.`}`,
           },
         ],
       },

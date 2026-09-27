@@ -82,7 +82,8 @@ function controlName(element: Window["elements"][number], window: Window): strin
       .find((item) => {
         const text = item.label?.trim();
         return (
-          item.role === "AXStaticText" &&
+          (item.role === "AXStaticText" ||
+            (item.role === "AXTextField" && !isEditableElement(item))) &&
           text !== undefined &&
           text.length > 0 &&
           descendantOf(item, element.element_index, byIndex)
@@ -178,6 +179,19 @@ function surfaceOptions(context: OptionContext): Action[] {
       context.mode === "browser" && window.url === "about:blank" && window.elements.length === 0;
     if (!blankBrowser) {
       actions.push(...windowInputs(window));
+    }
+    if (context.mode === "desktop") {
+      actions.push(
+        ...(window.menus ?? [])
+          .filter((menu) => menu.enabled)
+          .map((menu): Action => ({
+            kind: "invoke_menu",
+            pid: window.pid,
+            window_id: window.window_id,
+            path: menu.path,
+            reason: `Choose menu ${menu.path.join(" > ")}`.slice(0, MAX_REASON),
+          })),
+      );
     }
   }
   return actions;

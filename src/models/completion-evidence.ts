@@ -3,6 +3,20 @@ import type { Window } from "../agent/contracts.ts";
 
 const DIALOGS = new Set(["dialog", "alertdialog", "AXDialog", "AXSheet", "AXPopover"]);
 
+function nonSearchEditable(element: Window["elements"][number]): boolean {
+  return (
+    isEditableElement(element) &&
+    element.role !== "searchbox" &&
+    element.role !== "AXSearchField" &&
+    element.subrole !== "AXSearchField"
+  );
+}
+
+function hasEditableContent(window: Window | undefined): boolean {
+  // An empty editor can also hold an unsaved deletion.
+  return window?.elements.some((element) => nonSearchEditable(element)) ?? false;
+}
+
 function hasPendingDialogDraft(window: Window | undefined): boolean {
   if (window === undefined) {
     return false;
@@ -24,10 +38,10 @@ function hasPendingDialogDraft(window: Window | undefined): boolean {
   return window.elements.some(
     (element) =>
       included.has(element.element_index) &&
-      isEditableElement(element) &&
+      nonSearchEditable(element) &&
       typeof element.value === "string" &&
       element.value.trim().length > 0,
   );
 }
 
-export { hasPendingDialogDraft };
+export { hasEditableContent, hasPendingDialogDraft };

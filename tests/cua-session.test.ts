@@ -234,3 +234,36 @@ test("uses guarded foreground delivery only after an ambiguous background key is
     await connection.close();
   }
 });
+
+test("invokes only the exact observed native menu path on the bound window", async () => {
+  const base = fixture();
+  let invoked = 0;
+  const client: CuaClient = {
+    ...base.client,
+    async callTool(request) {
+      if (request.name === "invoke_menu") {
+        invoked += 1;
+        expect(request.arguments).toMatchObject({
+          pid: 7,
+          window_id: 9,
+          path: ["File", "Open…"],
+        });
+        return { content: [], structuredContent: { effect: "confirmed" } };
+      }
+      return base.client.callTool(request);
+    },
+  };
+  const connection = new CuaConnection("unused", client);
+  try {
+    await connection.invokeMenu({
+      kind: "invoke_menu",
+      pid: 7,
+      window_id: 9,
+      path: ["File", "Open…"],
+      reason: "Choose the observed Open menu item",
+    });
+    expect(invoked).toBe(1);
+  } finally {
+    await connection.close();
+  }
+});

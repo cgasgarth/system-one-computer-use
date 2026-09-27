@@ -26,19 +26,34 @@ test("restores the unique saved URL through the extension and verifies it", asyn
   const current = await browserBookmark(connection);
   expect(current.url).toBe(saved.url);
 });
-test("reports duplicate URLs and a tab change before returning a usable target", async () => {
-  const ambiguous: Pick<PlaywrightConnection, "call"> = {
-    async call() {
-      return "- 0: [A](https://example.test/a)\n- 1: [A](https://example.test/a)";
-    },
-  };
-  await expectFailure(restoreBrowser(ambiguous, saved), "ambiguous");
-  const raced: Pick<PlaywrightConnection, "call"> = {
+for (const listing of [
+  "- 0: [Other](https://example.test/other)",
+  "- 0: [A](https://example.test/a)\n- 1: [A](https://example.test/a)",
+]) {
+  test("creates a blank task tab when the saved tab cannot be identified", async () => {
+    const calls: string[] = [];
+    const connection: Pick<PlaywrightConnection, "call"> = {
+      async call(request) {
+        if (request.name === "browser_snapshot") {
+          return snapshot.replace("https://example.test/a", "about:blank");
+        }
+        const action = String(request.arguments?.["action"]);
+        calls.push(action);
+        if (action === "new") {
+          expect(request.arguments?.["url"]).toBe("about:blank");
+        }
+        return listing;
+      },
+    };
+    await restoreBrowser(connection, saved);
+    expect(calls).toEqual(["list", "new"]);
+  });
+}
+test("rejects a new tab when Chrome selects a different page", async () => {
+  const connection: Pick<PlaywrightConnection, "call"> = {
     async call(request) {
-      return request.name === "browser_snapshot"
-        ? snapshot.replace("https://example.test/a", "https://example.test/b")
-        : "- 0: [A](https://example.test/a)";
+      return request.name === "browser_snapshot" ? snapshot : "";
     },
   };
-  await expectFailure(restoreBrowser(raced, saved), "different tab");
+  await expectFailure(restoreBrowser(connection, saved), "did not select the new blank tab");
 });

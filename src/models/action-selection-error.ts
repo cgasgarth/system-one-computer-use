@@ -1,5 +1,5 @@
 import type { ActionCheck } from "./decision-verification.ts";
-import type { OperationDecision } from "./action-space.ts";
+import type { OperationDecision } from "./decision-context.ts";
 
 const REJECTED_CHECK_EXCERPT = 2;
 const MAX_REASON_EXCERPT = 100;

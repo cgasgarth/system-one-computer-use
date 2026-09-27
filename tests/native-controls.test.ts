@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { options } from "../src/agent/options.ts";
-import { actionDescription } from "../src/models/action-space.ts";
+import { actionDescription } from "../src/models/decision-context.ts";
 import { relevantControls, textTargetName } from "../src/agent/controls.ts";
 import { SurfaceSession } from "../src/agent/surface.ts";
 import { computerFixture, desktopFixture, windowFixture } from "./fixtures.ts";
@@ -130,6 +130,82 @@ test("uses an observed row action with its descendant text", () => {
   expect(row && actionDescription(row, { desktop: desktopFixture(), window })).toBe(
     "Activate Contact and preview",
   );
+});
+
+test("uses a read-only named file control to identify an actionable cell", () => {
+  const window = {
+    ...windowFixture(),
+    elements: [
+      { element_index: 0, element_token: "root", role: "AXWindow" },
+      {
+        element_index: 1,
+        parent_index: 0,
+        element_token: "cell",
+        role: "AXCell",
+        actions: ["AXOpen"],
+      },
+      {
+        element_index: 2,
+        parent_index: 1,
+        element_token: "name",
+        role: "AXTextField",
+        label: "Desktop",
+        editable: false,
+      },
+    ],
+  };
+  const choices = options({
+    mode: "desktop",
+    applications: [],
+    observation: { desktop: desktopFixture(), window },
+  });
+  expect(
+    choices.some(
+      (action) =>
+        action.kind === "click_element" &&
+        action.element_token === "cell" &&
+        action.operation === "open" &&
+        action.reason === "Open Desktop",
+    ),
+  ).toBe(true);
+});
+
+test("an openable file name is an action until its text editor has focus", () => {
+  const base = {
+    element_index: 1,
+    element_token: "file",
+    role: "AXTextField",
+    label: "Notes",
+    editable: true,
+    actions: ["AXOpen", "AXSetValue"],
+  };
+  const observation = {
+    desktop: desktopFixture(),
+    window: { ...windowFixture(), elements: [base] },
+  };
+  const offered = options({ mode: "desktop", applications: [], observation });
+  expect(
+    offered.some(
+      (action) =>
+        action.kind === "click_element" &&
+        action.element_token === "file" &&
+        action.operation === "open",
+    ),
+  ).toBe(true);
+  expect(
+    offered.some((action) => action.kind === "compose_text" && action.element_token === "file"),
+  ).toBe(false);
+  const editing = options({
+    mode: "desktop",
+    applications: [],
+    observation: {
+      ...observation,
+      window: { ...observation.window, elements: [{ ...base, focused: true }] },
+    },
+  });
+  expect(
+    editing.some((action) => action.kind === "compose_text" && action.element_token === "file"),
+  ).toBe(true);
 });
 
 test("uses the active dialog subtree instead of controls behind it", async () => {

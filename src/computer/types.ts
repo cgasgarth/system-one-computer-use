@@ -8,6 +8,7 @@ type ComputerMode = z.infer<typeof computerModeSchema>;
 type ClickAction = Extract<Action, { kind: "click_element" }>;
 type TypeAction = Extract<Action, { kind: "type_text" }>;
 type KeyAction = Extract<Action, { kind: "press_key" }>;
+type MenuAction = Extract<Action, { kind: "invoke_menu" }>;
 type ClickInspection =
   | { readonly kind: "form_submit" }
   | { readonly kind: "non_submit" }
@@ -28,6 +29,7 @@ interface Computer {
   }>;
   readonly typeText: (action: TypeAction) => Promise<void>;
   readonly pressKey: (action: KeyAction) => Promise<void>;
+  readonly invokeMenu?: (action: MenuAction) => Promise<void>;
   readonly navigate?: (url: string) => Promise<void>;
 }
 
@@ -44,6 +46,7 @@ export type {
   Computer,
   ComputerMode,
   KeyAction,
+  MenuAction,
   ManagedComputer,
   TypeAction,
 };
