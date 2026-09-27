@@ -42,12 +42,12 @@ async function recordTrial(output: string, trial: Readonly<TrialRecord>): Promis
   );
 }
 async function recordEvidence(output: string, outcome: Readonly<TrialOutcome>): Promise<void> {
-  const { record, trace, decisionEvents, wireRequests } = outcome;
+  const { record, trace, decisionEvents, wireRequests, textWire } = outcome;
   const folder = path.join(output, "traces", record.modelId);
   await mkdir(folder, { recursive: true });
   await Bun.write(
     path.join(folder, `${record.caseId}-trial-${record.trial}.json`),
-    JSON.stringify({ record, trace, decisionEvents, wireRequests }),
+    JSON.stringify({ record, trace, decisionEvents, wireRequests, textWire }),
   );
 }
 export { fixtureHash, recordEvidence, recordTrial };

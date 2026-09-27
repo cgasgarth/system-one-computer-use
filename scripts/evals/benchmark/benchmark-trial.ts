@@ -9,6 +9,7 @@ import type {
   DecisionRequestEvent,
   DecisionWireEvent,
 } from "../../../src/models/decision-request.ts";
+import type { TextWireEvent } from "../../../src/models/text.ts";
 import { restrictedBrowser } from "../restricted-browser.ts";
 import type { Workspace } from "../workspace.ts";
 import { excessWrites, grade, subtractWrites, writeCounts } from "./benchmark-cases.ts";
@@ -62,6 +63,11 @@ interface TrialOutcome {
   readonly decisionEvents: readonly DecisionRequestEvent[];
   readonly wireRequests: readonly {
     readonly phase: DecisionWireEvent["phase"];
+    readonly bodyJson: string;
+    readonly sha256: string;
+  }[];
+  readonly textWire: readonly {
+    readonly kind: TextWireEvent["kind"];
     readonly bodyJson: string;
     readonly sha256: string;
   }[];
@@ -128,6 +134,7 @@ async function runTrialCore(input: Readonly<CoreTrialInput>): Promise<TrialOutco
   const requests: DecisionRequestEvent[] = [];
   const wireRequests: { phase: DecisionWireEvent["phase"]; bodyJson: string; sha256: string }[] =
     [];
+  const textWire: { kind: TextWireEvent["kind"]; bodyJson: string; sha256: string }[] = [];
   const textTimes: number[] = [];
   let textRequests = 0;
   const startedAt = new Date().toISOString();
@@ -194,6 +201,11 @@ async function runTrialCore(input: Readonly<CoreTrialInput>): Promise<TrialOutco
         const sha256 = new Bun.CryptoHasher("sha256").update(bodyJson).digest("hex");
         wireRequests.push({ phase: event.phase, bodyJson, sha256 });
       },
+      onTextWire(event) {
+        const bodyJson = JSON.stringify(event.body);
+        const sha256 = new Bun.CryptoHasher("sha256").update(bodyJson).digest("hex");
+        textWire.push({ kind: event.kind, bodyJson, sha256 });
+      },
     });
     taskStatus = result.status;
     taskMs = performance.now() - taskStarted;
@@ -239,6 +251,7 @@ async function runTrialCore(input: Readonly<CoreTrialInput>): Promise<TrialOutco
     trace: steps,
     decisionEvents: requests,
     wireRequests,
+    textWire,
     record: {
       modelId,
       caseId: scenario.id,
