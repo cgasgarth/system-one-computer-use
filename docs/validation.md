@@ -9,14 +9,13 @@ bun run check
 bun run format:check
 bun run test
 bun run test:native
-uv run --project integrations/clm-mlx --frozen --no-editable python -m unittest integrations/local-bridge/test_serve.py -q
 ```
 
-These checks cover strict type-aware lint, source size, formatting, agent and model behavior, AppKit and Accessibility helpers, and local Unix socket framing and cancellation. They do not prove a live task result. Check actual page or app state and stored effects after each live task.
+These checks cover strict type-aware lint, source size, formatting, agent and model behavior, AppKit and Accessibility helpers. They do not prove a live task result. Check actual page or app state and stored effects after each live task.
 
 ## Current source evidence
 
-At source commit `33543ce`, strict check, format check, and all **276 Bun tests** passed. The action policy separates observed select-option actions from button actions. The decision model can choose a control that is present in the current snapshot, including an option in a grouped select. The benchmark stores exact typed decision request bodies and hashes. New runs also save typed text request and validated response JSON privately in each ignored trial trace. The 28-task cohort below preceded that text-wire capture, so its traces contain decision wires but not text wires.
+At reviewed commit `b93d99a`, strict check, format check, native tests, and the canonical `bun run test` gate passed: **236 tests, 0 failures, 715 assertions across 53 files**. The action policy separates observed select-option actions from button actions. The decision model can choose a control that is present in the current snapshot, including an option in a grouped select. The benchmark stores exact typed decision request bodies and hashes. New runs also save typed text request and validated response JSON privately in each ignored trial trace. The 28-task cohort below preceded that text-wire capture, so its traces contain decision wires but not text wires.
 
 In the [current seven-preset browser benchmark](benchmark.md), all **28/28** isolated localhost trials finished with one fixed Qwen 3.5 2B text writer, a stable fixture origin, equal browser-only action scope, canonical reset hashes, and no driver errors or unintended writes. Kev 4B and Kev 9B each passed 4/4 strict task grades. The other five presets passed 0/4; one Julia case returned an explicit capacity error. Failed tasks' short time to stop is not a completion speed result. The report lists every case result, correct-task time, turns, and first-unique model request time.
 
