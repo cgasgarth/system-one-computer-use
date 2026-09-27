@@ -6,8 +6,11 @@ import os
 import socket
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from threading import Event, Thread
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -34,7 +37,88 @@ class ActiveGeneration:
         self.stopped.set()
 
 
+class JuliaEngine:
+    def __init__(self):
+        self.calls = []
+        self.error = None
+
+    def predict(self, **arguments):
+        self.calls.append(arguments)
+        if self.error is not None:
+            raise self.error
+        criteria = arguments["questions"]["next_action"]["criteria"]
+        count = len(criteria)
+        return {"answers": {"next_action": {
+            "type": "choice", "choice": "A1",
+            "probabilities": {key: 1 / count for key in criteria},
+            "max_probability": 1 / count,
+        }}}
+
+
 class SocketBoundaryTests(unittest.TestCase):
+    def test_selected_revisions_reach_the_exact_model_loader(self):
+        encoder = "a" * 40
+        head = "b" * 40
+        julia = "c" * 40
+        loaded = (lambda *_: {}, lambda: None)
+        with patch.object(bridge, "load_clm", return_value=loaded) as clm, \
+             patch.object(bridge, "load_julia", return_value=loaded) as julia_loader, \
+             patch.object(bridge, "serve") as serve:
+            bridge.main(["--provider", "clm", "--socket", "/tmp/clm.sock", "--bits", "8",
+                         "--encoder-revision", encoder, "--head-revision", head])
+            clm.assert_called_once_with(8, encoder, head)
+            bridge.main(["--provider", "julia", "--socket", "/tmp/julia.sock",
+                         "--revision", julia])
+            julia_loader.assert_called_once_with(julia)
+            self.assertEqual(serve.call_count, 2)
+
+    def test_mutable_model_revision_fails_before_loading(self):
+        with patch.object(bridge, "load_clm") as load:
+            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                bridge.main(["--provider", "clm", "--socket", "/tmp/clm.sock",
+                             "--encoder-revision", "main", "--head-revision", "a" * 40])
+            load.assert_not_called()
+
+    def test_julia_keeps_exact_candidate_keys_and_probabilities(self):
+        engine = JuliaEngine()
+        body = bridge.DecisionBody.model_validate({
+            "model": "julia-latest", "state": "Current screen",
+            "questions": {"next_action": {"type": "choice", "instructions": "Choose one.",
+                "criteria": {"A0": "First", "A1": "Second", "A2": "Third"}}},
+        })
+        result = bridge.answer_julia(engine, body)
+        self.assertEqual(result["answers"]["next_action"]["choice"], "A1")
+        self.assertEqual(list(result["answers"]["next_action"]["probabilities"]), ["A0", "A1", "A2"])
+        self.assertEqual(engine.calls[0]["questions"]["next_action"]["criteria"],
+                         {"A0": "First", "A1": "Second", "A2": "Third"})
+
+    def test_julia_rejects_too_many_choices_without_inference(self):
+        engine = JuliaEngine()
+        body = bridge.DecisionBody.model_validate({
+            "model": "julia-latest", "state": "Current screen",
+            "questions": {"next_action": {"type": "choice", "instructions": "Choose one.",
+                "criteria": {f"A{index}": str(index) for index in range(21)}}},
+        })
+        with self.assertRaisesRegex(ValueError, "capacity_choices:"):
+            bridge.answer_julia(engine, body)
+        self.assertEqual(engine.calls, [])
+
+    def test_julia_labels_strict_encoding_capacity_errors(self):
+        engine = JuliaEngine()
+        body = bridge.DecisionBody.model_validate({
+            "model": "julia-latest", "state": "Current screen",
+            "questions": {"next_action": {"type": "choice", "instructions": "Choose one.",
+                "criteria": {"A0": "First", "A1": "Second"}}},
+        })
+        for upstream, prefix in (
+            ("Option exceeds 48-token model contract", "capacity_option_tokens:"),
+            ("Question/options exceed lossless head budget", "capacity_question_tokens:"),
+            ("Game state exceeds lossless context budget", "capacity_state_tokens:"),
+        ):
+            engine.error = ValueError(upstream)
+            with self.assertRaisesRegex(ValueError, prefix):
+                bridge.answer_julia(engine, body)
+
     def test_buffered_cancelled_request_is_discarded_before_inference(self):
         request = {"role": "text", "body": {
             "model": "default_model", "messages": [{"role": "user", "content": "Hello"}],

@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import select
 import signal
 import socket
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 MAX_FRAME_BYTES = 4_194_304
 READY_LINE = "SYSTEM_ONE_MODEL_READY"
+REVISION_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class StrictModel(BaseModel):
@@ -116,6 +118,9 @@ def watch_client_close(connection: socket.socket, cancelled: Event, active_conte
 
 
 def load_kev(run: str):
+    # ModelSlot downloaded the exact checkpoint and its declared base first.
+    # A resident serving process must not require network access to warm.
+    os.environ["HF_HUB_OFFLINE"] = "1"
     import torch
     from kev.checkpoint import Checkpoint, LoadOptions
     from kev.device import default_device
@@ -146,23 +151,23 @@ def load_kev(run: str):
     return answer, server.close
 
 
-def load_clm(bits: int):
+def load_clm(bits: int, encoder_revision: str, head_revision: str):
     import torch
     from clm.engine import Engine
     from clm_mlx.encoder import MLXEmbedder
     from huggingface_hub import hf_hub_download, snapshot_download
 
-    from clm_mlx.download import ENCODER_REVISION, HEAD_REVISION
-
     torch.set_num_threads(1)
     encoder_path = snapshot_download(
         "Qwen/Qwen3-8B",
-        revision=ENCODER_REVISION,
+        revision=encoder_revision,
         allow_patterns=["*.safetensors", "*.json", "*.txt", "*.model"],
         max_workers=4,
+        local_files_only=True,
     )
     head_path = hf_hub_download(
-        "Contrastive-LM/CLM-v0.1-8B", "CLM_v0.1-8B.pt", revision=HEAD_REVISION
+        "Contrastive-LM/CLM-v0.1-8B", "CLM_v0.1-8B.pt", revision=head_revision,
+        local_files_only=True,
     )
     engine = Engine(
         embedder=MLXEmbedder(encoder_path, bits),
@@ -179,6 +184,58 @@ def load_clm(bits: int):
             model=body.model,
             temperature=1.0,
         )
+
+    return answer, lambda: None
+
+
+def julia_capacity_error(error: ValueError) -> ValueError:
+    message = str(error)
+    for upstream, prefix in (
+        ("Option exceeds 48-token model contract", "capacity_option_tokens"),
+        ("Question/options exceed lossless head budget", "capacity_question_tokens"),
+        ("Game state exceeds lossless context budget", "capacity_state_tokens"),
+    ):
+        if upstream in message:
+            return ValueError(f"{prefix}: {message}")
+    return error
+
+
+def answer_julia(engine, body: DecisionBody) -> dict:
+    if body.model != "julia-latest":
+        raise ValueError("The requested Julia model is not loaded.")
+    criteria = body.questions["next_action"].criteria
+    if not 2 <= len(criteria) <= 20:
+        raise ValueError("capacity_choices: Julia requires 2 to 20 choices per question.")
+    try:
+        return engine.predict(
+            state=body.state,
+            questions={key: question.model_dump() for key, question in body.questions.items()},
+        )
+    except ValueError as error:
+        raise julia_capacity_error(error) from error
+
+
+def load_julia(revision: str):
+    import torch
+    from julia_runtime.checkpoint import resolved_snapshot
+
+    snapshot = resolved_snapshot(revision, offline=True)
+    sys.path.insert(0, str(snapshot))
+    from julia import load_model
+
+    torch.set_num_threads(4)
+    engine = load_model(
+        str(snapshot),
+        device="cpu",
+        max_length=8192,
+        head_length=512,
+        strict_encoding=True,
+        marker_only_head=False,
+        backend="torch",
+    )
+
+    def answer(body: DecisionBody, _connection: socket.socket) -> dict:
+        return answer_julia(engine, body)
 
     return answer, lambda: None
 
@@ -300,20 +357,34 @@ def serve(socket_path: Path, role: Literal["decision", "text"], answer, close) -
         close()
 
 
-def main() -> None:
+def required_revision(parser: argparse.ArgumentParser, value: str | None, flag: str) -> str:
+    if value is None or REVISION_PATTERN.fullmatch(value) is None:
+        parser.error(f"{flag} requires an exact 40-character checkpoint SHA")
+    return value
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Local model Unix socket service")
-    parser.add_argument("--provider", choices=("kev", "clm", "text"), required=True)
+    parser.add_argument("--provider", choices=("kev", "clm", "julia", "text"), required=True)
     parser.add_argument("--socket", type=Path, required=True)
     parser.add_argument("--run")
     parser.add_argument("--bits", type=int, choices=(0, 4, 8))
     parser.add_argument("--model-path")
-    args = parser.parse_args()
+    parser.add_argument("--encoder-revision")
+    parser.add_argument("--head-revision")
+    parser.add_argument("--revision")
+    args = parser.parse_args(argv)
     if args.provider == "kev":
         if args.run is None:
             parser.error("Kev requires --run")
         answer, close = load_kev(args.run)
     elif args.provider == "clm":
-        answer, close = load_clm(4 if args.bits is None else args.bits)
+        encoder = required_revision(parser, args.encoder_revision, "--encoder-revision")
+        head = required_revision(parser, args.head_revision, "--head-revision")
+        answer, close = load_clm(4 if args.bits is None else args.bits, encoder, head)
+    elif args.provider == "julia":
+        revision = required_revision(parser, args.revision, "--revision")
+        answer, close = load_julia(revision)
     else:
         if args.model_path is None:
             parser.error("Text requires --model-path")
