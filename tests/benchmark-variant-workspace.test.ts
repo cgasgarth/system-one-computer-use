@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { startVariantWorkspace } from "../scripts/evals/benchmark/variant-workspace.ts";
-import { zeroWrites } from "../scripts/evals/benchmark/benchmark-cases.ts";
+import { createBenchmarkSuite } from "../scripts/evals/benchmark/benchmark-suite.ts";
+import { cases, zeroWrites } from "../scripts/evals/benchmark/benchmark-cases.ts";
 import { gradeVariant, variantCases } from "../scripts/evals/benchmark/variant-cases.ts";
 import {
   canonicalVariantStart,
@@ -8,6 +12,7 @@ import {
 } from "../scripts/evals/benchmark/variant-state.ts";
 import type { Window } from "../src/agent/contracts.ts";
 
+const SHA256_HEX_LENGTH = 64;
 const dummy = {
   document: {
     id: "quartz-1",
@@ -167,6 +172,24 @@ describe("generic validation workspace", () => {
       expect(variantStateHash(workspace, rotatedWindow)).toBe(originalHash);
     } finally {
       await workspace.close();
+    }
+  });
+  test("binds changed tasks to the existing serial trial runner", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "s1-variant-test-"));
+    const file = path.join(directory, "variant.json");
+    await Bun.write(file, JSON.stringify(dummy));
+    const suite = await createBenchmarkSuite(cases, file);
+    try {
+      expect(suite.executions.map((scenario) => scenario.id)).toEqual(
+        cases.map((scenario) => scenario.id),
+      );
+      expect(
+        suite.variantMetadata?.tasks.find((task) => task.id === "open-document")?.task,
+      ).toContain("Quartz Memo");
+      expect(suite.variantMetadata?.configSha256).toHaveLength(SHA256_HEX_LENGTH);
+    } finally {
+      await suite.close();
+      await rm(directory, { recursive: true });
     }
   });
 });

@@ -11,11 +11,9 @@ import { modelName } from "../../../src/app/models/preferences.ts";
 import { PlaywrightComputer } from "../../../src/computer/playwright/computer.ts";
 import type { ManagedComputer } from "../../../src/computer/types.ts";
 import { sourceHash } from "../provenance.ts";
-import { startWorkspace } from "../workspace.ts";
-import type { Workspace } from "../workspace.ts";
 import { preparedArtifact, resolveArtifacts, savedArtifacts } from "./benchmark-artifacts.ts";
 import type { ArtifactSelection } from "./benchmark-artifacts.ts";
-import type { BenchmarkCase } from "./benchmark-cases.ts";
+import type { ScenarioExecution } from "./benchmark-execution.ts";
 import {
   ResourceLimitError,
   ensureInstalledHostStopped,
@@ -30,7 +28,7 @@ import { ModelCleanupError } from "./benchmark-errors.ts";
 import { BenchmarkRuntime } from "./benchmark-runtime.ts";
 import { summarize } from "./benchmark-stats.ts";
 import type { TrialRecord } from "./benchmark-stats.ts";
-import { runTrial } from "./benchmark-trial.ts";
+import { createBenchmarkSuite } from "./benchmark-suite.ts";
 import type { StartupRecord } from "./benchmark-types.ts";
 
 const BENCHMARK_DIRECTORY = "runs/benchmark";
@@ -74,9 +72,8 @@ async function runModel(input: {
   readonly candidate: ReadonlyDeep<ArtifactManifest>;
   readonly runtime: BenchmarkRuntime;
   readonly computer: ManagedComputer;
-  readonly workspace: Readonly<Workspace>;
   readonly expectedHashes: Map<string, string>;
-  readonly scenarios: readonly BenchmarkCase[];
+  readonly scenarios: readonly ScenarioExecution[];
   readonly trialCount: number;
   readonly output: string;
   readonly paths: Readonly<ConstructorParameters<typeof BenchmarkRuntime>[0]["paths"]>;
@@ -88,7 +85,6 @@ async function runModel(input: {
     candidate,
     runtime,
     computer,
-    workspace,
     expectedHashes,
     scenarios,
     trialCount,
@@ -126,13 +122,11 @@ async function runModel(input: {
         const expectedInitialHash = expectedHashes.get(scenario.id);
         // All model and browser actions are intentionally serial.
         // oxlint-disable-next-line no-await-in-loop
-        const result = await runTrial({
+        const result = await scenario.run({
           modelId: model.id,
           trial,
-          scenario,
           computer,
           models,
-          workspace,
           ...(expectedInitialHash === undefined ? {} : { expectedInitialHash }),
         });
         if (result.record.initialStateHash !== undefined && !expectedHashes.has(scenario.id)) {
@@ -162,9 +156,8 @@ async function runPreset(input: {
   readonly prepared: readonly ArtifactSelection[];
   readonly runtime: BenchmarkRuntime;
   readonly computer: ManagedComputer;
-  readonly workspace: Readonly<Workspace>;
   readonly expectedHashes: Map<string, string>;
-  readonly scenarios: readonly BenchmarkCase[];
+  readonly scenarios: readonly ScenarioExecution[];
   readonly trialCount: number;
   readonly output: string;
   readonly paths: Readonly<ConstructorParameters<typeof BenchmarkRuntime>[0]["paths"]>;
@@ -176,7 +169,6 @@ async function runPreset(input: {
     prepared,
     runtime,
     computer,
-    workspace,
     expectedHashes,
     scenarios,
     trialCount,
@@ -203,7 +195,6 @@ async function runPreset(input: {
       candidate,
       runtime,
       computer,
-      workspace,
       expectedHashes,
       scenarios,
       trialCount,
@@ -245,12 +236,12 @@ async function runBenchmark(): Promise<void> {
   const initialDiskFreeGiB = await freeDiskGiB(data);
   const runtime = new BenchmarkRuntime({ paths, output, initialDiskFreeGiB });
   const computer = new PlaywrightComputer({ mode: "isolated" });
-  const workspace = startWorkspace();
   const expectedHashes = new Map<string, string>();
   const trials: TrialRecord[] = [];
   const startups: StartupRecord[] = [];
   const selection = selectionFromEnvironment();
   const { models: presets, scenarios, trialCount } = selection;
+  const suite = await createBenchmarkSuite(scenarios);
   const manifest = {
     runId,
     sourceHash: await sourceHash(),
@@ -260,7 +251,13 @@ async function runBenchmark(): Promise<void> {
     host: await machineProfile(),
     runtimeScope:
       "source bridge over private Unix sockets and isolated Chrome; installed app preferences unchanged",
-    fixtureOrigin: workspace.origin,
+    fixtureOrigin: suite.origin,
+    ...(suite.variantMetadata === undefined
+      ? {}
+      : {
+          variantConfigSha256: suite.variantMetadata.configSha256,
+          variantTasks: suite.variantMetadata.tasks,
+        }),
   };
   await Bun.write(
     path.join(output, "manifest.json"),
@@ -323,9 +320,8 @@ async function runBenchmark(): Promise<void> {
         prepared,
         runtime,
         computer,
-        workspace,
         expectedHashes,
-        scenarios,
+        scenarios: suite.executions,
         trialCount,
         output,
         paths,
@@ -337,11 +333,7 @@ async function runBenchmark(): Promise<void> {
     failure = errorText(error);
     throw error;
   } finally {
-    const cleanup = await Promise.allSettled([
-      workspace.close(),
-      computer.close(),
-      runtime.close(),
-    ]);
+    const cleanup = await Promise.allSettled([suite.close(), computer.close(), runtime.close()]);
     const cleanupErrors = cleanup.flatMap((result) =>
       result.status === "rejected" ? [errorText(result.reason)] : [],
     );
