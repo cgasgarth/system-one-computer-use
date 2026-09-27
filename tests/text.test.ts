@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { ChatCompletionTextModel } from "../src/models/text.ts";
 import { textRequestSchema, textResponseSchema } from "../src/models/text-schema.ts";
+import type { TextRequest } from "../src/models/text-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
 const URL_TOKEN_BUDGET = 128;
@@ -30,6 +31,45 @@ test("asks the text provider for field content with the task and session context
         field: { kind: "general", role: "textbox", label: "Search", value: "" },
       }),
     ).toBe("Alex");
+  } finally {
+    await server.stop(true);
+  }
+});
+test("captures the exact typed text request and response without letting observers veto it", async () => {
+  const captured = Promise.withResolvers<TextRequest>();
+  const observed = Promise.withResolvers<TextRequest>();
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      captured.resolve(textRequestSchema.parse(await request.json()));
+      return Response.json({
+        choices: [{ message: { content: "Morgan Vale" }, finish_reason: "stop" }],
+      });
+    },
+  });
+  try {
+    const events: string[] = [];
+    const model = new ChatCompletionTextModel(server.url.href, "writer");
+    const result = await model.generate({
+      task: "Set Display name to Morgan Vale",
+      context: "",
+      observation: { desktop: desktopFixture(), window: windowFixture() },
+      purpose: "text",
+      field: { kind: "general", role: "textbox", label: "Display name", value: "" },
+      onWire(event) {
+        if (event.kind === "request") {
+          events.push("request");
+          observed.resolve(event.body);
+        } else {
+          events.push("response");
+          expect(event.body.choices[0].message.content).toBe("Morgan Vale");
+        }
+        throw new Error("A read-only observer cannot stop text generation.");
+      },
+    });
+    expect(result).toBe("Morgan Vale");
+    expect(await observed.promise).toEqual(await captured.promise);
+    expect(events).toEqual(["request", "response"]);
   } finally {
     await server.stop(true);
   }

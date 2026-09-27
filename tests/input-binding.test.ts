@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Window } from "../src/agent/contracts.ts";
-import type { TextModel } from "../src/models/text.ts";
+import type { TextModel, TextWireEvent } from "../src/models/text.ts";
 import type { ActionResult } from "../src/agent/types.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
 import { enterText, openUrl } from "../src/agent/input.ts";
@@ -63,12 +63,64 @@ function inputFixture(
     },
   };
 }
+function observeTextWire(_event: TextWireEvent): void {
+  /* The writer owns the read-only notification. */
+}
 
 test("rejects a same-labelled field on another URL after argument generation", async () => {
   const original = { ...windowFixture(), url: "https://example.test/document/one" };
   const fixture = inputFixture(original, { ...original, url: "https://example.test/document/two" });
   await expectFailure(fixture.run(), "document changed");
   expect(fixture.typed).toEqual([]);
+});
+test("forwards the optional text wire observer to the selected field writer", async () => {
+  const { computer, typed } = computerFixture();
+  const observation = {
+    desktop: desktopFixture(),
+    window: {
+      ...windowFixture(),
+      elements: [
+        {
+          element_index: 1,
+          element_token: "s1:1",
+          role: "AXTextField",
+          label: "Search",
+          value: "",
+          actions: ["AXPress", "AXSetValue"],
+        },
+      ],
+    },
+  };
+  const result = await enterText({
+    action: {
+      kind: "compose_text",
+      pid: 7,
+      window_id: 9,
+      element_token: "s1:1",
+      reason: "Type text into Search",
+    },
+    observation,
+    computer,
+    options: {
+      task: "Find Alex",
+      applications: [],
+      computer: () => computer,
+      onTextWire: observeTextWire,
+      text: {
+        async generate(input) {
+          expect(input.onWire).toBe(observeTextWire);
+          return "Alex";
+        },
+      },
+      decision: {
+        async choose() {
+          throw new Error("No decision needed");
+        },
+      },
+    },
+  });
+  expect(result.verifiedField?.value).toBe("Alex");
+  expect(typed).toEqual(["Alex"]);
 });
 
 test("rejects a different native document in the same window", async () => {

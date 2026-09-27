@@ -2,7 +2,7 @@ import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import type { ActionProbabilities } from "../models/system-one-schema.ts";
 import type { Decision, DecisionModel, DecisionRequestEvent } from "../models/system-one.ts";
 import type { DecisionWireEvent } from "../models/decision-request.ts";
-import type { TextModel } from "../models/text.ts";
+import type { TextModel, TextWireEvent } from "../models/text.ts";
 import type { Action, Surface } from "./contracts.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { ActionCheck } from "../models/action-check.ts";
@@ -75,5 +75,6 @@ interface TaskOptions {
   readonly onStage?: (event: TaskStageEvent) => void | Promise<void>;
   readonly onDecisionRequest?: (event: DecisionRequestEvent) => void;
   readonly onDecisionWire?: (event: DecisionWireEvent) => void;
+  readonly onTextWire?: (event: TextWireEvent) => void;
 }
 export type { TaskStageEvent, TaskStep, TaskResult, TaskOptions, ActionResult };
