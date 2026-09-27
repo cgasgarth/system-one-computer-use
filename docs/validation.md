@@ -35,6 +35,14 @@ In a separate installed task, Stop arrived during target inference before TextEd
 
 The QA turns displaced one older session under the three-session retention rule. After grading them, QA restored the original three session files and index byte for byte and kept its test session under ignored `runs/`. Quit stopped the owned worker, model daemon, model processes, and sockets.
 
+## Current preset and installed-app gate
+
+At source commit `b111464`, strict check, format check, and all **224 Bun tests** passed. The Julia integration also passed 28 Python tests. The signed macOS install built with Command Line Tools and kept the same certificate-bound designated requirement. The installed Models menu listed Julia 1. Selecting it started the Julia CPU Unix process at revision `a85b127321d580d65176c89ced8273f305745d85` and showed Ready. The selected model was then restored to Kev 4B. The saved model preferences matched the preinstall copy byte for byte; all four session files and their index remained unchanged. The environment file only gained the app-managed `SYSTEM_ONE_MAX_CHOICES` key. The app was left Ready with the original Calculator draft, Auto control surface, and Automatic session mode. No user task was submitted for this gate.
+
+The installed Julia, Kev 4B, and Qwen artifact manifests matched the latest runtime-asset check at validation time, so no Update control appeared for those current files. No new release was simulated. The source updater tests cover an available update and cancellation while base metadata is pending; installed UI validation covers only the current-file state.
+
+The corrected [seven-preset browser benchmark](benchmark.md) completed 84/84 isolated localhost trials with one fixed Qwen writer, a stable fixture origin, equal browser-only actions, canonical reset hashes, exact request capture, and no driver errors. Strict success was Kev 9B 12/12 and Kev 4B 9/12; five other presets passed 0/12 on these four development cases. Three Kev 4B failures reached the requested saved selection but made a second POST, so they remain strict failures. CLM identical-request cache hits are reported separately from first-unique request times. These cases do not establish general desktop-task or model quality.
+
 ## Limits
 
 Disposable local browser cases have exercised document navigation, editing and saving, unsaved drafts, duplicate-label selection, changed controls, and session follow-up. A model Finish was graded against actual page state and write counters. Native menu and browser capability coverage still varies by app and page. Complex canvas, drag, and vision-driven workflows have not been validated broadly.
