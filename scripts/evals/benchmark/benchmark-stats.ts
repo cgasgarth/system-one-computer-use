@@ -11,7 +11,8 @@ type Outcome =
   | "timeout"
   | "model-error"
   | "driver-error"
-  | "infrastructure-invalid";
+  | "infrastructure-invalid"
+  | "guarded-external-target";
 interface TrialRecord {
   readonly modelId: string;
   readonly caseId: string;
@@ -20,6 +21,7 @@ interface TrialRecord {
   readonly gradedOutcome: Outcome;
   readonly taskStatus: "complete" | "blocked" | "error" | "not-started";
   readonly driverErrors: readonly string[];
+  readonly guardedExternalAttempts: number;
   readonly initialStateHash?: string;
   readonly taskMs: number;
   readonly turns: number;
@@ -77,6 +79,7 @@ function summarize(modelId: string, trials: readonly TrialRecord[]): Summary {
     "model-error": count("model-error"),
     "driver-error": count("driver-error"),
     "infrastructure-invalid": count("infrastructure-invalid"),
+    "guarded-external-target": count("guarded-external-target"),
   };
   return {
     modelId,

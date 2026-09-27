@@ -13,6 +13,7 @@ type StartupRecord =
       readonly modelId: string;
       readonly provenance: ModelProvenance;
       readonly metrics: StartupMetrics;
+      readonly postDecisionTextProbeMs?: number;
     }
   | {
       readonly status: "load-failed";

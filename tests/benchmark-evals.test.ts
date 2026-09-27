@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { checkClmWeights } from "../scripts/evals/benchmark/benchmark-artifacts.ts";
 import type { ArtifactSelection } from "../scripts/evals/benchmark/benchmark-artifacts.ts";
-import { infrastructureGrade } from "../scripts/evals/benchmark/benchmark-infrastructure.ts";
+import {
+  externalTargetKind,
+  infrastructureGrade,
+} from "../scripts/evals/benchmark/benchmark-infrastructure.ts";
 import { initialStateHash } from "../scripts/evals/benchmark/benchmark-state.ts";
 import {
   cases,
@@ -53,6 +56,7 @@ function trial(overrides: Partial<TrialRecord>): TrialRecord {
     gradedOutcome: "success",
     taskStatus: "complete",
     driverErrors: [],
+    guardedExternalAttempts: 0,
     taskMs: SUCCESS_MS,
     turns: 3,
     decisionRequests: 5,
@@ -180,6 +184,18 @@ describe("fixture isolation", () => {
     expect(graded.outcome).toBe("infrastructure-invalid");
     expect(graded.driverErrors).toHaveLength(1);
   });
+  test("a rejected external URL stays bounded; an observed escape stops the matrix", () => {
+    expect(
+      externalTargetKind("The model selected a URL outside the disposable localhost fixture."),
+    ).toBe("blocked-target");
+    expect(
+      externalTargetKind(
+        "The model left the disposable localhost fixture; the evaluation stopped.",
+      ),
+    ).toBe("observed-escape");
+  });
+});
+describe("full fixture reset", () => {
   test("reset restores every fixture write and the initial logical state hash", async () => {
     const fixture = workspace();
     const initial = initialStateHash(fixture, window(`${fixture.origin}/`));

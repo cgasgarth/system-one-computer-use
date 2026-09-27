@@ -223,6 +223,14 @@ class BenchmarkRuntime {
     this.activeDecision = { ...loaded, model };
     return this.activeDecision;
   }
+  public async probeTextAfterDecisionLoad(): Promise<number> {
+    if (this.textProcess === undefined || this.textArtifact === undefined) {
+      throw new Error("The fixed text model must be loaded before its post-load probe.");
+    }
+    const started = performance.now();
+    await probeText(this.sockets.text, modelName({ source: "local", id: this.textArtifact.id }));
+    return performance.now() - started;
+  }
   public async stopDecision(): Promise<void> {
     const active = this.activeDecision;
     await active?.process.stop();

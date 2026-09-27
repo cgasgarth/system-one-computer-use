@@ -1,6 +1,19 @@
 import type { Outcome } from "./benchmark-stats.ts";
 
 const CLICK_FRESHNESS = "The browser changed before the click.";
+function externalTargetKind(message: string): "observed-escape" | "blocked-target" | undefined {
+  if (message.startsWith("The model left the disposable localhost fixture")) {
+    return "observed-escape";
+  }
+  if (
+    message.startsWith("The model selected a link outside the disposable localhost fixture") ||
+    message.startsWith("The model selected a URL outside the disposable localhost fixture") ||
+    message.startsWith("The saved browser target is outside the disposable localhost fixture")
+  ) {
+    return "blocked-target";
+  }
+  return undefined;
+}
 function driverError(message: string): boolean {
   return message.startsWith("Playwright browser_") || message.startsWith(CLICK_FRESHNESS);
 }
@@ -22,4 +35,4 @@ function infrastructureGrade(
     driverErrors,
   };
 }
-export { driverError, infrastructureGrade };
+export { driverError, externalTargetKind, infrastructureGrade };

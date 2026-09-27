@@ -13,7 +13,7 @@ import type { Workspace } from "../workspace.ts";
 import { excessWrites, grade, subtractWrites, writeCounts } from "./benchmark-cases.ts";
 import type { BenchmarkCase, FailureKind, WriteCounts } from "./benchmark-cases.ts";
 import { FixtureStateError } from "./benchmark-fixture-error.ts";
-import { infrastructureGrade } from "./benchmark-infrastructure.ts";
+import { externalTargetKind, infrastructureGrade } from "./benchmark-infrastructure.ts";
 import { canonicalStart, initialStateHash } from "./benchmark-state.ts";
 import type { Outcome, TrialRecord } from "./benchmark-stats.ts";
 
@@ -46,14 +46,11 @@ interface TrialOutcome {
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The browser trial failed.";
 }
-function originEscape(message: string): boolean {
-  return (
-    message.includes("outside the disposable localhost fixture") ||
-    message.includes("left the disposable localhost fixture")
-  );
-}
 function errorOutcome(error: unknown): Outcome {
   const message = errorText(error);
+  if (externalTargetKind(message) === "blocked-target") {
+    return "guarded-external-target";
+  }
   if (error instanceof ZodError) {
     return "format";
   }
@@ -158,7 +155,7 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
       },
       onStep(step) {
         steps.push(step);
-        if (step.error !== undefined && originEscape(step.error)) {
+        if (step.error !== undefined && externalTargetKind(step.error) === "observed-escape") {
           throw new Error(step.error);
         }
         const writes = subtractWrites(writeCounts(workspace), before);
@@ -204,7 +201,7 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
       taskMs = performance.now() - taskStarted;
     }
     stopMatrix =
-      originEscape(errorMessage) ||
+      externalTargetKind(errorMessage) === "observed-escape" ||
       error instanceof FixtureStateError ||
       (taskStarted === undefined && observedInitialHash === undefined);
   } finally {
@@ -216,6 +213,9 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
   const writeDelta: WriteCounts = subtractWrites(writeCounts(workspace), before);
   const gradedOutcome = outcome;
   const infrastructure = infrastructureGrade(gradedOutcome, steps, errorMessage);
+  const guardedExternalAttempts = steps.filter(
+    (step) => step.error !== undefined && externalTargetKind(step.error) === "blocked-target",
+  ).length;
   const completedRequests = requests.filter((event) => event.status === "ok");
   return {
     stopMatrix,
@@ -230,6 +230,7 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
       gradedOutcome,
       taskStatus,
       driverErrors: infrastructure.driverErrors,
+      guardedExternalAttempts,
       ...(observedInitialHash === undefined ? {} : { initialStateHash: observedInitialHash }),
       taskMs,
       turns: steps.length,

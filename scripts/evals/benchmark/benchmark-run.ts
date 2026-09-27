@@ -67,8 +67,8 @@ function setModelEnvironment(input: {
   Bun.env["TEXT_MODEL_URL"] = textEndpoint;
   Bun.env["TEXT_MODEL_ID"] = modelName({ source: "local", id: textPreset().id });
 }
-// One loaded decision provider serves all twelve task trials before it stops.
-// oxlint-disable-next-line typescript/prefer-readonly-parameter-types
+// One loaded decision provider serves all selected task trials before it stops.
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types, max-statements, max-lines-per-function -- Keep per-model startup and trial cleanup in one scope.
 async function runModel(input: {
   readonly model: Readonly<Preset>;
   readonly candidate: ReadonlyDeep<ArtifactManifest>;
@@ -102,6 +102,7 @@ async function runModel(input: {
   });
   const active = await runtime.startDecision(model, candidate);
   try {
+    const postDecisionTextProbeMs = await runtime.probeTextAfterDecisionLoad();
     const models = createModels(loadConfig());
     const provenance = await modelProvenance({
       model,
@@ -111,7 +112,13 @@ async function runModel(input: {
       maxChoices: model.maxChoices ?? DEFAULT_MAX_CHOICES,
       artifact: active.artifact,
     });
-    startups.push({ status: "ready", modelId: model.id, provenance, metrics: active.metrics });
+    startups.push({
+      status: "ready",
+      modelId: model.id,
+      provenance,
+      metrics: active.metrics,
+      postDecisionTextProbeMs,
+    });
     for (let trial = 1; trial <= TRIALS_PER_CASE; trial += 1) {
       for (const scenario of scenarios) {
         const expectedInitialHash = expectedHashes.get(scenario.id);
