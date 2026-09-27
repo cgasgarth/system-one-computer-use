@@ -82,7 +82,10 @@ function actionKey(action: Action, observation: Observation): string | undefined
   if (action.kind === "select_surface") {
     return JSON.stringify([action.kind, action.surface]);
   }
-  if (action.kind === "refresh" || action.kind === "request_app" || action.kind === "request_url") {
+  if (action.kind === "request_app") {
+    return JSON.stringify([action.kind, action.name]);
+  }
+  if (action.kind === "refresh" || action.kind === "request_url") {
     return action.kind;
   }
   if (action.kind === "observe_window") {

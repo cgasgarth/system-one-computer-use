@@ -53,6 +53,7 @@ async function generateFieldText(
   return context.options.text.generate({
     task: context.options.task,
     context: context.options.context ?? "",
+    ...(context.options.signal === undefined ? {} : { signal: context.options.signal }),
     tool: action.reason,
     observation: context.observation,
     purpose: "text",
@@ -257,6 +258,7 @@ async function generateWebAddress(context: InputContext, correction?: string): P
     return await options.text.generate({
       task: options.task,
       context: options.context ?? "",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
       tool: context.action.reason,
       observation,
       purpose: "url",
@@ -328,19 +330,14 @@ interface OpenedApplication {
 }
 async function openApplication(context: InputContext): Promise<OpenedApplication> {
   const { options, computer, observation } = context;
-  const generated = await options.text.generate({
-    task: options.task,
-    context: options.context ?? "",
-    tool: context.action.reason,
-    observation,
-    purpose: "application",
-    applications: options.applications,
-  });
-  const name = generated.trim();
+  if (context.action.kind !== "request_app") {
+    throw new Error("Expected an installed application action");
+  }
+  const { name } = context.action;
   options.signal?.throwIfAborted();
   if (!options.applications.includes(name)) {
     throw new Error(
-      "The text helper did not return an installed application name. Observe again or select another tool.",
+      "The selected application is not installed. Observe again and choose an available app.",
     );
   }
   const before = await computer.desktop();

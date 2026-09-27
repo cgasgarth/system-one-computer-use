@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 import { actionSchema, desktopSchema, windowSchema } from "../../src/agent/contracts.ts";
-import { SystemOneHttpDecisionModel } from "../../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../../src/models/system-one.ts";
+import { requestJson } from "../../src/models/request.ts";
+import { socketPaths } from "../../src/app/models/sockets.ts";
 import {
   decisionRequestSchema,
   decisionResponseSchema,
@@ -14,9 +16,7 @@ import { sourceHash } from "./provenance.ts";
 const MAX_CASES = 20;
 const JSON_INDENT = 2;
 const REQUEST_TIMEOUT_MS = 20_000;
-const ERROR_CHARS = 300;
 const ARGUMENT_START = 2;
-const DECISION_PORT = "18700";
 const DATA = "/Users/cgas/Library/Application Support/SystemOneComputerUse";
 const CORPUS = "runs/recovery/provider-compare-corpus.json";
 const PRIOR = "runs/research/overnight/precision-requests.json";
@@ -181,23 +181,22 @@ async function runtime(provider: "clm" | "kev"): Promise<{
   if (settings.decision.source !== "local" || settings.decision.id !== selection) {
     throw new Error(`Select ${selection} in the installed app and wait for Ready before replay`);
   }
-  const pids = output(["lsof", "-nP", "-t", `-iTCP:${DECISION_PORT}`, "-sTCP:LISTEN"])
-    .split("\n")
-    .filter(Boolean);
+  const socket = socketPaths(DATA).decision;
+  const pids = output(["lsof", "-nP", "-t", socket]).split("\n").filter(Boolean);
   if (pids.length !== 1 || pids[0] === undefined) {
-    throw new Error(`Expected one app-managed decision listener on :${DECISION_PORT}`);
+    throw new Error(`Expected one app-managed decision listener on ${socket}`);
   }
   const command = output(["ps", "-p", pids[0], "-o", "args="]);
-  const expected =
-    provider === "clm"
-      ? "clm_mlx.server --bits 4 --port 18700"
-      : "kev.serve --run jaredpalmer/kev-4b@139fdd94f1b6a6ad80cc15e08fcb99cac885a101";
-  if (!command.includes(expected)) {
+  const expected = provider === "clm" ? "--provider clm" : "--provider kev";
+  const checkpoint = "--run jaredpalmer/kev-4b@139fdd94f1b6a6ad80cc15e08fcb99cac885a101";
+  if (
+    !command.includes("local-bridge/serve.py") ||
+    !command.includes(expected) ||
+    !command.includes(`--socket ${socket}`) ||
+    (provider === "clm" && !command.includes("--bits 4")) ||
+    (provider === "kev" && !command.includes(checkpoint))
+  ) {
     throw new Error(`Decision listener does not match ${selection}`);
-  }
-  const processes = output(["ps", "-axo", "args="]);
-  if (processes.includes(provider === "clm" ? "-m kev.serve" : "-m clm_mlx.server")) {
-    throw new Error("Another decision model process is still running");
   }
   return {
     model: provider === "clm" ? "clm-latest" : "kev-latest",
@@ -241,22 +240,15 @@ async function runWire(
   probabilities: Readonly<Record<string, number>>;
 }> {
   const body = { ...item.body, model: modelId };
-  const response = await fetch(config.SYSTEM_ONE_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(config.SYSTEM_ONE_API_KEY === undefined
-        ? {}
-        : { authorization: `Bearer ${config.SYSTEM_ONE_API_KEY}` }),
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  const response = await requestJson({
+    endpoint: config.SYSTEM_ONE_URL,
+    apiKey: config.SYSTEM_ONE_API_KEY,
+    body,
+    label: "Decision replay",
+    schema: decisionResponseSchema,
+    timeoutMs: REQUEST_TIMEOUT_MS,
   });
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${raw.slice(0, ERROR_CHARS)}`);
-  }
-  const answer = decisionResponseSchema.parse(JSON.parse(raw)).answers.next_action;
+  const answer = response.answers.next_action;
   return {
     id: item.id,
     kind: item.kind,
@@ -269,7 +261,7 @@ async function runWire(
 
 async function runDecision(
   item: ReadonlyDeep<z.infer<typeof decisionCaseSchema>>,
-  model: Readonly<SystemOneHttpDecisionModel>,
+  model: Readonly<SystemOneDecisionModel>,
 ): Promise<{
   id: string;
   kind: "decision";
@@ -301,7 +293,7 @@ async function runCase(
   context: Readonly<{
     modelId: string;
     config: Config;
-    model: Readonly<SystemOneHttpDecisionModel>;
+    model: Readonly<SystemOneDecisionModel>;
   }>,
 ): Promise<Awaited<ReturnType<typeof runWire>> | Awaited<ReturnType<typeof runDecision>>> {
   return item.kind === "wire"
@@ -318,7 +310,7 @@ async function run(provider: "clm" | "kev", wireOnly: boolean): Promise<void> {
   const cases = wireOnly ? corpus.cases.filter((item) => item.kind === "wire") : corpus.cases;
   const loaded = await runtime(provider);
   const config = loadConfig();
-  const model = new SystemOneHttpDecisionModel(
+  const model = new SystemOneDecisionModel(
     config.SYSTEM_ONE_URL,
     loaded.model,
     config.SYSTEM_ONE_API_KEY,

@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { ModelHost } from "./host.ts";
+import { ModelIngress } from "./ingress.ts";
 import { commandSchema } from "./protocol.ts";
 import { readPreferences } from "./preferences.ts";
 
@@ -15,38 +16,21 @@ const host = new ModelHost({
   },
   preferences: await readPreferences(),
 });
-const DECISION_PORT = 8700;
-const TEXT_PORT = 8080;
-const IDLE_SECONDS = 255;
-const BAD_GATEWAY = 502;
-function gateway(port: number, role: "decision" | "text"): ReturnType<typeof Bun.serve> {
-  return Bun.serve({
-    hostname: "127.0.0.1",
-    port,
-    idleTimeout: IDLE_SECONDS,
-    async fetch(request) {
-      try {
-        return await host.forward(request, host[role]);
-      } catch (error) {
-        return Response.json(
-          { error: error instanceof Error ? error.message : "Model request failed" },
-          { status: BAD_GATEWAY },
-        );
-      }
-    },
-  });
-}
-const servers = [gateway(DECISION_PORT, "decision"), gateway(TEXT_PORT, "text")];
 await host.boot();
+const ingress = new ModelIngress(host);
+await ingress.start();
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let closing = false;
+function isClosing(): boolean {
+  return closing;
+}
 async function close(): Promise<void> {
   if (closing) {
     return;
   }
   closing = true;
   input.close();
-  await Promise.all(servers.map(async (server) => server.stop(true)));
+  await ingress.close();
   await host.close();
 }
 input.once("close", () => {
@@ -99,7 +83,13 @@ async function execute(line: string): Promise<void> {
 }
 try {
   for await (const line of input) {
+    if (isClosing()) {
+      break;
+    }
     await execute(line);
+    if (isClosing()) {
+      break;
+    }
   }
 } finally {
   await close();

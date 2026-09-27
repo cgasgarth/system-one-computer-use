@@ -12,7 +12,7 @@ const menuAction = {
   path: ["File", "Open"],
   reason: "Choose menu File > Open",
 } as const;
-const FILE_GROUP_COUNT = 2;
+const MENU_GROUP_COUNT = 3;
 const window = {
   ...windowFixture(),
   menus: [{ path: ["File", "Open"], label: "Open", enabled: true }],
@@ -70,15 +70,14 @@ test("a persistent menu command requires a separate task authorization", async (
   ]);
 });
 
-test("menu choices are grouped by their observed top-level menu", () => {
+test("observed menu commands share one operation group with exact target paths", () => {
   const groups = actionGroups([
     menuAction,
     { ...menuAction, path: ["File", "Close"], reason: "Choose menu File > Close" },
     { ...menuAction, path: ["Edit", "Copy"], reason: "Choose menu Edit > Copy" },
   ]);
-  expect(groups.map((group) => group.actions.length)).toEqual([FILE_GROUP_COUNT, 1]);
+  expect(groups.map((group) => group.actions.length)).toEqual([MENU_GROUP_COUNT]);
   expect(groups.map((group) => group.description)).toEqual([
-    "Choose an enabled command in the observed File menu.",
-    "Choose an enabled command in the observed Edit menu.",
+    "Use an observed command in this application's menu.",
   ]);
 });

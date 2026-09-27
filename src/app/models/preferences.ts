@@ -1,6 +1,8 @@
 import { chmod, rename } from "node:fs/promises";
 import { defaultPreferences, preferencesSchema } from "./catalog.ts";
 import type { ModelPreferences, ModelSelection } from "./catalog.ts";
+import { localModelEndpoint } from "./sockets.ts";
+import type { SocketPaths } from "./sockets.ts";
 
 const PRIVATE_MODE = 0o600;
 const FILE = "models.json";
@@ -20,7 +22,10 @@ function modelName(selection: ModelSelection): string {
   }
   return "default_model";
 }
-async function writePreferences(preferences: Readonly<ModelPreferences>): Promise<void> {
+async function writePreferences(
+  preferences: Readonly<ModelPreferences>,
+  sockets: SocketPaths,
+): Promise<void> {
   const temporary = `${FILE}.tmp`;
   await Bun.write(temporary, JSON.stringify(preferences));
   await chmod(temporary, PRIVATE_MODE);
@@ -28,9 +33,9 @@ async function writePreferences(preferences: Readonly<ModelPreferences>): Promis
   const file = Bun.file(".env");
   const original = (await file.exists()) ? await file.text() : "";
   const values = {
-    SYSTEM_ONE_URL: "http://127.0.0.1:8700/v1/systemone",
+    SYSTEM_ONE_URL: localModelEndpoint(sockets.ingress, "decision"),
     SYSTEM_ONE_MODEL: modelName(preferences.decision),
-    TEXT_MODEL_URL: "http://127.0.0.1:8080/v1/chat/completions",
+    TEXT_MODEL_URL: localModelEndpoint(sockets.ingress, "text"),
     TEXT_MODEL_ID: modelName(preferences.text),
   };
   const keys = new Set(Object.keys(values));

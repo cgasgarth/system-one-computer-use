@@ -6,6 +6,7 @@ import type { BinaryAnswer } from "../src/models/system-one-schema.ts";
 
 const yes: BinaryAnswer = { choice: "A0", probabilities: { A0: 0.98, A1: 0.02 } };
 const no: BinaryAnswer = { choice: "A1", probabilities: { A0: 0.02, A1: 0.98 } };
+const LOW_YES = 0.51;
 const window: Window = {
   app_name: "Google Chrome",
   pid: 0,
@@ -125,3 +126,35 @@ test("allows Save after a requested field change is observed", async () => {
   expect(authorizationState).toContain('button "Save"');
   expect(authorizationState).toContain('current value "Draft"');
 });
+
+test.each(["A0", "A1"] as const)(
+  "uses categorical authorization and field-readiness answers (%s)",
+  async (fieldChoice) => {
+    const result = await verifyCommit({
+      action,
+      input: {
+        task: "Set Name to Draft and save",
+        observation: { desktop: desktopFixture(), window },
+        actions: [action],
+      },
+      model: "test",
+      async judge(_request, phase) {
+        if (phase === "commit-classification") {
+          return yes;
+        }
+        if (phase === "commit-authorization") {
+          return { choice: "A0", probabilities: { A0: LOW_YES, A1: 1 - LOW_YES } };
+        }
+        return fieldChoice === "A0"
+          ? { choice: "A0", probabilities: { A0: LOW_YES, A1: 1 - LOW_YES } }
+          : { choice: "A1", probabilities: { A0: LOW_YES, A1: 1 - LOW_YES } };
+      },
+    });
+    expect(result.allowed).toBe(fieldChoice === "A1");
+    expect(result.checks.map((check) => check.phase)).toEqual([
+      "commit-classification",
+      "commit-authorization",
+      "field-readiness",
+    ]);
+  },
+);

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
@@ -63,7 +63,7 @@ async function decide(
           : []),
       ],
     };
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task,
       observation: { desktop: desktopFixture(), window },
       actions: [

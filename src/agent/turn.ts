@@ -7,7 +7,7 @@ import { executeInput } from "./surface.ts";
 import { enterText, openApplication, openUrl } from "./input.ts";
 import { options as actionOptions } from "./options.ts";
 import { summarizeObservation } from "../app/sessions/context.ts";
-import { stateKey } from "./state-key.ts";
+import { progressStateKey, stateKey } from "./state-key.ts";
 import type { Decision, DecisionInput } from "../models/system-one.ts";
 
 const HISTORY_CHARS = 2000;
@@ -156,17 +156,6 @@ async function selectSurface({ options, surfaces, action }: TurnContext): Promis
       },
     });
   }
-  if (action.surface === "desktop" && options.applications.length > 0) {
-    return applyInput({
-      options,
-      surfaces,
-      observation: selected,
-      action: {
-        kind: "request_app",
-        reason: "Open the application needed for the selected desktop tool.",
-      },
-    });
-  }
   return { output: `Selected ${action.surface} tools` };
 }
 async function act(context: TurnContext): Promise<ActionResult> {
@@ -269,6 +258,8 @@ function chooseInput(
           },
         }),
     ...(inspectClick === undefined ? {} : { inspectClick }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.onDecisionRequest === undefined ? {} : { onRequest: options.onDecisionRequest }),
     mode: surfaces.mode,
   };
 }
@@ -283,7 +274,7 @@ async function verifyFinishSurface(
   try {
     const fresh = await input.surfaces.observe(input.options.computer);
     input.options.signal?.throwIfAborted();
-    if (stateKey(fresh) === stateKey(observation)) {
+    if (progressStateKey(fresh) === progressStateKey(observation)) {
       return {};
     }
     const decision = await input.options.decision.choose(
@@ -302,7 +293,8 @@ async function verifyFinishSurface(
     return {
       observation: confirmed,
       decision,
-      ...(decision.action.kind === "finish" && stateKey(confirmed) === stateKey(fresh)
+      ...(decision.action.kind === "finish" &&
+      progressStateKey(confirmed) === progressStateKey(fresh)
         ? {}
         : {
             error:
@@ -323,11 +315,12 @@ function nextError(step: TaskStep, lastError: string): string {
     step.action.kind !== "request_app";
   return step.error ?? (performed ? "" : lastError);
 }
-// Trace fields record each independent model check and tool result.
-// eslint-disable-next-line eslint/complexity
+// Keep checkpoint writes immediately before each asynchronous turn stage.
+// eslint-disable-next-line eslint/complexity, eslint/max-statements
 async function performTurn(input: TurnInput): Promise<TurnResult> {
   const { options, surfaces, history } = input;
   options.signal?.throwIfAborted();
+  await options.onStage?.({ stage: "observation", stepIndex: history.length + 1 });
   const observing = performance.now();
   const { observation, lastError, observationError } = await observe(input);
   const observationMs = performance.now() - observing;
@@ -336,6 +329,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   } else {
     input.progress.observeFailure(observationError);
   }
+  await options.onStage?.({ stage: "decision", stepIndex: history.length + 1 });
   const decision = await options.decision.choose(
     chooseInput(input, {
       observation,
@@ -344,6 +338,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     }),
   );
   options.signal?.throwIfAborted();
+  await options.onStage?.({ stage: "action", stepIndex: history.length + 1 });
   const acting = performance.now();
   const finishSurface =
     decision.action.kind === "finish" ? await verifyFinishSurface(input, observation) : undefined;

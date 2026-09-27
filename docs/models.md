@@ -33,9 +33,11 @@ The app does not stop or unload external servers.
 
 ## Process ownership and data
 
-The app owns a model-manager process and its local serving processes. Quitting the app closes its gateways and stops its model process groups. It does not stop unrelated services.
+The app owns a model-manager process and its local serving processes. Quitting the app closes its sockets and stops its model process groups. It does not stop unrelated services.
 
-Settings, environments and logs are under `~/Library/Application Support/SystemOneComputerUse/`. Model weights use the Hugging Face cache. Local gateways bind only to `127.0.0.1`: decision requests on port 8700 and text requests on port 8080. The owned backend ports are 18700 and 18800.
+Settings, environments and logs are under `~/Library/Application Support/SystemOneComputerUse/`. Model weights use the Hugging Face cache. Local inference uses private Unix sockets under `ipc/`, with one newline-delimited JSON request and response per connection. The model manager loads the selected model when needed and forwards the request to its socket. The Python bridge invokes the model library directly. Local inference does not bind TCP ports or use HTTP.
+
+Socket directories are accessible only to the current user; socket files have mode `0600`. Messages have a 4 MiB size limit and are validated at process boundaries. A client disconnect cancels the pending request. Text generation stops through the runtime's cancellation hook; a decision forward pass can finish before the next request is processed.
 
 Backend failures and setup failures are shown in Settings. Detailed logs are in the app's `logs/` directory; manager failures are in `model-host.log`.
 

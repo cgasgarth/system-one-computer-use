@@ -8,6 +8,7 @@ interface TextContext {
   readonly context: string;
   readonly tool?: string;
   readonly observation: Observation;
+  readonly signal?: Readonly<AbortSignal>;
 }
 interface TextFieldInput {
   readonly kind: "search" | "general";
@@ -26,20 +27,12 @@ type TextInput = TextContext &
     | {
         readonly purpose: "url";
         readonly correction?: string;
-        readonly applications?: never;
-        readonly field?: never;
-      }
-    | {
-        readonly purpose: "application";
-        readonly applications?: readonly string[];
-        readonly correction?: never;
         readonly field?: never;
       }
     | {
         readonly purpose: "text";
         readonly field?: TextFieldInput;
         readonly correction?: never;
-        readonly applications?: never;
       }
   );
 interface TextModel {
@@ -48,13 +41,11 @@ interface TextModel {
 const TIMEOUT_MS = 60_000;
 const MAX_TOKENS = 1024;
 const PROMPTS = {
-  application:
-    "Return only the exact installed application name needed for this tool call, from the supplied applications list. No explanation, quotes, or markdown. This is an argument to an already selected open-application tool, not a task plan.",
   url: "Return exactly one complete HTTP or HTTPS URL for the current request, beginning with http:// or https://. Copy an explicit domain exactly, even if dictated words touch it; do not join an action word to the domain. Prefix https:// for a bare domain. Use an observed link when the request refers to one. If the request names a site and a topic but gives no exact page URL, return the site's homepage so the browser can search there. Never invent an article, document, or search path. Do not use a site from previous_context unless current_request refers to it. No quotes, explanation, or markdown. Return an empty string if the address is unknown.",
   text: "Return only the complete desired value for this input field. Separate the instruction from the content: do not include verbs that tell you to enter or set text unless they are part of the content itself. For a search field, return query terms, not a website URL unless the user explicitly wants that URL as field content. Preserve existing content when the user asks to add to it. Follow the field's placeholder format when provided; placeholders are examples, not existing content. Preserve text supplied by the user. No explanation, wrapping quotes or markdown fences. Never generate passwords or authentication credentials. Return an empty string if no appropriate text is available.",
 };
 const SEARCH_PROMPT =
-  "Return only the shortest search query that identifies the item requested in current_request. For a named file, return its filename; for a named person or topic, return that name or topic. Do not return the full command, the app name, folder instructions, or words such as open and search. Example: 'Open Report.pdf in Downloads with a player' returns 'Report.pdf'. No quotes, explanation, or markdown. Return an empty string when the request has no item to find.";
+  "Return only the shortest search query that identifies the item requested in current_request. For a named file, return its filename; for a named person or topic, return that name or topic. If the selected search field already contains a query and the observed result scene changed without showing the requested item, use a different, shorter distinctive part of the current request; do not repeat the field's current value or guess a corrected spelling. Do not return the full command, the app name, folder instructions, or words such as open and search. Example: 'Open Report.pdf in Downloads with a player' returns 'Report.pdf'. No quotes, explanation, or markdown. Return an empty string when the request has no grounded item or alternative query to find.";
 class ChatCompletionTextModel implements TextModel {
   private readonly endpoint: string;
   private readonly modelId: string;
@@ -75,6 +66,7 @@ class ChatCompletionTextModel implements TextModel {
       label: "Text input",
       schema: textResponseSchema,
       timeoutMs: TIMEOUT_MS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
       body: {
         model: this.modelId,
         temperature: 0,
@@ -90,7 +82,6 @@ class ChatCompletionTextModel implements TextModel {
               previous_context: input.context,
               selected_tool: input.tool,
               field: input.field,
-              applications: input.applications,
               observed: summarizeObservation(input.observation),
               ...(input.purpose === "url" && input.correction !== undefined
                 ? { url_correction: input.correction }

@@ -5,6 +5,8 @@ import type { ManagedComputer } from "../src/computer/types.ts";
 
 const VERIFIED_DECISIONS = 2;
 const REJECTED_DECISIONS = 3;
+const ORIGINAL_FRAME_X = 10;
+const MOVED_FRAME_X = 15;
 function testComputer(readContent: () => string): ManagedComputer {
   return {
     async desktop() {
@@ -135,4 +137,96 @@ test("rejects a screen change during the fresh completion decision", async () =>
   expect(result.status).toBe("blocked");
   expect(steps[0]?.error).toContain("screen changed before Finish");
   expect(steps[0]?.terminalObservation).toContain("third");
+});
+
+test("ignores focus and geometry changes while confirming Finish", async () => {
+  let focused = false;
+  let frameX = ORIGINAL_FRAME_X;
+  let decisions = 0;
+  const steps: TaskStep[] = [];
+  const base = testComputer(() => "requested content");
+  const computer: ManagedComputer = {
+    ...base,
+    async window() {
+      const snapshot = await base.window(0, 0);
+      const [element] = snapshot.elements;
+      if (element === undefined) {
+        throw new Error("Missing observed control");
+      }
+      return {
+        ...snapshot,
+        elements: [
+          {
+            ...element,
+            focused,
+            frame: { x: frameX, y: 10, w: 200, h: 30 },
+          },
+        ],
+      };
+    },
+  };
+  const result = await runTask({
+    task: "Read the requested content",
+    preferredSurface: "browser",
+    applications: [],
+    computer: () => computer,
+    decision: {
+      async choose() {
+        decisions += 1;
+        focused = true;
+        frameX = MOVED_FRAME_X;
+        return {
+          action: { kind: "finish", reason: "Content matched", summary: "Done" },
+          latencyMs: 1,
+          probabilities: { A0: 1 },
+        };
+      },
+    },
+    text: { generate: async () => "" },
+    onStep: (step) => {
+      steps.push(step);
+    },
+  });
+  expect(result.status).toBe("complete");
+  expect(decisions).toBe(1);
+  expect(steps).toHaveLength(1);
+  expect(steps[0]?.terminalDecision).toBeUndefined();
+});
+
+test("rechecks a changed URL before Finish", async () => {
+  let url = "https://example.com/before";
+  let decisions = 0;
+  const base = testComputer(() => "requested content");
+  const computer: ManagedComputer = {
+    ...base,
+    async window() {
+      return { ...(await base.window(0, 0)), url };
+    },
+  };
+  const steps: TaskStep[] = [];
+  const result = await runTask({
+    task: "Read the requested page",
+    preferredSurface: "browser",
+    applications: [],
+    computer: () => computer,
+    decision: {
+      async choose() {
+        decisions += 1;
+        url = "https://example.com/after";
+        return {
+          action: { kind: "finish", reason: "Page matched", summary: "Done" },
+          latencyMs: 1,
+          probabilities: { A0: 1 },
+        };
+      },
+    },
+    text: { generate: async () => "" },
+    onStep: (step) => {
+      steps.push(step);
+    },
+  });
+  expect(result.status).toBe("complete");
+  expect(decisions).toBe(VERIFIED_DECISIONS);
+  expect(steps[0]?.terminalDecision?.action.kind).toBe("finish");
+  expect(steps[0]?.terminalObservation).toContain("/after");
 });

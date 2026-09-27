@@ -1,22 +1,22 @@
-import { relevantControls } from "../agent/controls.ts";
 import type { Action, ActionChoices, Observation } from "../agent/contracts.ts";
 import {
-  MAX_STATE_CHARS,
   actionDescription,
   actionGroups,
   criteriaFor,
   decisionState,
   describeControl,
 } from "./decision-context.ts";
+import { completionState, completionTargetState } from "./completion-context.ts";
 import type { OperationDecision } from "./decision-context.ts";
 import type { ClickInspection } from "../computer/types.ts";
-import { requestJson } from "./request.ts";
+import { requestDecision } from "./decision-request.ts";
+import type { DecisionRequestContext, DecisionRequestPhase } from "./decision-request.ts";
 import { verificationRequest } from "./decision-verification.ts";
 import { hasEditableContent, hasPendingDialogDraft } from "./completion-evidence.ts";
 import { ActionSelectionError } from "./action-selection-error.ts";
 import { verifyCommit } from "./commit-verification.ts";
 import type { ActionCheck } from "./decision-verification.ts";
-import { binaryAnswerSchema, decisionResponseSchema } from "./system-one-schema.ts";
+import { binaryAnswerSchema } from "./system-one-schema.ts";
 import type {
   ActionProbabilities,
   BinaryAnswer,
@@ -25,7 +25,6 @@ import type {
   DecisionResponse,
 } from "./system-one-schema.ts";
 
-const TIMEOUT_MS = 10_000;
 const COMMIT_CONTROLS_CHARS = 2200;
 const COMMIT_PRIOR_CHARS = 900;
 const COMMIT_CONTEXT_CHARS = 400;
@@ -33,17 +32,8 @@ const COMMIT_EVIDENCE_CHARS = 500;
 const COMMIT_LOCATION_CHARS = 300;
 const PROBABILITY_TOLERANCE = 0.02;
 const COMPLETION_CLASSES = 2;
-const COMPLETION_THRESHOLD = 0.6;
-const DRAFT_COMPLETION_THRESHOLD = 0.5;
-const ACTION_MATCH_THRESHOLD = 0.8;
-const TEXT_CONTENT = new Set([
-  "AXStaticText",
-  "AXTextArea",
-  "text",
-  "paragraph",
-  "heading",
-  "listitem",
-]);
+const MAX_OPERATION_PASSES = 2;
+const MAX_TARGETS_PER_PAGE = 255;
 interface Decision {
   readonly action: Action;
   readonly latencyMs: number;
@@ -57,7 +47,7 @@ interface Decision {
   readonly candidates?: readonly Action[];
 }
 
-interface DecisionInput {
+interface DecisionInput extends DecisionRequestContext {
   readonly task: string;
   readonly observation: Observation;
   readonly actions: ActionChoices;
@@ -117,7 +107,7 @@ function finishEligible(
     (commit === undefined || commit.choice === "A1")
   );
 }
-class SystemOneHttpDecisionModel implements DecisionModel {
+class SystemOneDecisionModel implements DecisionModel {
   private readonly apiKey: string | undefined;
   private readonly endpoint: string;
   private readonly modelId: string;
@@ -136,10 +126,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     const start = performance.now();
     const completion = checkCompletion ? await this.checkCompletion(input) : undefined;
     const pendingDraft = hasPendingDialogDraft(input.observation.window);
-    const complete =
-      completion?.choice === "A0" &&
-      (completion.probabilities["A0"] ?? 0) >=
-        (pendingDraft ? DRAFT_COMPLETION_THRESHOLD : COMPLETION_THRESHOLD);
+    const complete = completion?.choice === "A0";
     const completionTarget =
       complete && (input.context?.length ?? 0) > 0
         ? await this.checkCompletionTarget(input)
@@ -188,27 +175,33 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     };
   }
 
+  // The bounded retry keeps operation and target evidence together.
+  // eslint-disable-next-line eslint/max-statements
   private async chooseAvailable(
     input: DecisionInput,
     available: readonly Action[],
     started: number,
   ): Promise<Decision> {
     let remaining = available;
+    let currentInput = input;
     const rejectedOperations: OperationDecision[] = [];
     const rejectedChecks: ActionCheck[] = [];
     let groupCount = 0;
-    while (remaining.length > 0) {
+    while (remaining.length > 0 && groupCount < MAX_OPERATION_PASSES) {
       groupCount += 1;
-      // Each retry excludes the rejected operation before asking the model again.
+      // Retry with another operation group, never mix targets from different operations.
       // eslint-disable-next-line no-await-in-loop
-      const { actions, operation } = await this.operationActions(input, remaining);
+      const { actions, operation } = await this.operationActions(currentInput, remaining);
+      // Large target sets are paged by observed descriptions; System One picks the page.
+      // eslint-disable-next-line no-await-in-loop
+      const page = await this.pageActions(currentInput, actions);
       const otherOperations = operation !== undefined && remaining.length > actions.length;
       // eslint-disable-next-line no-await-in-loop
-      const target = await this.targetChoice(input, actions, otherOperations);
+      const target = await this.targetChoice(currentInput, page, { otherOperations });
       if (!target.rejectGroup) {
         // eslint-disable-next-line no-await-in-loop
-        const attempt = await this.selectAction(input, {
-          actions,
+        const attempt = await this.selectAction(currentInput, {
+          actions: page,
           answer: target.answer,
           started,
           optionCount: target.optionCount,
@@ -217,37 +210,94 @@ class SystemOneHttpDecisionModel implements DecisionModel {
           return {
             ...attempt.decision,
             checks: [...rejectedChecks, ...attempt.checks],
-            candidates: actions,
+            candidates: page,
             rejectedOperations,
             ...(operation === undefined ? {} : { operation }),
           };
         }
         rejectedChecks.push(...attempt.checks);
       }
-      if (operation !== undefined) {
+      if (operation !== undefined && (!target.rejectGroup || page.length === actions.length)) {
         rejectedOperations.push(operation);
       }
-      remaining = remaining.filter((action) => !actions.includes(action));
+      // A page-level None keeps other pages; failed candidate checks move to another operation.
+      const rejected = target.rejectGroup && page.length < actions.length ? page : actions;
+      remaining = remaining.filter((action) => !rejected.includes(action));
+      currentInput = {
+        ...input,
+        feedback: [
+          input.feedback ?? "",
+          target.rejectGroup
+            ? "The selected target group contained no action matching the request. Choose from the remaining observed targets."
+            : "The previous operation yielded no approved action on this observation. Choose another available operation.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
     }
     throw new ActionSelectionError(rejectedChecks, rejectedOperations, groupCount);
+  }
+
+  private async pageActions(
+    input: DecisionInput,
+    actions: readonly Action[],
+  ): Promise<readonly Action[]> {
+    if (actions.length <= MAX_TARGETS_PER_PAGE) {
+      return actions;
+    }
+    const pages: Action[][] = [];
+    for (let index = 0; index < actions.length; index += MAX_TARGETS_PER_PAGE) {
+      pages.push(actions.slice(index, index + MAX_TARGETS_PER_PAGE));
+    }
+    const descriptions = pages.map((page) =>
+      page.map((action) => actionDescription(action, input.observation)).join(" | "),
+    );
+    const response = await this.request(input, "target-page", {
+      model: this.modelId,
+      state: decisionState(input),
+      questions: {
+        next_action: {
+          type: "choice",
+          instructions: `Which group contains the exact observed target needed next for this request: ${input.task}?`,
+          criteria: criteriaFor(descriptions),
+        },
+      },
+    });
+    const answer = response.answers.next_action;
+    if (!validProbabilities(answer.probabilities, pages.length)) {
+      throw new Error("System One returned an invalid target-page distribution");
+    }
+    const selected = pages.find((_page, index) => `A${index}` === answer.choice);
+    if (selected === undefined) {
+      throw new Error("System One selected an unavailable target page");
+    }
+    return selected;
   }
 
   private async targetChoice(
     input: DecisionInput,
     actions: readonly Action[],
-    otherOperations: boolean,
+    options: { readonly otherOperations: boolean; readonly forceChoice?: boolean },
   ): Promise<{
     readonly answer: DecisionAnswer;
     readonly optionCount: number;
     readonly rejectGroup: boolean;
   }> {
+    if (actions.length === 1 && options.forceChoice !== true) {
+      // The operation choice already selected this sole target; do not ask it to veto itself.
+      return {
+        answer: { choice: "A0", probabilities: { A0: 1 } },
+        optionCount: 1,
+        rejectGroup: false,
+      };
+    }
     const descriptions = actions.map((action) => actionDescription(action, input.observation));
-    if (otherOperations) {
+    if (options.otherOperations) {
       descriptions.push(
         "None of these targets; choose another operation without taking an action.",
       );
     }
-    const payload = await this.request({
+    const payload = await this.request(input, "target", {
       model: this.modelId,
       state: decisionState(input),
       questions: {
@@ -265,7 +315,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     return {
       answer,
       optionCount: descriptions.length,
-      rejectGroup: otherOperations && answer.choice === `A${actions.length}`,
+      rejectGroup: options.otherOperations && answer.choice === `A${actions.length}`,
     };
   }
 
@@ -274,23 +324,26 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     actions: readonly Action[],
   ): Promise<{ readonly actions: readonly Action[]; readonly operation?: OperationDecision }> {
     const groups = actionGroups(actions);
-    if (
-      input.observation.window === undefined ||
-      !actions.some(
-        (action) => action.kind === "click_element" || action.kind === "compose_text",
-      ) ||
-      groups.length <= 1
-    ) {
+    const hasTargetedOperation =
+      (input.observation.window !== undefined &&
+        actions.some(
+          (action) => action.kind === "click_element" || action.kind === "compose_text",
+        )) ||
+      actions.filter((action) => action.kind === "request_app").length > 1;
+    if (groups.length <= 1 || !hasTargetedOperation) {
       return { actions };
     }
-    const descriptions = groups.map((group) =>
-      group.kind === "observe_window" ||
-      group.kind === "select_surface" ||
-      group.kind === "invoke_menu"
-        ? `${group.description} Available targets: ${group.actions.map((action) => actionDescription(action, input.observation)).join(" | ")}`
-        : group.description,
-    );
-    const response = await this.request({
+    const descriptions = groups.map((group) => {
+      const description =
+        group.kind === "blocked"
+          ? "Stop only when required input or access is missing and no observed action can advance the request."
+          : group.description;
+      const showTargets = group.kind === "observe_window" || group.kind === "select_surface";
+      return showTargets
+        ? `${description} Available targets: ${group.actions.map((action) => actionDescription(action, input.observation)).join(" | ")}`
+        : description;
+    });
+    const response = await this.request(input, "operation", {
       model: this.modelId,
       state: decisionState(input),
       questions: {
@@ -315,8 +368,6 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     };
   }
 
-  // Candidate checks include a separate persistent-effect gate before execution.
-  // eslint-disable-next-line eslint/max-statements
   private async selectAction(
     input: DecisionInput,
     selection: {
@@ -331,94 +382,80 @@ class SystemOneHttpDecisionModel implements DecisionModel {
       latencyMs: performance.now() - started,
       optionCount,
     });
-    const ranked = actions
-      .map((action, index) => ({ action, probability: answer.probabilities[`A${index}`] ?? 0 }))
-      .toSorted((left, right) => right.probability - left.probability);
-    const candidates = [
-      initial.action,
-      ...ranked.filter((entry) => entry.action !== initial.action).map((entry) => entry.action),
-    ];
+    const first = await this.verifySelected(input, initial, started);
+    if (first.decision !== undefined || actions.length === 1) {
+      return first;
+    }
+    const alternatives = actions.filter((action) => action !== initial.action);
+    const retryInput = {
+      ...input,
+      feedback: [
+        input.feedback ?? "",
+        "The previously selected target did not pass its action or persistent-effect check. Choose another observed target, or choose None for another operation.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+    const alternate = await this.targetChoice(retryInput, alternatives, {
+      otherOperations: true,
+      forceChoice: true,
+    });
+    if (alternate.rejectGroup) {
+      return first;
+    }
+    const next = decision(alternate.answer, alternatives, {
+      latencyMs: performance.now() - started,
+      optionCount: alternate.optionCount,
+    });
+    const second = await this.verifySelected(retryInput, next, started);
+    return { ...second, checks: [...first.checks, ...second.checks] };
+  }
+
+  private async verifySelected(
+    input: DecisionInput,
+    selected: Decision,
+    started: number,
+  ): Promise<{ readonly decision?: Decision; readonly checks: readonly ActionCheck[] }> {
     const checks: ActionCheck[] = [];
     const observable =
       input.observation.window !== undefined || input.observation.application !== undefined;
-    for (const action of candidates.filter(
-      (candidate) => candidate.kind !== "finish" || observable,
-    )) {
-      const request = verificationRequest(action, input, this.modelId);
-      let check: BinaryAnswer | undefined = undefined;
-      if (request !== undefined) {
-        // Each check depends on the result of the previous candidate check.
-        // eslint-disable-next-line no-await-in-loop
-        const response = await this.request(request);
-        check = binaryAnswerSchema.parse(response.answers.next_action);
-        if (!validProbabilities(check.probabilities, COMPLETION_CLASSES)) {
-          throw new Error("System One returned an invalid action verification");
-        }
-        checks.push({ action, answer: check });
+    const { action } = selected;
+    if (action.kind === "finish" && !observable) {
+      return { checks };
+    }
+    const request = verificationRequest(action, input, this.modelId);
+    let check: BinaryAnswer | undefined = undefined;
+    if (request !== undefined) {
+      const response = await this.request(input, "action-verification", request);
+      check = binaryAnswerSchema.parse(response.answers.next_action);
+      if (!validProbabilities(check.probabilities, COMPLETION_CLASSES)) {
+        throw new Error("System One returned an invalid action verification");
       }
-      if (
-        check === undefined ||
-        (check.choice === "A0" &&
-          ((action.kind !== "click_element" && action.kind !== "invoke_menu") ||
-            (check.probabilities["A0"] ?? 0) >= ACTION_MATCH_THRESHOLD))
-      ) {
-        // The ordinary action match does not establish that a persistent click is authorized.
-        // eslint-disable-next-line no-await-in-loop
-        const commit = await verifyCommit({
-          action,
-          input,
-          model: this.modelId,
-          judge: async (query) => this.judge(query),
-        });
-        checks.push(...commit.checks);
-        if (commit.allowed) {
-          return {
-            decision: { ...initial, action, latencyMs: performance.now() - started },
-            checks,
-          };
-        }
+      checks.push({ action, answer: check });
+    }
+    if (check === undefined || check.choice === "A0") {
+      // An ordinary action match does not authorize a persistent effect.
+      const commit = await verifyCommit({
+        action,
+        input,
+        model: this.modelId,
+        judge: async (query, phase) => this.judge(input, query, phase),
+      });
+      checks.push(...commit.checks);
+      if (commit.allowed) {
+        return {
+          decision: { ...selected, latencyMs: performance.now() - started },
+          checks,
+        };
       }
     }
     return { checks };
   }
 
   private async checkCompletion(input: DecisionInput): Promise<BinaryAnswer> {
-    const { window } = input.observation;
-
-    const values = (window === undefined ? [] : relevantControls(window))
-      .filter(
-        (element) =>
-          (element.value !== undefined && element.value !== null && element.value !== "") ||
-          element.selected === true ||
-          TEXT_CONTENT.has(element.role),
-      )
-      .map((element) => describeControl(element))
-      .join(" | ");
-    const state = [
-      `User request: ${input.task}`,
-      `Observed result: ${window?.app_name ?? input.observation.application?.name} is open.`,
-      window === undefined
-        ? "No controllable window is available."
-        : `Window title: ${window.window_title}.`,
-      ...(window?.url === undefined ? [] : [`Current URL: ${window.url}`]),
-      `Control values: ${values.slice(0, MAX_STATE_CHARS)}`,
-      ...(input.context === undefined
-        ? []
-        : [`Previous session context (reference only): ${input.context}`]),
-      ...(input.completionEvidence === undefined
-        ? []
-        : [`Executed actions in this request: ${input.completionEvidence}`]),
-      ...(window?.elements.some((element) =>
-        ["AXPopover", "AXSheet", "AXDialog"].includes(element.role),
-      ) === true
-        ? [
-            "A dialog or popover is still open. Its text fields can contain unsubmitted input. Verify the requested creation, saving, or submission before declaring completion.",
-          ]
-        : []),
-    ].join("\n");
-    const response = await this.request({
+    const response = await this.request(input, "completion", {
       model: this.modelId,
-      state,
+      state: completionState(input),
       questions: {
         next_action: {
           type: "choice",
@@ -438,27 +475,18 @@ class SystemOneHttpDecisionModel implements DecisionModel {
   }
 
   private async checkCompletionTarget(input: DecisionInput): Promise<BinaryAnswer> {
-    const { window } = input.observation;
-    const contents =
-      window?.elements.map((element) => describeControl(element)).join(" | ") ??
-      "No window selected.";
-    const response = await this.request({
+    const response = await this.request(input, "completion-target", {
       model: this.modelId,
-      state: [
-        `User request: ${input.task}`,
-        `Previous session context (references only): ${input.context ?? ""}`,
-        `Executed actions in this request: ${input.completionEvidence ?? ""}`,
-        `Selected application: ${input.observation.application?.name ?? window?.app_name ?? "None"}`,
-        `Current window: ${window === undefined ? "None" : `${window.app_name}: ${window.window_title}`}`,
-        ...(window?.url === undefined ? [] : [`Current URL: ${window.url}`]),
-        `Current content: ${contents.slice(0, MAX_STATE_CHARS)}`,
-      ].join("\n"),
+      state: completionTargetState(input),
       questions: {
         next_action: {
           type: "choice",
           instructions:
-            "Does the selected app, page, or document match the current user request? Use previous session context only to resolve references left unspecified by the current request.",
-          criteria: { A0: "Yes", A1: "No" },
+            "Is the final result requested in the current request already displayed in this selected app or window? A matching row, link, or search result that can still be opened is only an available next action. Use previous session context only to resolve references left unspecified by the current request.",
+          criteria: {
+            A0: "Yes. The requested final view or content is already open or displayed.",
+            A1: "No. Only a selectable target is visible, or the requested final result is not yet displayed.",
+          },
         },
       },
     });
@@ -473,7 +501,7 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     const { window } = input.observation;
     const controls = window?.elements.map((element) => describeControl(element)).join(" | ") ?? "";
     const prior = input.priorCompletionCommit;
-    const response = await this.request({
+    const response = await this.request(input, "completion-commit", {
       model: this.modelId,
       state: [
         `User request: ${input.task}`,
@@ -509,19 +537,26 @@ class SystemOneHttpDecisionModel implements DecisionModel {
     return answer;
   }
 
-  private async request(body: DecisionRequest): Promise<DecisionResponse> {
-    return requestJson({
-      apiKey: this.apiKey,
+  private async request(
+    input: DecisionInput,
+    phase: DecisionRequestPhase,
+    body: DecisionRequest,
+  ): Promise<DecisionResponse> {
+    return requestDecision({
+      context: input,
+      phase,
       body,
       endpoint: this.endpoint,
-      label: "System One",
-      schema: decisionResponseSchema,
-      timeoutMs: TIMEOUT_MS,
+      apiKey: this.apiKey,
     });
   }
 
-  private async judge(request: DecisionRequest): Promise<BinaryAnswer> {
-    const response = await this.request(request);
+  private async judge(
+    input: DecisionInput,
+    request: DecisionRequest,
+    phase: DecisionRequestPhase,
+  ): Promise<BinaryAnswer> {
+    const response = await this.request(input, phase, request);
     const answer = binaryAnswerSchema.parse(response.answers.next_action);
     if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
       throw new Error("System One returned an invalid commit verification");
@@ -530,5 +565,6 @@ class SystemOneHttpDecisionModel implements DecisionModel {
   }
 }
 
-export { SystemOneHttpDecisionModel };
+export { SystemOneDecisionModel };
 export type { Decision, DecisionInput, DecisionModel };
+export type { DecisionRequestEvent } from "./decision-request.ts";

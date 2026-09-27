@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import type { Window } from "../src/agent/contracts.ts";
 
@@ -39,23 +39,27 @@ test("shows a late actionable target when the page has more than one hundred con
           body.state.includes("Further actionable controls") && body.state.includes("Final Audit");
       }
       const completion = body.questions.next_action.instructions.startsWith("Has this");
-      const actionChoice = body.questions.next_action.instructions.startsWith("Which action");
+      const keys = Object.keys(body.questions.next_action.criteria);
       return Response.json({
         answers: {
           next_action: completion
             ? { choice: "A1", probabilities: { A0: 0, A1: 1 } }
-            : { choice: "A0", probabilities: actionChoice ? { A0: 1 } : { A0: 1, A1: 0 } },
+            : {
+                choice: "A0",
+                probabilities: Object.fromEntries(keys.map((key) => [key, Number(key === "A0")])),
+              },
         },
       });
     },
   });
   try {
-    await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Open Final Audit",
       mode: "browser",
       observation: { desktop: { apps: [], windows: [] }, window },
       actions: [
         { kind: "blocked", reason: "Blocked" },
+        { kind: "refresh", reason: "Observe again" },
         { kind: "finish", reason: "Done", summary: "Done" },
       ],
     });

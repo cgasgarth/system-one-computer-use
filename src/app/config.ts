@@ -4,13 +4,13 @@ import { PlaywrightComputer } from "../computer/playwright/computer.ts";
 import { CuaMcpComputer } from "../computer/native.ts";
 import { DEFAULT_NATIVE_ACCESS } from "../computer/native-access.ts";
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
-import { SystemOneHttpDecisionModel } from "../models/system-one.ts";
+import { SystemOneDecisionModel } from "../models/system-one.ts";
 import type { DecisionModel } from "../models/system-one.ts";
 import { ChatCompletionTextModel } from "../models/text.ts";
 import type { TextModel } from "../models/text.ts";
 import { driverModeSchema } from "./task-schema.ts";
+import { endpointSchema } from "../models/transport/endpoint.ts";
 
-const endpointSchema = z.url({ protocol: /^https?$/u });
 const optionalKey = z.string().min(1).optional();
 const configSchema = z.object({
   CUA_DRIVER_BIN: z.string().default("cua-driver"),
@@ -37,7 +37,7 @@ function loadConfig(): Config {
 
 function createModels(config: Config): Models {
   return {
-    decision: new SystemOneHttpDecisionModel(
+    decision: new SystemOneDecisionModel(
       config.SYSTEM_ONE_URL,
       config.SYSTEM_ONE_MODEL,
       config.SYSTEM_ONE_API_KEY,

@@ -13,8 +13,9 @@ const MAX_FIELD_CHARS = 100;
 const MAX_STATE_CHARS = 6000;
 const MIN_STATE_CHARS = 1200;
 
+type ActionGroupKind = Action["kind"] | "visible_controls" | "application_menu";
 interface ActionGroup {
-  readonly kind: Action["kind"];
+  readonly kind: ActionGroupKind;
   readonly description: string;
   readonly actions: readonly Action[];
 }
@@ -37,28 +38,36 @@ const DESCRIPTIONS: Readonly<Record<Action["kind"], string>> = {
   observe_window: "Select a different open window.",
   invoke_menu: "Choose an enabled command from the selected application's observed menu.",
 };
+const GROUP_DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
+  ...DESCRIPTIONS,
+  visible_controls:
+    "Use a visible control in this window, including search and text fields, rows, and buttons.",
+  application_menu: "Use an observed command in this application's menu.",
+};
+function groupKind(action: Action): ActionGroupKind {
+  if (
+    action.kind === "click_element" ||
+    action.kind === "compose_text" ||
+    action.kind === "press_key" ||
+    action.kind === "type_text"
+  ) {
+    return "visible_controls";
+  }
+  return action.kind === "invoke_menu" ? "application_menu" : action.kind;
+}
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
-  const grouped = new Map<string, Action[]>();
+  const grouped = new Map<ActionGroupKind, Action[]>();
   for (const action of actions) {
-    const key = action.kind === "invoke_menu" ? `${action.kind}:${action.path[0]}` : action.kind;
+    const key = groupKind(action);
     const group = grouped.get(key) ?? [];
     group.push(action);
     grouped.set(key, group);
   }
-  return [...grouped.values()].map((group) => {
-    const [first] = group;
-    if (first === undefined) {
-      throw new Error("Empty operation group");
-    }
-    return {
-      kind: first.kind,
-      description:
-        first.kind === "invoke_menu"
-          ? `Choose an enabled command in the observed ${first.path[0]} menu.`
-          : DESCRIPTIONS[first.kind],
-      actions: group,
-    };
-  });
+  return [...grouped].map(([kind, group]) => ({
+    kind,
+    description: GROUP_DESCRIPTIONS[kind],
+    actions: group,
+  }));
 }
 function actionDescription(action: Action, observation: Observation): string {
   const target =

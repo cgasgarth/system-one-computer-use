@@ -1,5 +1,6 @@
 import type { Action, ActionChoices, Observation } from "./contracts.ts";
-import { actionKey, progressStateKey, textFieldKey } from "./state-key.ts";
+import { actionKey, progressStateKey, textFieldKey, windowScopeKey } from "./state-key.ts";
+import { textTargetName } from "./controls.ts";
 
 const UNCHANGED_ATTEMPTS = 2;
 const REMEMBERED_STATES = 128;
@@ -9,8 +10,52 @@ type UnchangedDestination =
   | { readonly kind: "url"; readonly url: string }
   | { readonly kind: "application"; readonly name: string };
 
+function searchFieldIdentity(observation: Observation, token: string): string | undefined {
+  const { window } = observation;
+  const field = window?.elements.find((element) => element.element_token === token);
+  if (
+    window === undefined ||
+    field === undefined ||
+    (field.role !== "searchbox" && field.subrole !== "AXSearchField")
+  ) {
+    return undefined;
+  }
+  const name = textTargetName(field);
+  const ordinal = window.elements
+    .filter(
+      (element) =>
+        element.role === field.role &&
+        element.subrole === field.subrole &&
+        textTargetName(element) === name,
+    )
+    .findIndex((element) => element.element_token === token);
+  return JSON.stringify([windowScopeKey(window), field.role, field.subrole, name, ordinal]);
+}
+
+function searchResultScene(observation: Observation, token: string): string {
+  return JSON.stringify(
+    observation.window?.elements
+      .filter(
+        (element) =>
+          element.element_token !== token &&
+          element.role !== "searchbox" &&
+          element.subrole !== "AXSearchField",
+      )
+      .map((element) => ({
+        role: element.role,
+        subrole: element.subrole,
+        label: element.label,
+        value: element.value,
+        href: element.href,
+        selected: element.selected,
+        enabled: element.enabled,
+      })) ?? [],
+  );
+}
+
 class Progress {
   private readonly satisfiedInputs = new Set<string>();
+  private readonly searchScenes = new Map<string, string>();
   private readonly urls = new Set<string>();
   private readonly applications = new Set<string>();
   private readonly visits = new Map<string, Map<string, number>>();
@@ -30,7 +75,6 @@ class Progress {
     const current = progressStateKey(observation);
     if (this.state !== current) {
       this.urls.clear();
-      this.applications.clear();
     }
     this.state = current;
   }
@@ -42,6 +86,12 @@ class Progress {
     }
     if (action.kind === "observe_window" || action.kind === "select_surface") {
       this.inspections.set(key, (this.inspections.get(key) ?? 0) + 1);
+    }
+    if (action.kind === "compose_text") {
+      const identity = searchFieldIdentity(observation, action.element_token);
+      if (identity !== undefined) {
+        this.searchScenes.set(identity, searchResultScene(observation, action.element_token));
+      }
     }
     const state = progressStateKey(observation);
     const attempts = this.visits.get(state) ?? new Map<string, number>();
@@ -57,6 +107,9 @@ class Progress {
   }
 
   public advanced(action: Action, performed: boolean): void {
+    if (performed && action.kind === "request_app") {
+      this.applications.add(action.name);
+    }
     if (
       performed &&
       (action.kind === "click_element" ||
@@ -67,6 +120,7 @@ class Progress {
         action.kind === "press_key")
     ) {
       this.inspections.clear();
+      this.applications.clear();
     }
   }
 
@@ -82,12 +136,28 @@ class Progress {
     }
   }
 
+  private satisfiedTextInput(observation: Observation, token: string): boolean {
+    const key = textFieldKey(observation, token);
+    if (key === undefined || !this.satisfiedInputs.has(key)) {
+      return false;
+    }
+    const identity = searchFieldIdentity(observation, token);
+    if (identity === undefined) {
+      return true;
+    }
+    const previousScene = this.searchScenes.get(identity);
+    return previousScene === undefined || previousScene === searchResultScene(observation, token);
+  }
+
   private redundant(action: Action, observation: Observation): boolean {
-    if (action.kind === "compose_text") {
-      const key = textFieldKey(observation, action.element_token);
-      if (key !== undefined && this.satisfiedInputs.has(key)) {
-        return true;
-      }
+    if (action.kind === "request_app" && this.applications.has(action.name)) {
+      return true;
+    }
+    if (
+      action.kind === "compose_text" &&
+      this.satisfiedTextInput(observation, action.element_token)
+    ) {
+      return true;
     }
     if (action.kind === "refresh" && (this.failure?.count ?? 0) >= UNCHANGED_ATTEMPTS) {
       return true;
@@ -127,13 +197,6 @@ class Progress {
       return {
         ...action,
         reason: `Navigate to a different website. The browser is already at ${window.url}; reopening that URL has no effect.`,
-      };
-    }
-    const app = window?.app_name ?? observation.application?.name;
-    if (action.kind === "request_app" && app !== undefined && this.applications.has(app)) {
-      return {
-        ...action,
-        reason: `Open another installed application. ${app} is already selected; reopening it has no effect.`,
       };
     }
     return action;

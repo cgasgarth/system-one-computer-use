@@ -6,7 +6,6 @@ import { SurfaceSession } from "./surface.ts";
 import { performTurn } from "./turn.ts";
 import { Progress } from "./progress.ts";
 
-const MS_PER_SECOND = 1000;
 const validationIssues = z.array(z.object({ message: z.string() })).nonempty();
 async function bookmark(
   options: TaskOptions,
@@ -79,7 +78,6 @@ async function finish(context: FinishContext): Promise<TaskResult> {
     summary: context.complete ? "Task marked complete" : blockedSummary(context),
     steps: context.steps,
     totalMs,
-    requestsPerSecond: context.steps.length / (totalMs / MS_PER_SECOND),
     ...(surface === undefined ? {} : { surface }),
   };
 }

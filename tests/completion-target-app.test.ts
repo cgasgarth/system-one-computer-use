@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
@@ -13,10 +13,10 @@ test("completion target sees the selected app separately from its dialog title",
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const question = body.questions.next_action.instructions;
-      if (question.startsWith("Does the selected app")) {
+      if (question.startsWith("Is the final result")) {
         targetState = body.state;
       }
-      const yesProbability = question.startsWith("Does the selected app")
+      const yesProbability = question.startsWith("Is the final result")
         ? TARGET_YES
         : PRIMARY_CONFIDENCE;
       return Response.json({
@@ -31,7 +31,7 @@ test("completion target sees the selected app separately from its dialog title",
   });
   try {
     const current = { ...windowFixture(), app_name: "Player", window_title: "Open" };
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test-model").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test-model").choose({
       task: "Open the player application",
       context: "Previous request (historical context only): Open another document",
       mode: "desktop",
@@ -61,7 +61,7 @@ test("a selected target No still prevents Finish", async () => {
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const instruction = body.questions.next_action.instructions;
-      const target = instruction.startsWith("Does the selected app");
+      const target = instruction.startsWith("Is the final result");
       const criteria = Object.keys(body.questions.next_action.criteria);
       return Response.json({
         answers: {
@@ -78,7 +78,7 @@ test("a selected target No still prevents Finish", async () => {
     },
   });
   try {
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Open the requested item",
       context: "Previous request was about another item",
       observation: { desktop: desktopFixture(), window: windowFixture() },

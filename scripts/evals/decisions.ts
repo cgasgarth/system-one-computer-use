@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SystemOneHttpDecisionModel } from "../../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../../src/models/system-one.ts";
 import { scenarios, validationScenarios } from "./scenarios.ts";
 
 const config = z
@@ -9,7 +9,7 @@ const config = z
     SYSTEM_ONE_API_KEY: z.string().optional(),
   })
   .parse(Bun.env);
-const model = new SystemOneHttpDecisionModel(
+const model = new SystemOneDecisionModel(
   config.SYSTEM_ONE_URL,
   config.SYSTEM_ONE_MODEL,
   config.SYSTEM_ONE_API_KEY,

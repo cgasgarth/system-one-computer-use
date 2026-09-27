@@ -1,13 +1,18 @@
 import path from "node:path";
+import { chmod } from "node:fs/promises";
+import type { ReadonlyDeep } from "type-fest";
 import { preset } from "./catalog.ts";
 import type { ModelRole, ModelSelection } from "./catalog.ts";
 import { commands } from "./commands.ts";
 import type { RuntimePaths } from "./commands.ts";
 import { startProcess } from "./process.ts";
 import type { ModelProcess } from "./process.ts";
+import { verifySocketReady } from "./ready.ts";
+import { clearStaleSocket } from "./sockets.ts";
 
 const STARTUP_TIMEOUT_MS = 180_000;
-const HEALTH_TIMEOUT_MS = 1000;
+const PRIVATE_SOCKET = 0o600;
+type ModelCommand = ReturnType<typeof commands>;
 type LoadState = "unloaded" | "downloading" | "loading" | "ready" | "error";
 interface SlotStatus {
   readonly role: ModelRole;
@@ -21,22 +26,23 @@ class ModelSlot {
   private loading: Promise<void> | undefined = undefined;
   private unloading: Promise<void> | undefined = undefined;
   private abort = new AbortController();
+  private closed = false;
   private state: LoadState = "unloaded";
   private message = "Not loaded";
   private readonly role: ModelRole;
-  private readonly port: number;
+  public readonly socketPath: string;
   private readonly paths: RuntimePaths;
   private readonly changed: () => void;
   public constructor(options: {
     readonly role: ModelRole;
     readonly selection: ModelSelection;
-    readonly port: number;
+    readonly socketPath: string;
     readonly paths: RuntimePaths;
     readonly changed: () => void;
   }) {
     this.role = options.role;
     this.selection = options.selection;
-    this.port = options.port;
+    this.socketPath = options.socketPath;
     this.paths = options.paths;
     this.changed = options.changed;
   }
@@ -49,15 +55,13 @@ class ModelSlot {
     this.changed();
   }
   public select(selection: ModelSelection): void {
+    this.assertOpen();
     this.selection = selection;
   }
-  public endpoint(): string {
-    return this.selection.source === "endpoint"
-      ? this.selection.url
-      : `http://127.0.0.1:${this.port}${this.role === "decision" ? "/v1/systemone" : "/v1/chat/completions"}`;
-  }
   public async ensure(): Promise<void> {
+    this.assertOpen();
     await this.unloading;
+    this.assertOpen();
     if (this.state === "ready") {
       return;
     }
@@ -65,6 +69,7 @@ class ModelSlot {
     await this.loading;
   }
   private async loadTracked(): Promise<void> {
+    this.assertOpen();
     this.abort = new AbortController();
     try {
       await this.load();
@@ -93,16 +98,33 @@ class ModelSlot {
     if (model.role !== this.role) {
       throw new Error("This model does not support the selected role");
     }
-    const command = commands(model, this.port, this.paths);
+    const command = commands(model, this.socketPath, this.paths);
     const log = path.join(this.paths.data, "logs", `${model.id}.log`);
-    this.update("downloading", `Preparing ${model.name}…`);
+    await this.download(command, log, model.name);
+    this.abort.signal.throwIfAborted();
+    await this.serve(command, log, model.name);
+  }
+  private async download(
+    command: ReadonlyDeep<ModelCommand>,
+    log: string,
+    name: string,
+  ): Promise<void> {
+    this.update("downloading", `Preparing ${name}…`);
     this.child = await startProcess(command.download, command.environment, { logPath: log });
     this.abort.signal.throwIfAborted();
     if ((await this.child.exited) !== 0) {
       throw new Error(`Download failed. See ${log}`);
     }
     this.abort.signal.throwIfAborted();
-    this.update("loading", `Loading ${model.name}…`);
+  }
+  private async serve(
+    command: ReadonlyDeep<ModelCommand>,
+    log: string,
+    name: string,
+  ): Promise<void> {
+    this.update("loading", `Loading ${name}…`);
+    await clearStaleSocket(this.socketPath);
+    this.abort.signal.throwIfAborted();
     this.child = await startProcess(
       command.serve,
       { ...command.environment, HF_HUB_OFFLINE: "1" },
@@ -117,42 +139,28 @@ class ModelSlot {
     );
     this.abort.signal.throwIfAborted();
     await Promise.race([this.child.waitUntilReady(), this.serverExit(this.child, log)]);
-    await this.verifyReady();
-    this.update("ready", `${model.name} is ready`);
-  }
-  private async verifyReady(): Promise<void> {
-    this.abort.signal.throwIfAborted();
-    // MLX starts its HTTP listener while the text model loads on a worker thread.
-    // One small completion confirms that loading and inference both finished.
-    const text = this.role === "text";
-    const response = await fetch(
-      text ? this.endpoint() : `http://127.0.0.1:${this.port}/v1/models`,
-      {
-        ...(text
-          ? {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                messages: [{ role: "user", content: "Ready" }],
-                max_tokens: 1,
-                stream: false,
-              }),
-            }
-          : { method: "GET" }),
-        signal: AbortSignal.any([
-          this.abort.signal,
-          AbortSignal.timeout(text ? STARTUP_TIMEOUT_MS : HEALTH_TIMEOUT_MS),
-        ]),
-      },
-    );
-    await response.body?.cancel();
-    if (!response.ok) {
-      throw new Error(`Model startup check failed: HTTP ${response.status}`);
-    }
+    await chmod(this.socketPath, PRIVATE_SOCKET);
+    await verifySocketReady({
+      role: this.role,
+      selection: this.selection,
+      socketPath: this.socketPath,
+      signal: this.abort.signal,
+      timeoutMs: STARTUP_TIMEOUT_MS,
+    });
+    this.update("ready", `${name} is ready`);
   }
   public async unload(): Promise<void> {
     this.unloading ??= this.unloadTracked();
     await this.unloading;
+  }
+  public async close(): Promise<void> {
+    this.closed = true;
+    await this.unload();
+  }
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error("Model slot is closed");
+    }
   }
   private async unloadTracked(): Promise<void> {
     try {
@@ -166,6 +174,7 @@ class ModelSlot {
     const { child } = this;
     this.child = undefined;
     await child?.stop();
+    await clearStaleSocket(this.socketPath);
     try {
       await this.loading;
     } catch {

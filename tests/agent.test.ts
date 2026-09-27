@@ -66,10 +66,7 @@ test("lets the decision model select desktop and invokes the writer only for an 
       return computer;
     },
     text: {
-      async generate(input) {
-        if (input.purpose === "application") {
-          return "Messages";
-        }
+      async generate() {
         writes += 1;
         return "Alex";
       },
@@ -77,10 +74,15 @@ test("lets the decision model select desktop and invokes the writer only for an 
     decision: {
       async choose(input) {
         if (!input.observation.window) {
-          if (input.actions.some((action) => action.kind === "observe_window")) {
-            return pick(input, "observe_window");
+          if (input.mode === undefined) {
+            return pick(input, "select_surface", "desktop");
           }
-          return pick(input, "select_surface", "desktop");
+          expect(
+            input.actions.some(
+              (action) => action.kind === "request_app" && action.name === "Messages",
+            ),
+          ).toBe(true);
+          return pick(input, "request_app");
         }
         return typed.length === 0 ? pick(input, "compose_text") : pick(input, "finish");
       },

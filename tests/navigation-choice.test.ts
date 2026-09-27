@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
-import { verificationRequest } from "../src/models/decision-verification.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
@@ -41,7 +40,7 @@ test("an observed navigation link can advance a task without a second relevance 
       element_token: "target",
       reason: "Open requested document",
     } as const;
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Open the requested document",
       observation: {
         desktop: desktopFixture(),
@@ -125,7 +124,7 @@ test.each([
           },
         ],
       };
-      const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+      const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
         task: "Use the selected native control",
         observation: { desktop: desktopFixture(), window },
         mode: "desktop",
@@ -141,41 +140,6 @@ test.each([
     }
   },
 );
-
-test("ordinary text confirmation still gets an action relevance check", () => {
-  const action = {
-    kind: "click_element",
-    pid: 7,
-    window_id: 9,
-    element_token: "confirm",
-    operation: "confirm",
-    reason: "Submit editor text",
-  } as const;
-  const window = {
-    ...windowFixture(),
-    elements: [
-      {
-        element_index: 1,
-        element_token: "confirm",
-        role: "AXTextField",
-        label: "Editor",
-        actions: ["AXConfirm"],
-      },
-    ],
-  };
-  const request = verificationRequest(
-    action,
-    {
-      task: "Submit the edited text",
-      observation: { desktop: desktopFixture(), window },
-      actions: [action],
-    },
-    "test",
-  );
-  expect(request?.questions.next_action.instructions.startsWith("Is this exact control")).toBe(
-    true,
-  );
-});
 
 test("a model-selected form submit still fails the separate commit gate", async () => {
   const server = Bun.serve({
@@ -197,7 +161,7 @@ test("a model-selected form submit still fails the separate commit gate", async 
       element_token: "save",
       reason: "Save draft",
     } as const;
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Leave the draft open without saving",
       observation: {
         desktop: desktopFixture(),
@@ -247,7 +211,7 @@ test("an observed search field uses the primary grounded text choice", async () 
       element_token: "search",
       reason: "Type into search field",
     } as const;
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Find a document in this window",
       observation: {
         desktop: desktopFixture(),

@@ -63,7 +63,11 @@ const cases: RoutingCase[] = [
     destination: "Notes",
   },
 ];
-function chooseAction(input: DecisionInput, acted: boolean): Action {
+function chooseAction(
+  input: DecisionInput,
+  acted: boolean,
+  destination: RoutingCase["destination"],
+): Action {
   let desired: Action["kind"] = "click_element";
   if (acted) {
     desired = "finish";
@@ -75,7 +79,8 @@ function chooseAction(input: DecisionInput, acted: boolean): Action {
   const action = input.actions.find(
     (candidate) =>
       candidate.kind === desired &&
-      (candidate.kind !== "select_surface" || candidate.surface === "desktop"),
+      (candidate.kind !== "select_surface" || candidate.surface === "desktop") &&
+      (candidate.kind !== "request_app" || candidate.name === destination),
   );
   if (action === undefined) {
     throw new Error(`Missing ${desired}`);
@@ -134,15 +139,13 @@ test.each(cases)(
       ...(preferredSurface === undefined ? {} : { preferredSurface }),
       computer: () => computer,
       text: {
-        async generate(input) {
-          expect(input.task).toBe(task);
-          expect(input.purpose).toBe("application");
-          return destination;
+        async generate() {
+          throw new Error("Text generation must not select an installed application");
         },
       },
       decision: {
         async choose(input) {
-          const action = chooseAction(input, actions.length > 0);
+          const action = chooseAction(input, actions.length > 0, destination);
           return { action, latencyMs: 1, probabilities: { A0: 1 } };
         },
       },

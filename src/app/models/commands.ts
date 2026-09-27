@@ -19,15 +19,19 @@ function checkpoint(model: Preset): string {
 }
 function commands(
   model: Preset,
-  port: number,
+  socket: string,
   paths: RuntimePaths,
 ): { download: string[]; serve: string[]; readyMessage: string; environment: NodeJS.ProcessEnv } {
   const projectName = model.family === "kev" ? "kev-mlx" : "clm-mlx";
   const project = path.join(paths.integrations, projectName);
-  const prefix = [paths.uv, "run", "--project", project, "--frozen", "python"];
+  const prefix = [paths.uv, "run", "--project", project, "--frozen", "--no-editable", "python"];
+  const runtime = path.join(paths.data, "runtimes", projectName);
+  const python = path.join(runtime, "bin", "python3");
+  const bridge = path.join(paths.integrations, "local-bridge", "serve.py");
+  const serve = [python, bridge, "--provider", model.family, "--socket", socket];
   const environment = {
     ...Bun.env,
-    UV_PROJECT_ENVIRONMENT: path.join(paths.data, "runtimes", projectName),
+    UV_PROJECT_ENVIRONMENT: runtime,
     PYTHONUNBUFFERED: "1",
     PYTHONDONTWRITEBYTECODE: "1",
     HF_HUB_DISABLE_PROGRESS_BARS: "1",
@@ -36,30 +40,22 @@ function commands(
   if (model.family === "kev") {
     return {
       environment,
-      readyMessage: `Uvicorn running on http://127.0.0.1:${port}`,
+      readyMessage: "SYSTEM_ONE_MODEL_READY",
       download: [...prefix, path.join(project, "download.py"), "--run", checkpoint(model)],
-      serve: [...prefix, "-m", "kev.serve", "--run", checkpoint(model), "--port", String(port)],
+      serve: [...serve, "--run", checkpoint(model)],
     };
   }
   if (model.family === "clm") {
     return {
       environment,
-      readyMessage: `Uvicorn running on http://127.0.0.1:${port}`,
+      readyMessage: "SYSTEM_ONE_MODEL_READY",
       download: [...prefix, "-m", "clm_mlx.download"],
-      serve: [
-        ...prefix,
-        "-m",
-        "clm_mlx.server",
-        "--bits",
-        String(model.bits),
-        "--port",
-        String(port),
-      ],
+      serve: [...serve, "--bits", String(model.bits)],
     };
   }
   return {
     environment,
-    readyMessage: `Starting httpd at 127.0.0.1 on port ${port}...`,
+    readyMessage: "SYSTEM_ONE_MODEL_READY",
     download: [
       ...prefix,
       "-m",
@@ -69,18 +65,7 @@ function commands(
       "--text-output",
       path.join(paths.data, "models", model.id),
     ],
-    serve: [
-      ...prefix,
-      "-m",
-      "mlx_lm",
-      "server",
-      "--model",
-      path.join(paths.data, "models", model.id),
-      "--port",
-      String(port),
-      "--chat-template-args",
-      '{"enable_thinking":false}',
-    ],
+    serve: [...serve, "--model-path", path.join(paths.data, "models", model.id)],
   };
 }
 export { commands };

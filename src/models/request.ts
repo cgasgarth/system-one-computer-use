@@ -1,5 +1,7 @@
 import type { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
+import { localEndpoint } from "./transport/endpoint.ts";
+import { requestUnix } from "./transport/unix.ts";
 
 const ERROR_DETAIL_LIMIT = 600;
 
@@ -10,9 +12,24 @@ interface JsonRequest<Body, Result> {
   readonly label: string;
   readonly schema: z.ZodType<Result>;
   readonly timeoutMs: number;
+  readonly signal?: Readonly<AbortSignal>;
 }
 
-async function requestJson<Body, Result>(request: JsonRequest<Body, Result>): Promise<Result> {
+async function requestJson<Body extends object, Result>(
+  request: JsonRequest<Body, Result>,
+): Promise<Result> {
+  const timeout = AbortSignal.timeout(request.timeoutMs);
+  const signal =
+    request.signal === undefined ? timeout : AbortSignal.any([timeout, request.signal]);
+  const local = localEndpoint(request.endpoint);
+  if (local !== undefined) {
+    return requestUnix({
+      path: local.path,
+      message: { role: local.role, body: request.body },
+      schema: request.schema,
+      signal,
+    });
+  }
   const headers = new Headers({ "content-type": "application/json" });
   if (request.apiKey !== undefined) {
     headers.set("authorization", `Bearer ${request.apiKey}`);
@@ -21,7 +38,7 @@ async function requestJson<Body, Result>(request: JsonRequest<Body, Result>): Pr
     body: JSON.stringify(request.body),
     headers,
     method: "POST",
-    signal: AbortSignal.timeout(request.timeoutMs),
+    signal,
   });
   if (!response.ok) {
     const detail = await response.text();

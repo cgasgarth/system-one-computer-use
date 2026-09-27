@@ -2,16 +2,70 @@ import { spawn } from "node:child_process";
 import { mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
+import { z } from "zod";
 import { Readiness } from "./readiness.ts";
 import type { ReadinessOptions } from "./readiness.ts";
 
 const PRIVATE_MODE = 0o600;
 const STOP_GRACE_MS = 5000;
+const STOP_REAP_MS = 1000;
+const missingProcess = z.object({ code: z.literal("ESRCH") });
+function groupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (missingProcess.safeParse(error).success) {
+      return false;
+    }
+    throw error;
+  }
+}
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (!missingProcess.safeParse(error).success) {
+      throw error;
+    }
+  }
+}
+async function waitForGroupExit(pid: number, exited: Promise<number>): Promise<void> {
+  await Promise.race([
+    Bun.sleep(STOP_GRACE_MS),
+    exited.then(
+      async () => {
+        if (groupExists(pid)) {
+          await Bun.sleep(STOP_GRACE_MS);
+        }
+        return 0;
+      },
+      async () => {
+        await Bun.sleep(STOP_GRACE_MS);
+        return 0;
+      },
+    ),
+  ]);
+}
+async function stopGroup(pid: number, exited: Promise<number>): Promise<void> {
+  if (!groupExists(pid)) {
+    return;
+  }
+  signalGroup(pid, "SIGTERM");
+  await waitForGroupExit(pid, exited);
+  if (!groupExists(pid)) {
+    return;
+  }
+  signalGroup(pid, "SIGKILL");
+  await Promise.race([exited.catch(() => 1), Bun.sleep(STOP_REAP_MS)]);
+}
 interface ModelProcess {
   readonly exited: Promise<number>;
   readonly waitUntilReady: () => Promise<void>;
   readonly stop: () => Promise<void>;
 }
+// Process startup binds the child, log stream, readiness marker, and owned group.
+// oxlint-disable-next-line max-statements
 async function startProcess(
   args: readonly string[],
   environment: Readonly<NodeJS.ProcessEnv>,
@@ -50,6 +104,8 @@ async function startProcess(
     const [code] = await Promise.all([completion.promise, logged]);
     return code;
   })();
+  const groupPid = child.pid;
+  let stopping: Promise<void> | undefined = undefined;
   return {
     exited,
     async waitUntilReady() {
@@ -59,23 +115,11 @@ async function startProcess(
       }
     },
     async stop() {
-      if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
+      if (groupPid === undefined) {
         return;
       }
-      const group = -child.pid;
-      const timer = setTimeout(() => {
-        try {
-          process.kill(group, "SIGKILL");
-        } catch {
-          /* The owned group already exited. */
-        }
-      }, STOP_GRACE_MS);
-      try {
-        process.kill(group, "SIGTERM");
-        await exited;
-      } finally {
-        clearTimeout(timer);
-      }
+      stopping ??= stopGroup(groupPid, exited);
+      await stopping;
     },
   };
 }

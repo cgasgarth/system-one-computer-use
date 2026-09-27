@@ -2,16 +2,12 @@
 
 An optional serving adapter for the published [Contrastive Language Model](https://github.com/Contrastive-LM/CLM).
 It uses MLX for Qwen3-8B last-token pooling and the upstream CLM projection heads,
-vector cache, scoring rules, and HTTP API. It does not train a new model.
+vector cache, and scoring rules. It does not train a new model.
 
-```bash
-uv run --project integrations/clm-mlx --frozen clm-mlx --bits 4 --port 8700
-```
-
-Use `SYSTEM_ONE_URL=http://127.0.0.1:8700/v1/systemone` and
-`SYSTEM_ONE_MODEL=clm-latest` in the harness. The service binds to localhost.
-Set `CLM_API_KEY` to require a bearer token, then give the harness that token as
-`SYSTEM_ONE_API_KEY`.
+Select a CLM preset in the app's model settings. The app downloads the model and
+starts `integrations/local-bridge/serve.py` with this integration's Python
+environment. Requests use private Unix sockets and JSON messages, without HTTP.
+The manager owns startup, warm-up, idle unloading, and shutdown.
 
 `--bits 0` keeps the BF16 encoder; `--bits 4` and `--bits 8` use MLX quantization.
 The published projection heads remain unchanged. MLX embedding calls are serialized;
@@ -33,8 +29,8 @@ after loading. Leave room for startup conversion and other applications.
 
 ## Local response-time probe
 
-Loopback HTTP medians on the M5 Pro, 10 requests per condition, MLX 0.32.2,
-mlx-lm 0.31.3, and the 4-bit encoder:
+Historical loopback HTTP medians on the M5 Pro, before the Unix transport change:
+10 requests per condition, MLX 0.32.2, mlx-lm 0.31.3, and the 4-bit encoder:
 
 | Input                                | State and actions uncached | New state, cached actions | Everything cached |
 | ------------------------------------ | -------------------------: | ------------------------: | ----------------: |

@@ -1,6 +1,6 @@
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import type { ActionProbabilities, BinaryAnswer } from "../models/system-one-schema.ts";
-import type { Decision, DecisionModel } from "../models/system-one.ts";
+import type { Decision, DecisionModel, DecisionRequestEvent } from "../models/system-one.ts";
 import type { TextModel } from "../models/text.ts";
 import type { Action } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
@@ -18,6 +18,10 @@ interface ActionResult {
     readonly label: string;
     readonly value: string;
   };
+}
+interface TaskStageEvent {
+  readonly stage: "observation" | "decision" | "action";
+  readonly stepIndex: number;
 }
 
 interface TaskStep {
@@ -54,7 +58,6 @@ interface TaskStep {
 }
 interface TaskResult {
   readonly status: "complete" | "blocked";
-  readonly requestsPerSecond: number;
   readonly steps: readonly TaskStep[];
   readonly summary: string;
   readonly task: string;
@@ -70,7 +73,9 @@ interface TaskOptions {
   readonly context?: string;
   readonly preferredSurface?: ComputerMode;
   readonly previousSurface?: Surface;
-  readonly signal?: Readonly<Pick<AbortSignal, "aborted" | "throwIfAborted">>;
+  readonly signal?: Readonly<AbortSignal>;
   readonly onStep?: (step: TaskStep) => void | Promise<void>;
+  readonly onStage?: (event: TaskStageEvent) => void | Promise<void>;
+  readonly onDecisionRequest?: (event: DecisionRequestEvent) => void;
 }
-export type { TaskStep, TaskResult, TaskOptions, ActionResult };
+export type { TaskStageEvent, TaskStep, TaskResult, TaskOptions, ActionResult };

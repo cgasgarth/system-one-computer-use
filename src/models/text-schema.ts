@@ -19,6 +19,7 @@ const textRequestSchema = z.object({
   temperature: z.number(),
 });
 type TextRequest = ReadonlyDeep<z.infer<typeof textRequestSchema>>;
+type TextResponse = ReadonlyDeep<z.infer<typeof textResponseSchema>>;
 
 export { textRequestSchema, textResponseSchema };
-export type { TextRequest };
+export type { TextRequest, TextResponse };

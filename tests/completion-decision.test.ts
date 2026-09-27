@@ -1,15 +1,63 @@
 import { expect, test } from "bun:test";
 import type { ActionChoices } from "../src/agent/contracts.ts";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
+import { completionState } from "../src/models/completion-context.ts";
+import { MAX_STATE_CHARS } from "../src/models/decision-context.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
 
-const BINARY_MIDPOINT = 0.5;
 const LONG_REQUEST_REPEATS = 200;
 const LONG_CONTEXT_REPEATS = 100;
 const LONG_PRIOR_REPEATS = 400;
 const MAX_COMMIT_TEST_CHARS = 5000;
 const FINAL_CONSTRAINT = "Final constraint: do not save any other project.";
+const LONG_LABEL_CHARS = 80;
+test("keeps selected result and edited value in a bounded completion observation", () => {
+  const selected = "Selected Morgan Vale conversation";
+  const window = {
+    ...windowFixture(),
+    elements: [
+      {
+        element_index: 0,
+        element_token: "field",
+        role: "AXTextArea",
+        label: "Document text",
+        value: "Requested draft value",
+        editable: true,
+      },
+      ...Array.from({ length: 120 }, (_unused, index) => ({
+        element_index: index + 1,
+        element_token: `row-${index}`,
+        role: "AXRow",
+        label: `Other result ${index} ${"x".repeat(LONG_LABEL_CHARS)}`,
+        actions: ["AXPress"],
+      })),
+      {
+        element_index: 121,
+        element_token: "selected",
+        role: "AXStaticText",
+        label: selected,
+        selected: true,
+        actions: ["AXPress"],
+      },
+    ],
+  };
+  const state = completionState({
+    task: "Open the requested conversation",
+    observation: { desktop: desktopFixture(), window },
+    actions: [{ kind: "blocked", reason: "Stop" }],
+  });
+  const [, evidence] = state.split(
+    "Observed controls and values (listing alone does not prove target content is open): ",
+  );
+  expect(evidence).toBeDefined();
+  expect(evidence?.length).toBeLessThanOrEqual(MAX_STATE_CHARS);
+  expect(evidence).toContain(selected);
+  expect(evidence).toContain("(selected)");
+  expect(evidence).toContain("Requested draft value");
+  expect(evidence?.indexOf(selected)).toBe(evidence?.lastIndexOf(selected));
+  expect(evidence).toContain("observed controls omitted due to size");
+});
 test("can search for the requested person after rejecting the current conversation", async () => {
   const server = Bun.serve({
     port: 0,
@@ -18,12 +66,16 @@ test("can search for the requested person after rejecting the current conversati
       const question = body.questions.next_action.instructions;
       const { criteria } = body.questions.next_action;
       let choice = "A0";
-      if (question.startsWith("Does the selected app")) {
+      if (question.startsWith("Is the final result")) {
         choice = "A1";
       }
       if (question.startsWith("Which operation")) {
         expect(body.state).toContain("Locate the requested target");
-        expect(Object.values(criteria)).toContain("Enter or replace text in an editable field.");
+        expect(
+          Object.values(criteria).some((entry) =>
+            entry.startsWith("Use a visible control in this window"),
+          ),
+        ).toBe(true);
       }
       return Response.json({
         answers: {
@@ -46,7 +98,7 @@ test("can search for the requested person after rejecting the current conversati
       element_token: "s1:1",
       reason: "Type into Search",
     } as const;
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Open my latest text with Alex Smth",
       context: "An earlier task opened a different conversation.",
       observation: { desktop: desktopFixture(), window },
@@ -63,10 +115,15 @@ test("can search for the requested person after rejecting the current conversati
     await server.stop(true);
   }
 });
-const cases: { readonly probability: number; readonly expected: "finish" | "press_key" }[] = [
-  { probability: 0.95, expected: "finish" },
-  { probability: 0.51, expected: "press_key" },
-  { probability: 0.49, expected: "press_key" },
+const cases: {
+  readonly choice: "A0" | "A1";
+  readonly probability: number;
+  readonly expected: "finish" | "press_key";
+}[] = [
+  { choice: "A0", probability: 0.95, expected: "finish" },
+  { choice: "A0", probability: 0.51, expected: "finish" },
+  { choice: "A0", probability: 0.4, expected: "finish" },
+  { choice: "A1", probability: 0.49, expected: "press_key" },
 ];
 function choices(): ActionChoices {
   const target = windowFixture();
@@ -84,8 +141,8 @@ function choices(): ActionChoices {
   ];
 }
 test.each(cases)(
-  "checks observed completion with probability $probability",
-  async ({ probability, expected }) => {
+  "uses categorical completion $choice at probability $probability",
+  async ({ choice, probability, expected }) => {
     let requests = 0;
     const server = Bun.serve({
       port: 0,
@@ -101,7 +158,7 @@ test.each(cases)(
         let answer = { choice: "A0", probabilities: { A0: 1, A1: 0 } };
         if (checking) {
           answer = {
-            choice: probability > BINARY_MIDPOINT ? "A0" : "A1",
+            choice,
             probabilities: { A0: probability, A1: 1 - probability },
           };
         }
@@ -113,7 +170,7 @@ test.each(cases)(
       },
     });
     try {
-      const result = await new SystemOneHttpDecisionModel(server.url.href, "any-model").choose({
+      const result = await new SystemOneDecisionModel(server.url.href, "any-model").choose({
         task: "Find Alex in Messages",
         context: "Search has not been submitted",
         observation: { desktop: desktopFixture(), window: windowFixture() },
@@ -146,7 +203,7 @@ test.each([{ choice: "A0", probabilities: { A0: 0.2, A1: 0 } }])(
     });
     try {
       await expectFailure(
-        new SystemOneHttpDecisionModel(server.url.href, "model").choose({
+        new SystemOneDecisionModel(server.url.href, "model").choose({
           task: "Open Messages",
           observation: { desktop: desktopFixture(), window: windowFixture() },
           actions: choices(),
@@ -171,7 +228,7 @@ test("requires an observed target before accepting a Finish choice", async () =>
     },
   });
   try {
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Open Calendar",
       feedback: "Last tool error: Accessibility permission is missing.",
       observation: { desktop: { apps: [], windows: [] } },
@@ -224,7 +281,7 @@ test.each([
           },
         ],
       };
-      const result = await new SystemOneHttpDecisionModel(server.url.href, "model").choose({
+      const result = await new SystemOneDecisionModel(server.url.href, "model").choose({
         task,
         observation: { desktop: desktopFixture(), window },
         actions: choices(),
@@ -309,7 +366,7 @@ test.each([
               ]
             : windowFixture().elements,
       };
-      const answer = await new SystemOneHttpDecisionModel(server.url.href, "model").choose({
+      const answer = await new SystemOneDecisionModel(server.url.href, "model").choose({
         task: `Create New project ${"detail ".repeat(LONG_REQUEST_REPEATS)} ${FINAL_CONSTRAINT}`,
         observation: { desktop: desktopFixture(), window: resultWindow },
         actions: choices(),

@@ -264,7 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         ready()
         if event.status == .complete {
             statusActivity.complete()
-            content.setStatus("Completed · \(event.decisions ?? 0) decisions", color: .systemGreen)
+            content.setStatus("Completed", color: .systemGreen)
         } else {
             content.setStatus(event.message, color: .systemOrange)
         }

@@ -5,8 +5,9 @@ Enter a task or dictate with Handy. The harness reads live controls, asks the
 model to choose an action, executes it, and checks the resulting state.
 
 The decision model, text model, and computer driver are separate interfaces.
-CLM, Jev, Kev, and other compatible services use the same HTTP adapter. This
-repository does not train a custom decision model.
+App-managed MLX models use JSON messages over private Unix sockets. External
+System One endpoints use HTTP when selected in Settings. This repository does
+not train a custom decision model.
 
 ## macOS app
 
@@ -75,10 +76,10 @@ The browser adapter uses that release's `target` references for clicks and typin
 
 The task dropdown shows:
 
-| Metric              | Definition                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| Median latency · ms | Median System One HTTP decision latency                                                   |
-| Actions / sec       | Model-selected actions divided by active execution time, starting with the first decision |
+| Metric               | Definition                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| Median decision · ms | Median completed System One request latency                                                         |
+| Actions / sec        | Performed model-selected actions divided by task execution time, including time still spent waiting |
 
 Tool operations and observations are included in throughput. Initial model loading is excluded. The menu stays open on submit and does not reopen itself after a task error.
 
@@ -92,36 +93,25 @@ Editing the task field or starting dictation starts model loading before submiss
 
 ## Model services
 
-| Setting                          | Purpose                                      |
-| -------------------------------- | -------------------------------------------- |
-| `SYSTEM_ONE_URL`                 | Complete endpoint, including `/v1/systemone` |
-| `SYSTEM_ONE_MODEL`               | Decision provider's model ID                 |
-| `SYSTEM_ONE_API_KEY`             | Optional bearer token                        |
-| `TEXT_MODEL_URL`                 | Chat-completion endpoint                     |
-| `TEXT_MODEL_ID`                  | Text provider's model ID                     |
-| `TEXT_MODEL_API_KEY`             | Optional bearer token                        |
-| `CUA_MODE`                       | `auto` (default), `browser`, or `desktop`    |
-| `CUA_DRIVER_BIN`                 | CUA executable; defaults to `cua-driver`     |
-| `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Optional explicit Chrome extension token     |
-| `SYSTEM_ONE_TRACE`               | Set to `1` for CLI decision output           |
+| Setting                          | Purpose                                                    |
+| -------------------------------- | ---------------------------------------------------------- |
+| `SYSTEM_ONE_URL`                 | App-managed Unix endpoint or external System One URL       |
+| `SYSTEM_ONE_MODEL`               | Decision provider's model ID                               |
+| `SYSTEM_ONE_API_KEY`             | Optional bearer token                                      |
+| `TEXT_MODEL_URL`                 | App-managed Unix endpoint or external Chat Completions URL |
+| `TEXT_MODEL_ID`                  | Text provider's model ID                                   |
+| `TEXT_MODEL_API_KEY`             | Optional bearer token                                      |
+| `CUA_MODE`                       | `auto` (default), `browser`, or `desktop`                  |
+| `CUA_DRIVER_BIN`                 | CUA executable; defaults to `cua-driver`                   |
+| `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Optional explicit Chrome extension token                   |
+| `SYSTEM_ONE_TRACE`               | Set to `1` for CLI decision output                         |
 
-The optional [CLM MLX integration](integrations/clm-mlx/README.md) runs published
-CLM-8B heads with an MLX Qwen3-8B encoder:
-
-```bash
-uv run --project integrations/clm-mlx --frozen clm-mlx --bits 4
-```
-
-It serves `http://127.0.0.1:8700/v1/systemone` with model ID `clm-latest`.
-A separate small chat model supplies task text. For example:
-
-```bash
-uv tool install mlx-lm==0.31.3
-mlx_lm.server --model mlx-community/Qwen3.5-2B-4bit --port 8080 \
-  --chat-template-args '{"enable_thinking":false}'
-```
-
-For `mlx-lm`, `TEXT_MODEL_ID=default_model` uses the loaded model.
+The app writes its managed endpoints to its private `.env` file. A local endpoint
+has the form `unix:///absolute/path/model.sock?role=decision` or `role=text`.
+Each connection carries one JSON request and one JSON response. The Python
+bridge calls the model library directly; local inference has no HTTP server or
+TCP listening port. Closing the connection cancels the caller's pending request.
+An active decision forward pass can finish before its process accepts another request.
 
 ## CLI
 
@@ -136,13 +126,13 @@ can implement [`DecisionModel`](src/models/system-one.ts).
 
 ## Behavior and limits
 
-External configuration, HTTP responses, model output, and driver data are
+External configuration, socket and HTTP responses, model output, and driver data are
 validated with Zod. Swift validates its IPC messages with Codable. Internal
 TypeScript uses schema-derived types and concrete driver methods.
 
 Actions use current references. CUA's own authorization windows and the harness UI are excluded. Tool failures are included in the next decision; they do not remove access to the other tool set.
 
-The decision model selects tools and termination. The text helper supplies string arguments only when selected: field text, a URL, or an installed application name for the open-application tool. Application names are checked against the installed-app list. Field handles are refreshed after text generation. There is no text-model task planner.
+The decision model selects tools, installed applications, and termination. Selecting desktop tools does not launch an application. The next choice names an exact installed app; the harness checks that name before launch. Large target lists are grouped for model selection. The text helper supplies field text or a URL only when needed. Field handles are refreshed after text generation. There is no text-model task planner.
 
 The loop remembers recent state/action pairs. Repeated controls in the same state become unavailable, including focus cycles that return to an earlier state. Refresh retries are bounded when the screen does not change or the same observation error persists. Other tools and terminal choices remain available. There is no total action limit.
 
@@ -150,7 +140,7 @@ Opening the current URL or selected app is idempotent. Text responses must end n
 
 Actions are grouped by operation, with native menus grouped by their observed top-level menu. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
 
-Completion uses the observed app, window title, URL, and field values. Inline editors and dialogs get a separate check for an unobserved saved or submitted result, so matching text alone does not prove a save. If the screen changes before Finish, completion is checked again against the fresh observation. Primary score cutoffs are policy settings, not calibrated accuracy estimates; secondary target and saved-result checks use their selected answers.
+Completion uses the observed app, window title, URL, and field values. Inline editors and dialogs get a separate check for an unobserved saved or submitted result, so matching text alone does not prove a save. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.
@@ -202,7 +192,8 @@ page update was checked separately to verify the bounded observation retry.
 
 Task traces separate `observationMs`, `decisionMs`, and `actionMs`. Request
 latency varies with screen size and cache state; a large Calendar observation
-can take much longer than a small page. The menu shows the measured mean for
-the current task.
+can take much longer than a small page. Request events record the phase, result,
+and duration, including an unfinished request when a task is stopped. The menu
+shows the median request latency for the current task.
 
 See [validation](docs/validation.md) for installed-app checks and their limits.

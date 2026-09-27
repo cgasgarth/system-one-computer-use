@@ -3,9 +3,10 @@ import type { ModelPreferences } from "./catalog.ts";
 import type { RuntimePaths } from "./commands.ts";
 import { ModelSlot } from "./slot.ts";
 import { writePreferences } from "./preferences.ts";
+import { prepareSocketDirectory, socketPaths } from "./sockets.ts";
+import type { SocketPaths } from "./sockets.ts";
+import { forwardRequest } from "./forward.ts";
 
-const DECISION_PORT = 18_700;
-const TEXT_PORT = 18_800;
 const IDLE_MS = 300_000;
 interface HostOptions {
   readonly paths: RuntimePaths;
@@ -14,18 +15,21 @@ interface HostOptions {
 class ModelHost {
   public readonly decision: ModelSlot;
   public readonly text: ModelSlot;
+  public readonly sockets: SocketPaths;
   private preferences: ModelPreferences;
   private timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private held = false;
   private prewarming = false;
   private closed = false;
+  private closing: Promise<void> | undefined = undefined;
   private activeRequests = 0;
   public constructor(options: HostOptions) {
     this.preferences = options.preferences;
+    this.sockets = socketPaths(options.paths.data);
     this.decision = new ModelSlot({
       role: "decision",
       selection: options.preferences.decision,
-      port: DECISION_PORT,
+      socketPath: this.sockets.decision,
       paths: options.paths,
       changed: (): void => {
         this.snapshot();
@@ -34,7 +38,7 @@ class ModelHost {
     this.text = new ModelSlot({
       role: "text",
       selection: options.preferences.text,
-      port: TEXT_PORT,
+      socketPath: this.sockets.text,
       paths: options.paths,
       changed: (): void => {
         this.snapshot();
@@ -55,20 +59,33 @@ class ModelHost {
     );
   }
   public async boot(): Promise<void> {
-    await writePreferences(this.preferences);
+    this.assertOpen();
+    await prepareSocketDirectory(this.sockets);
+    this.assertOpen();
+    await writePreferences(this.preferences, this.sockets);
+    this.assertOpen();
     this.snapshot();
     this.schedule();
   }
   public async configure(preferences: Readonly<ModelPreferences>): Promise<void> {
+    this.assertOpen();
     clearTimeout(this.timer);
-    this.preferences = preferences;
-    await ModelHost.select(this.decision, preferences.decision);
-    await ModelHost.select(this.text, preferences.text);
-    await writePreferences(preferences);
-    this.snapshot();
-    await this.decision.ensure();
-    await this.text.ensure();
-    this.schedule();
+    try {
+      this.preferences = preferences;
+      await ModelHost.select(this.decision, preferences.decision);
+      this.assertOpen();
+      await ModelHost.select(this.text, preferences.text);
+      this.assertOpen();
+      await writePreferences(preferences, this.sockets);
+      this.assertOpen();
+      this.snapshot();
+      await this.decision.ensure();
+      this.assertOpen();
+      await this.text.ensure();
+      this.assertOpen();
+    } finally {
+      this.schedule();
+    }
   }
   private static async select(
     slot: Readonly<ModelSlot>,
@@ -81,22 +98,49 @@ class ModelHost {
     slot.select(selection);
   }
   public async warm(): Promise<void> {
+    this.assertOpen();
     clearTimeout(this.timer);
     this.prewarming = true;
-    await this.decision.ensure();
-    await this.text.ensure();
-    console.log(JSON.stringify({ event: "warmed" }));
-    this.schedule();
+    let warmed = false;
+    try {
+      await this.decision.ensure();
+      this.assertOpen();
+      await this.text.ensure();
+      this.assertOpen();
+      warmed = true;
+      console.log(JSON.stringify({ event: "warmed" }));
+    } finally {
+      if (!warmed) {
+        this.prewarming = false;
+      }
+      this.schedule();
+    }
   }
   public async prepare(requestId: string): Promise<void> {
+    this.assertOpen();
+    const wasHeld = this.held;
     this.held = true;
     this.prewarming = false;
     clearTimeout(this.timer);
-    await this.decision.ensure();
-    await this.text.ensure();
-    console.log(JSON.stringify({ event: "prepared", requestId }));
+    let prepared = false;
+    try {
+      await this.decision.ensure();
+      this.assertOpen();
+      await this.text.ensure();
+      this.assertOpen();
+      prepared = true;
+      console.log(JSON.stringify({ event: "prepared", requestId }));
+    } finally {
+      if (!prepared) {
+        this.held = wasHeld;
+        this.schedule();
+      }
+    }
   }
   public release(): void {
+    if (this.closed) {
+      return;
+    }
     this.held = false;
     this.schedule();
   }
@@ -130,27 +174,19 @@ class ModelHost {
       }
     }
   }
-  public async forward(request: Request, slot: Readonly<ModelSlot>): Promise<Response> {
+  public async forward(
+    request: Parameters<typeof forwardRequest>[1],
+    signal: Readonly<AbortSignal>,
+  ): ReturnType<typeof forwardRequest> {
+    this.assertOpen();
     this.activeRequests += 1;
     clearTimeout(this.timer);
     try {
+      const slot = this[request.role];
       await slot.ensure();
-      const headers = new Headers(request.headers);
-      headers.delete("host");
-      headers.delete("content-length");
-      const response = await fetch(slot.endpoint(), {
-        method: request.method,
-        headers,
-        body: await request.arrayBuffer(),
-        signal: request.signal,
-      });
-      const responseHeaders = new Headers(response.headers);
-      responseHeaders.delete("content-encoding");
-      responseHeaders.delete("content-length");
-      return new Response(await response.arrayBuffer(), {
-        status: response.status,
-        headers: responseHeaders,
-      });
+      this.assertOpen();
+      signal.throwIfAborted();
+      return await forwardRequest(slot, request, signal);
     } finally {
       this.activeRequests -= 1;
       this.schedule();
@@ -165,9 +201,21 @@ class ModelHost {
     );
   }
   public async close(): Promise<void> {
+    if (this.closing !== undefined) {
+      return this.closing;
+    }
     this.closed = true;
     clearTimeout(this.timer);
-    await Promise.all([this.decision.unload(), this.text.unload()]);
+    this.closing = this.closeSlots();
+    await this.closing;
+  }
+  private async closeSlots(): Promise<void> {
+    await Promise.all([this.decision.close(), this.text.close()]);
+  }
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error("Model host is closed");
+    }
   }
 }
 export { ModelHost };

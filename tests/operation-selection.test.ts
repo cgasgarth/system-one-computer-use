@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SystemOneHttpDecisionModel } from "../src/models/system-one.ts";
+import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 import type { ActionChoices } from "../src/agent/contracts.ts";
@@ -22,11 +22,23 @@ test("selects an operation before a compatible target and records both distribut
         });
       }
       if (question.startsWith("Which operation")) {
-        expect(Object.values(body.questions.next_action.criteria)).toContain(
-          "Enter or replace text in an editable field.",
-        );
+        expect(
+          Object.values(body.questions.next_action.criteria).some((item) =>
+            item.startsWith("Use a visible control in this window"),
+          ),
+        ).toBe(true);
         return Response.json({
-          answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0, A2: 0 } } },
+          answers: {
+            next_action: {
+              choice: "A0",
+              probabilities: Object.fromEntries(
+                Object.keys(body.questions.next_action.criteria).map((key) => [
+                  key,
+                  Number(key === "A0"),
+                ]),
+              ),
+            },
+          },
         });
       }
       if (question.startsWith("Does entering")) {
@@ -36,15 +48,16 @@ test("selects an operation before a compatible target and records both distribut
       }
       expect(Object.values(body.questions.next_action.criteria)).toEqual([
         "Enter message",
+        "Click. Save document",
         "None of these targets; choose another operation without taking an action.",
       ]);
       return Response.json({
-        answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } } },
+        answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0, A2: 0 } } },
       });
     },
   });
   try {
-    const result = await new SystemOneHttpDecisionModel(server.url.href, "test").choose({
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
       task: "Write hello",
       mode: "desktop",
       actions,
@@ -52,7 +65,9 @@ test("selects an operation before a compatible target and records both distribut
     });
     expect(result.action.kind).toBe("compose_text");
     expect(result.operation?.answer.choice).toBe("A0");
-    expect(result.candidates).toEqual(actions.filter((action) => action.kind === "compose_text"));
+    expect(result.candidates).toEqual(
+      actions.filter((action) => action.kind === "compose_text" || action.kind === "click_element"),
+    );
   } finally {
     await server.stop(true);
   }

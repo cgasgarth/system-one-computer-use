@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const patterns = [
   "{src,tests,scripts}/**/*.{ts,tsx,js,mjs,html,css}",
   "integrations/clm-mlx/src/**/*.py",
+  "integrations/local-bridge/**/*.py",
   "native/**/*.swift",
 ];
 const groups = await Promise.all(

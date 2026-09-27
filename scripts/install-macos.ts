@@ -48,8 +48,15 @@ const info = {
   ToolSearchPath: Bun.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
 };
 
-async function command(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
-  const child = Bun.spawn([...args], { stderr: "pipe", stdout: "pipe" });
+async function command(
+  args: readonly string[],
+  environment?: Readonly<NodeJS.ProcessEnv>,
+): Promise<{ stdout: string; stderr: string }> {
+  const child = Bun.spawn([...args], {
+    stderr: "pipe",
+    stdout: "pipe",
+    ...(environment === undefined ? {} : { env: environment }),
+  });
   const [status, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -207,6 +214,11 @@ async function prepareRuntime(): Promise<void> {
     path.join(root, "integrations/kev-mlx/download.py"),
     path.join(contents, "Resources", "integrations/kev-mlx/download.py"),
   );
+  await mkdir(path.join(contents, "Resources", "integrations/local-bridge"), { recursive: true });
+  await cp(
+    path.join(root, "integrations/local-bridge/serve.py"),
+    path.join(contents, "Resources", "integrations/local-bridge/serve.py"),
+  );
   const environment = path.join(data, ".env");
   if (!(await Bun.file(environment).exists())) {
     await cp(path.join(root, ".env"), environment);
@@ -255,6 +267,33 @@ async function buildSignedApp(selectedIdentity: string): Promise<void> {
   await command(["codesign", "--verify", "--deep", "--strict", app]);
 }
 
+async function syncManagedRuntimes(): Promise<void> {
+  const uv = path.join(installedApp, "Contents", "MacOS", "uv");
+  const results = await Promise.allSettled(
+    ["clm-mlx", "kev-mlx"].map(async (project) =>
+      command(
+        [
+          uv,
+          "sync",
+          "--project",
+          path.join(installedApp, "Contents", "Resources", "integrations", project),
+          "--frozen",
+          "--no-editable",
+          "--quiet",
+        ],
+        {
+          ...Bun.env,
+          UV_PROJECT_ENVIRONMENT: path.join(data, "runtimes", project),
+        },
+      ),
+    ),
+  );
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    throw failed.reason;
+  }
+}
+
 async function swapInstalledApp(previousInstall: boolean): Promise<void> {
   const backup = path.join(applications, `.system-one-backup-${crypto.randomUUID()}.app`);
   if (previousInstall) {
@@ -262,6 +301,8 @@ async function swapInstalledApp(previousInstall: boolean): Promise<void> {
   }
   try {
     await rename(app, installedApp);
+    await command(["codesign", "--verify", "--deep", "--strict", installedApp]);
+    await syncManagedRuntimes();
     await command(["codesign", "--verify", "--deep", "--strict", installedApp]);
   } catch (error) {
     await rm(installedApp, { recursive: true, force: true });

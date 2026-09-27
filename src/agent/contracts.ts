@@ -73,7 +73,7 @@ const actionSchema = z.discriminatedUnion("kind", [
     reason,
   }),
   z.strictObject({ kind: z.literal("request_url"), reason }),
-  z.strictObject({ kind: z.literal("request_app"), reason }),
+  z.strictObject({ kind: z.literal("request_app"), name: z.string().min(1), reason }),
   z.strictObject({ kind: z.literal("refresh"), reason }),
   z.strictObject({ kind: z.literal("blocked"), reason }),
   z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),

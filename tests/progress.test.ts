@@ -1,6 +1,7 @@
 import type { Action } from "../src/agent/contracts.ts";
 import { expect, test } from "bun:test";
 import { Progress } from "../src/agent/progress.ts";
+import { textFieldKey } from "../src/agent/state-key.ts";
 import { options } from "../src/agent/options.ts";
 import { runTask } from "../src/agent/loop.ts";
 import type { Decision, DecisionInput } from "../src/models/system-one.ts";
@@ -107,14 +108,119 @@ test("keeps native controls available when reopening the same app has no effect"
   const observation = { desktop: desktopFixture(), window: windowFixture() };
   progress.record({ kind: "application", name: observation.window.app_name });
   const choices = progress.choices(
-    options({ mode: "desktop", observation, applications: [] }),
+    options({ mode: "desktop", observation, applications: ["Messages", "Other"] }),
     observation,
   );
-  expect(choices.find((action) => action.kind === "request_app")?.reason).toContain(
-    "another installed application",
-  );
+  expect(choices.find((action) => action.kind === "request_app")?.name).toBe("Other");
   expect(choices.some((action) => action.kind === "compose_text")).toBe(true);
   expect(choices.some((action) => action.kind === "select_surface")).toBe(true);
+});
+
+test("search can be revised after a result change but not after focus or frame changes", () => {
+  const progress = new Progress();
+  const search = {
+    element_index: 1,
+    element_token: "search",
+    role: "AXTextField",
+    subrole: "AXSearchField",
+    label: "Search",
+    value: "",
+    editable: true,
+  };
+  const result = {
+    element_index: 2,
+    element_token: "result",
+    role: "AXStaticText",
+    label: "Initial list",
+  };
+  const before = {
+    desktop: desktopFixture(),
+    window: { ...windowFixture(), elements: [search, result] },
+  };
+  const typedSearch = {
+    ...search,
+    value: "Morgn Vale",
+    focused: true,
+    frame: { x: 1, y: 2, w: 3, h: 4 },
+  };
+  const typed = { ...before, window: { ...before.window, elements: [typedSearch, result] } };
+  const changed = {
+    ...typed,
+    window: {
+      ...typed.window,
+      elements: [typedSearch, { ...result, label: "Changed result list" }],
+    },
+  };
+  const action = {
+    kind: "compose_text",
+    pid: before.window.pid,
+    window_id: before.window.window_id,
+    element_token: search.element_token,
+    reason: "Type in Search",
+  } as const;
+  const satisfied = textFieldKey(typed, search.element_token);
+  if (satisfied === undefined) {
+    throw new Error("Search identity unavailable");
+  }
+  progress.observe(before);
+  progress.record(undefined, satisfied);
+  progress.advanced(action, true);
+  progress.attempted(action, before);
+  progress.observe(typed);
+  expect(
+    progress
+      .choices(options({ mode: "desktop", observation: typed, applications: [] }), typed)
+      .some((candidate) => candidate.kind === "compose_text"),
+  ).toBe(false);
+  progress.observe(changed);
+  expect(
+    progress
+      .choices(options({ mode: "desktop", observation: changed, applications: [] }), changed)
+      .some((candidate) => candidate.kind === "compose_text"),
+  ).toBe(true);
+});
+
+test("result changes do not reopen a satisfied non-search input", () => {
+  const progress = new Progress();
+  const editor = {
+    element_index: 1,
+    element_token: "editor",
+    role: "textbox",
+    label: "Document text",
+    value: "New text",
+    editable: true,
+  };
+  const first = {
+    desktop: desktopFixture(),
+    window: {
+      ...windowFixture(),
+      elements: [
+        editor,
+        { element_index: 2, element_token: "result", role: "heading", label: "First" },
+      ],
+    },
+  };
+  const changed = {
+    ...first,
+    window: {
+      ...first.window,
+      elements: [
+        editor,
+        { element_index: 2, element_token: "result", role: "heading", label: "Changed" },
+      ],
+    },
+  };
+  const key = textFieldKey(first, editor.element_token);
+  if (key === undefined) {
+    throw new Error("Editor identity unavailable");
+  }
+  progress.record(undefined, key);
+  progress.observe(changed);
+  expect(
+    progress
+      .choices(options({ mode: "browser", observation: changed, applications: [] }), changed)
+      .some((candidate) => candidate.kind === "compose_text"),
+  ).toBe(false);
 });
 
 test("blocks repeated control actions across snapshot handles until visible state changes", () => {
@@ -183,10 +289,19 @@ test("keeps no-window app progress when another application's title changes", ()
   progress.record({ kind: "application", name: app.name });
   const changed = { ...observation, desktop: { ...observation.desktop, windows: [] } };
   progress.observe(changed);
-  const actions = options({ mode: "desktop", observation: changed, applications: [] });
+  const actions = options({
+    mode: "desktop",
+    observation: changed,
+    applications: ["Image Viewer", "Other"],
+  });
+  const choices = progress.choices(actions, changed);
   expect(
-    progress.choices(actions, changed).find((action) => action.kind === "request_app")?.reason,
-  ).toContain("reopening it has no effect");
+    choices.some((action) => action.kind === "request_app" && action.name === "Image Viewer"),
+  ).toBe(false);
+  expect(choices.some((action) => action.kind === "request_app" && action.name === "Other")).toBe(
+    true,
+  );
+  expect(progress.context(changed)).toContain("Reopening the application has no effect");
 });
 
 test("stops retrying the same observation failure and restores refresh after recovery", () => {
@@ -246,16 +361,17 @@ test("detects a repeated focus cycle across two different states", () => {
   expect(available.some((action) => action.kind === "select_surface")).toBe(true);
 });
 
-test("offers other tools after repeated app-launch failures in an unchanged desktop", () => {
+test("does not relaunch a successfully opened app without task progress", () => {
   const progress = new Progress();
   const observation = { desktop: desktopFixture() };
   const action = {
     kind: "request_app",
+    name: "Messages",
     reason: "Open an installed application on this Mac.",
   } as const;
   progress.observe(observation);
   progress.attempted(action, observation);
-  progress.attempted(action, observation);
+  progress.advanced(action, true);
   const choices = progress.choices(
     options({ mode: "desktop", observation, applications: ["Messages"] }),
     observation,
@@ -264,6 +380,49 @@ test("offers other tools after repeated app-launch failures in an unchanged desk
   expect(choices.some((candidate) => candidate.kind === "observe_window")).toBe(true);
   expect(choices.some((candidate) => candidate.kind === "select_surface")).toBe(true);
   expect(choices.some((candidate) => candidate.kind === "blocked")).toBe(true);
+  const changed = { desktop: { apps: observation.desktop.apps, windows: [] } };
+  progress.observe(changed);
+  const afterStateChange = options({
+    mode: "desktop",
+    observation: changed,
+    applications: ["Messages"],
+  });
+  expect(
+    progress
+      .choices(afterStateChange, changed)
+      .some((candidate) => candidate.kind === "request_app"),
+  ).toBe(false);
+  progress.advanced(
+    {
+      kind: "click_element",
+      pid: 7,
+      window_id: 9,
+      element_token: "button",
+      reason: "Activate control",
+    },
+    true,
+  );
+  expect(
+    progress
+      .choices(afterStateChange, changed)
+      .some((candidate) => candidate.kind === "request_app"),
+  ).toBe(true);
+});
+
+test("a failed app launch may be retried before the per-state repetition limit", () => {
+  const progress = new Progress();
+  const observation = { desktop: desktopFixture() };
+  const action = { kind: "request_app", name: "Messages", reason: "Open Messages" } as const;
+  const offered = options({ mode: "desktop", observation, applications: ["Messages"] });
+  progress.observe(observation);
+  progress.attempted(action, observation);
+  expect(
+    progress.choices(offered, observation).some((candidate) => candidate.kind === "request_app"),
+  ).toBe(true);
+  progress.attempted(action, observation);
+  expect(
+    progress.choices(offered, observation).some((candidate) => candidate.kind === "request_app"),
+  ).toBe(false);
   const changed = { desktop: { apps: observation.desktop.apps, windows: [] } };
   progress.observe(changed);
   expect(

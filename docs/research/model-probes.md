@@ -276,3 +276,10 @@ current DOM inspection recognizes only an HTML submit button/input attached
 to a POST form. These fixture Save/Create buttons use that pattern. A JS
 button that writes through `fetch` is outside this mechanical detector, so
 any gain in this ablation does not establish general write protection.
+
+The M/A/T thresholds above describe a historical development ablation.
+The current harness uses the model's selected categorical answer for
+completion, relevance, commit authorization, and field readiness. It still
+validates the returned probability distribution, but does not impose a
+separate confidence floor. This policy change has not established task
+success; it requires outcome grading on independent tasks.

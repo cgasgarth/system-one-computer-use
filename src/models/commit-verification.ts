@@ -4,8 +4,6 @@ import type { ActionCheck } from "./decision-verification.ts";
 import type { DecisionInput } from "./system-one.ts";
 import type { BinaryAnswer, DecisionRequest } from "./system-one-schema.ts";
 
-const COMMIT_CONFIDENCE = 0.9;
-const MISSING_CHANGE_CONFIDENCE = 0.55;
 const AUTHORIZATION_FIELDS_CHARS = 1200;
 const CHECK_ROLES = new Set([
   "checkbox",
@@ -16,7 +14,8 @@ const CHECK_ROLES = new Set([
   "AXRadioButton",
   "AXPopUpButton",
 ]);
-type Judge = (request: DecisionRequest) => Promise<BinaryAnswer>;
+type CommitJudgePhase = "commit-classification" | "commit-authorization" | "field-readiness";
+type Judge = (request: DecisionRequest, phase: CommitJudgePhase) => Promise<BinaryAnswer>;
 
 function question(input: {
   readonly model: string;
@@ -113,6 +112,7 @@ async function verifyCommit({
             yes: "Yes. It saves, creates, sends, submits, deletes, or changes stored data now.",
             no: "No. It only opens, chooses, navigates, or closes a view without a persistent data change.",
           }),
+          "commit-classification",
         );
   const checks: ActionCheck[] = [
     {
@@ -145,12 +145,10 @@ async function verifyCommit({
       yes: `Activate ${clicked} now as a requested step and store the observed form values; a later requested step may undo this change.`,
       no: `Do not activate ${clicked} now; this stored result is not requested or is premature.`,
     }),
+    "commit-authorization",
   );
   checks.push({ action, answer: authorization, phase: "commit-authorization" });
-  if (
-    authorization.choice !== "A0" ||
-    (authorization.probabilities["A0"] ?? 0) < COMMIT_CONFIDENCE
-  ) {
+  if (authorization.choice !== "A0") {
     return { allowed: false, checks };
   }
   const { window } = input.observation;
@@ -169,6 +167,7 @@ async function verifyCommit({
         yes: "Yes. The request specifies a different value or state for this field.",
         no: "No. This field already matches the request, or the request does not mention it.",
       }),
+      "field-readiness",
     );
     checks.push({
       action,
@@ -176,7 +175,7 @@ async function verifyCommit({
       phase: "field-readiness",
       control: { role: field.role, label: field.label ?? "" },
     });
-    if (answer.choice === "A0" && (answer.probabilities["A0"] ?? 0) >= MISSING_CHANGE_CONFIDENCE) {
+    if (answer.choice === "A0") {
       return { allowed: false, checks };
     }
   }

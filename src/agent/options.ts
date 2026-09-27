@@ -153,19 +153,23 @@ function surfaceOptions(context: OptionContext): Action[] {
     return [];
   }
   if (context.mode === "desktop" && context.needsApplication === true) {
-    return [
-      { kind: "request_app", reason: "Open the application needed for the current user request." },
-    ];
+    return context.applications.map((name): Action => ({
+      kind: "request_app",
+      name,
+      reason: `Open installed application ${name}`.slice(0, MAX_REASON),
+    }));
   }
   const actions = desktopTargets(context);
   if (context.mode === "desktop") {
-    actions.push({
-      kind: "request_app",
-      reason:
-        context.observation.window === undefined
-          ? "Open an installed application on this Mac."
-          : "Switch to another installed Mac application.",
-    });
+    actions.push(
+      ...context.applications
+        .filter((name) => context.observation.window?.app_name !== name)
+        .map((name): Action => ({
+          kind: "request_app",
+          name,
+          reason: `Open installed application ${name}`.slice(0, MAX_REASON),
+        })),
+    );
   }
   if (context.mode === "browser") {
     actions.push({
