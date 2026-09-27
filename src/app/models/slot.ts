@@ -13,7 +13,7 @@ import {
   resolvedBaseFingerprint,
   writeManifest,
 } from "./artifacts.ts";
-import type { ArtifactManifest } from "./artifacts.ts";
+import type { ArtifactFetcher, ArtifactManifest } from "./artifacts.ts";
 import { startProcess } from "./process.ts";
 import type { ModelProcess } from "./process.ts";
 import { verifySocketReady } from "./ready.ts";
@@ -23,13 +23,19 @@ const STARTUP_TIMEOUT_MS = 180_000;
 const PRIVATE_SOCKET = 0o600;
 type LoadState = "unloaded" | "downloading" | "loading" | "ready" | "error";
 async function selectedBase(
-  command: ReadonlyDeep<ModelCommand>,
-  manifest: ReadonlyDeep<ArtifactManifest>,
+  input: Readonly<{
+    command: ReadonlyDeep<ModelCommand>;
+    manifest: ReadonlyDeep<ArtifactManifest>;
+    signal: Readonly<AbortSignal>;
+    fetcher: ArtifactFetcher;
+  }>,
 ): Promise<ArtifactManifest["base"]> {
+  const { command, manifest, signal, fetcher } = input;
   if (command.baseOutput === undefined) {
     return undefined;
   }
   const declared = await readBaseOutput(command.baseOutput);
+  signal.throwIfAborted();
   if (
     manifest.base?.repository === declared.repository &&
     manifest.base.revision === declared.revision &&
@@ -37,7 +43,7 @@ async function selectedBase(
   ) {
     return manifest.base;
   }
-  return resolvedBaseFingerprint(declared);
+  return resolvedBaseFingerprint(declared, fetcher, signal);
 }
 interface SlotStatus {
   readonly role: ModelRole;
@@ -58,18 +64,21 @@ class ModelSlot {
   public readonly socketPath: string;
   private readonly paths: RuntimePaths;
   private readonly changed: () => void;
+  private readonly artifactFetch: ArtifactFetcher;
   public constructor(options: {
     readonly role: ModelRole;
     readonly selection: ModelSelection;
     readonly socketPath: string;
     readonly paths: RuntimePaths;
     readonly changed: () => void;
+    readonly artifactFetch?: ArtifactFetcher;
   }) {
     this.role = options.role;
     this.selection = options.selection;
     this.socketPath = options.socketPath;
     this.paths = options.paths;
     this.changed = options.changed;
+    this.artifactFetch = options.artifactFetch ?? fetch;
   }
   public status(): SlotStatus {
     return { role: this.role, selection: this.selection, state: this.state, message: this.message };
@@ -103,7 +112,7 @@ class ModelSlot {
     }
     const model = preset(this.selection.id);
     const previous = await readManifest(this.paths.data, model);
-    const latest = await latestManifest(model);
+    const latest = await latestManifest(model, this.artifactFetch, this.abort.signal);
     if (previous !== undefined && !hasNewerArtifacts(previous, latest)) {
       return false;
     }
@@ -150,18 +159,31 @@ class ModelSlot {
       throw new Error("This model does not support the selected role");
     }
     const manifest =
-      candidate ?? (await readManifest(this.paths.data, model)) ?? (await latestManifest(model));
+      candidate ??
+      (await readManifest(this.paths.data, model)) ??
+      (await latestManifest(model, this.artifactFetch, this.abort.signal));
     const command = commands({ model, socket: this.socketPath, paths: this.paths, manifest });
     const log = path.join(this.paths.data, "logs", `${model.id}.log`);
     await this.download(command, log, model.name);
     this.abort.signal.throwIfAborted();
     await this.serve(command, log, model.name);
-    const base = await selectedBase(command, manifest);
+    const base = await selectedBase({
+      command,
+      manifest,
+      signal: this.abort.signal,
+      fetcher: this.artifactFetch,
+    });
+    this.abort.signal.throwIfAborted();
+    this.assertOpen();
     await writeManifest(
       this.paths.data,
       model,
       base === undefined ? manifest : { ...manifest, base },
+      this.abort.signal,
     );
+    this.abort.signal.throwIfAborted();
+    this.assertOpen();
+    this.update("ready", `${model.name} is ready`);
   }
   private async download(
     command: ReadonlyDeep<ModelCommand>,
@@ -206,7 +228,6 @@ class ModelSlot {
       signal: this.abort.signal,
       timeoutMs: STARTUP_TIMEOUT_MS,
     });
-    this.update("ready", `${name} is ready`);
   }
   public async unload(): Promise<void> {
     this.unloading ??= this.unloadTracked();

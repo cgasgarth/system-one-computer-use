@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, rename } from "node:fs/promises";
+import { chmod, mkdir, rename, rm } from "node:fs/promises";
 import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 import { modelIdSchema } from "./catalog.ts";
@@ -49,7 +49,7 @@ interface SourceSpec {
 type ArtifactManifest = z.infer<typeof artifactManifestSchema>;
 // The fetch SDK owns RequestInit's mutable shape at this external boundary.
 // eslint-disable-next-line typescript/prefer-readonly-parameter-types
-type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
+type ArtifactFetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
 function sourceSpecs(model: Readonly<Preset>): readonly SourceSpec[] {
   if (model.family === "clm") {
@@ -126,20 +126,28 @@ async function readManifest(
 async function readBaseOutput(file: string): Promise<z.infer<typeof baseSchema>> {
   return baseSchema.parse(await Bun.file(file).json());
 }
+// The optional signal guards the atomic acceptance step after file preparation.
+// eslint-disable-next-line eslint/max-params
 async function writeManifest(
   data: string,
   model: Readonly<Preset>,
   manifest: ReadonlyDeep<ArtifactManifest>,
+  signal?: Readonly<AbortSignal>,
 ): Promise<void> {
   const file = manifestPath(data, model);
   await mkdir(path.dirname(file), { recursive: true, mode: PRIVATE_DIRECTORY });
   const temporary = `${file}.${crypto.randomUUID()}.tmp`;
-  await Bun.write(temporary, JSON.stringify(manifest));
-  await chmod(temporary, PRIVATE_FILE);
-  await rename(temporary, file);
+  try {
+    await Bun.write(temporary, JSON.stringify(manifest));
+    await chmod(temporary, PRIVATE_FILE);
+    signal?.throwIfAborted();
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 interface HubLookup {
-  readonly fetcher: Fetcher;
+  readonly fetcher: ArtifactFetcher;
   readonly signal?: Readonly<AbortSignal> | undefined;
   readonly revision?: string;
 }
@@ -161,7 +169,7 @@ async function hubInfo(
 }
 async function latestManifest(
   model: Readonly<Preset>,
-  fetcher: Fetcher = fetch,
+  fetcher: ArtifactFetcher = fetch,
   signal?: Readonly<AbortSignal>,
 ): Promise<ArtifactManifest> {
   const sources = await Promise.all(
@@ -182,9 +190,10 @@ async function latestManifest(
 }
 async function resolvedBaseFingerprint(
   base: Readonly<z.infer<typeof baseSchema>>,
-  fetcher: Fetcher = fetch,
+  fetcher: ArtifactFetcher = fetch,
+  signal?: Readonly<AbortSignal>,
 ): Promise<z.infer<typeof baseSchema>> {
-  const info = await hubInfo(base.repository, { fetcher, revision: base.revision });
+  const info = await hubInfo(base.repository, { fetcher, revision: base.revision, signal });
   if (info.sha !== base.revision || info.siblings === undefined) {
     throw new Error("The checkpoint-declared base did not resolve to its exact revision.");
   }
@@ -216,4 +225,4 @@ export {
   validateManifest,
   writeManifest,
 };
-export type { ArtifactManifest };
+export type { ArtifactFetcher, ArtifactManifest };
