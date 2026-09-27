@@ -1,7 +1,7 @@
 import { runTask } from "../agent/loop.ts";
 import { createComputer, createModels, loadConfig } from "./config.ts";
 import { installedApplications } from "../computer/applications.ts";
-import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
+import { ComputerSessions } from "./computers.ts";
 import { taskTextSchema } from "./task-schema.ts";
 import { SessionStore } from "./sessions/store.ts";
 import { sessionContext } from "./sessions/context.ts";
@@ -15,21 +15,12 @@ const models = createModels(config);
 const sessions = new SessionStore("runs/sessions");
 const task = taskTextSchema.parse(Bun.argv.slice(ARGUMENT_OFFSET).join(" "));
 const { handle, session } = await sessions.begin(task);
-const computers = new Map<ComputerMode, ManagedComputer>();
+const computers = new ComputerSessions((mode) => createComputer(config, mode));
 const steps: TaskStep[] = [];
-function computer(mode: ComputerMode): ManagedComputer {
-  const existing = computers.get(mode);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const created = createComputer(config, mode);
-  computers.set(mode, created);
-  return created;
-}
 try {
   const result = await runTask({
     ...models,
-    computer,
+    computer: (mode) => computers.get(mode),
     task,
     context: sessionContext(session),
     applications: await installedApplications(),
@@ -66,5 +57,5 @@ try {
   });
   throw error;
 } finally {
-  await Promise.all([...computers.values()].map(async (driver) => driver.close()));
+  await computers.close();
 }

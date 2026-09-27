@@ -3,7 +3,7 @@ import { runTask } from "../agent/loop.ts";
 import { ActionSelectionError } from "../models/action-selection-error.ts";
 import { describeAction } from "../agent/contracts.ts";
 import { createComputer, createModels, installedApplications, loadConfig } from "./config.ts";
-import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
+import { ComputerSessions } from "./computers.ts";
 import { taskInputSchema } from "./task-schema.ts";
 import { SessionStore } from "./sessions/store.ts";
 import type { TurnHandle } from "./sessions/store.ts";
@@ -14,7 +14,7 @@ import type { TraceModels } from "./task-trace.ts";
 const config = loadConfig();
 const models = createModels(config);
 const sessions = new SessionStore();
-const computers = new Map<ComputerMode, ManagedComputer>();
+const computers = new ComputerSessions((mode) => createComputer(config, mode));
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const shutdown = new AbortController();
 function endpointOrigin(value: string): string {
@@ -28,24 +28,11 @@ const identities: TraceModels = {
   },
   text: { modelId: config.TEXT_MODEL_ID, endpointOrigin: endpointOrigin(config.TEXT_MODEL_URL) },
 };
-function computerFor(mode: ComputerMode): ManagedComputer {
-  const existing = computers.get(mode);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const computer = createComputer(config, mode);
-  computers.set(mode, computer);
-  return computer;
-}
 async function closeComputers(): Promise<void> {
-  const current = [...computers.values()];
-  computers.clear();
-  await Promise.all(current.map(async (computer) => computer.close()));
+  await computers.close();
 }
 async function closeNativeTask(): Promise<void> {
-  const native = computers.get("desktop");
-  computers.delete("desktop");
-  await native?.close();
+  await computers.closeDesktop();
 }
 // The worker has no active task until it receives the first request.
 // eslint-disable-next-line eslint/init-declarations
@@ -160,7 +147,7 @@ async function executeTask(line: string, execution: Readonly<Execution>): Promis
   const result = await runTask({
     decision: models.decision,
     text: execution.textModel(),
-    computer: computerFor,
+    computer: (mode) => computers.get(mode),
     applications: await installedApplications(),
     task: request.task,
     context: sessionContext(session),
