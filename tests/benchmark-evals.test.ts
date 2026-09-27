@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { checkClmWeights } from "../scripts/evals/benchmark/benchmark-artifacts.ts";
 import type { ArtifactSelection } from "../scripts/evals/benchmark/benchmark-artifacts.ts";
-import { cases, grade, zeroWrites } from "../scripts/evals/benchmark/benchmark-cases.ts";
+import { infrastructureGrade } from "../scripts/evals/benchmark/benchmark-infrastructure.ts";
+import { initialStateHash } from "../scripts/evals/benchmark/benchmark-state.ts";
+import {
+  cases,
+  grade,
+  writeCounts,
+  zeroWrites,
+} from "../scripts/evals/benchmark/benchmark-cases.ts";
 import { decisionPresets, plan } from "../scripts/evals/benchmark/benchmark-plan.ts";
 import { median, summarize } from "../scripts/evals/benchmark/benchmark-stats.ts";
 import type { TrialRecord } from "../scripts/evals/benchmark/benchmark-stats.ts";
@@ -43,6 +50,9 @@ function trial(overrides: Partial<TrialRecord>): TrialRecord {
     caseId: "open-document",
     trial: 1,
     outcome: "success",
+    gradedOutcome: "success",
+    taskStatus: "complete",
+    driverErrors: [],
     taskMs: SUCCESS_MS,
     turns: 3,
     decisionRequests: 5,
@@ -145,5 +155,78 @@ describe("benchmark matrix", () => {
     expect(() => {
       checkClmWeights([q4, clmArtifact("clm-8b-q8", "e".repeat(FINGERPRINT_LENGTH))]);
     }).toThrow("different head assets");
+  });
+});
+describe("fixture isolation", () => {
+  test("fixture reset preserves origin and restores writes and document content", async () => {
+    const fixture = workspace();
+    const originalOrigin = fixture.origin;
+    const response = await fetch(`${fixture.origin}/save`, {
+      method: "POST",
+      body: new URLSearchParams({ id: "r-8", body: "Changed in QA" }),
+    });
+    expect(response.ok).toBe(true);
+    expect(fixture.saves()).toBe(ONE_POST);
+    fixture.reset();
+    expect(fixture.origin).toBe(originalOrigin);
+    expect(fixture.saves()).toBe(0);
+    expect(fixture.document("r-8")?.body).toBe("Discuss milestones on Tuesday.");
+  });
+  test("a resolved click that times out is infrastructure-invalid even when writes are missing", () => {
+    const step = {
+      error: "Playwright browser_click failed: TimeoutError: locator resolved but was not visible",
+    };
+    const graded = infrastructureGrade("wrong-write-count", [step]);
+    expect(graded.outcome).toBe("infrastructure-invalid");
+    expect(graded.driverErrors).toHaveLength(1);
+  });
+  test("reset restores every fixture write and the initial logical state hash", async () => {
+    const fixture = workspace();
+    const initial = initialStateHash(fixture, window(`${fixture.origin}/`));
+    await Promise.all([
+      fetch(`${fixture.origin}/save`, {
+        method: "POST",
+        body: new URLSearchParams({ id: "r-8", body: "Changed in QA" }),
+      }),
+      fetch(`${fixture.origin}/profile`, {
+        method: "POST",
+        body: new URLSearchParams({
+          displayName: "QA",
+          summary: "Changed",
+          priority: "high",
+          updates: "on",
+          visibility: "private",
+        }),
+      }),
+      fetch(`${fixture.origin}/projects`, {
+        method: "POST",
+        body: new URLSearchParams({ name: "Temporary" }),
+      }),
+      fetch(`${fixture.origin}/projects/cancel`, {
+        method: "POST",
+        body: new URLSearchParams({ name: "Cancelled" }),
+      }),
+      fetch(`${fixture.origin}/volatile`, { method: "POST" }),
+      fetch(`${fixture.origin}/select-values`, {
+        method: "POST",
+        body: new URLSearchParams({ priority: "high-priority" }),
+      }),
+      fetch(`${fixture.origin}/select-duplicate`, {
+        method: "POST",
+        body: new URLSearchParams({ priority: "external-high" }),
+      }),
+    ]);
+    expect(initialStateHash(fixture, window(`${fixture.origin}/`))).not.toBe(initial);
+    fixture.reset();
+    expect(writeCounts(fixture)).toEqual(zeroWrites);
+    expect(initialStateHash(fixture, window(`${fixture.origin}/`))).toBe(initial);
+    const [documentPage, projectPage, profilePage] = await Promise.all([
+      fetch(`${fixture.origin}/item/r-8`).then(async (response) => response.text()),
+      fetch(`${fixture.origin}/projects`).then(async (response) => response.text()),
+      fetch(`${fixture.origin}/profile`).then(async (response) => response.text()),
+    ]);
+    expect(documentPage).toContain("Discuss milestones on Tuesday.");
+    expect(projectPage).not.toContain("Temporary");
+    expect(profilePage).toContain("Initial name");
   });
 });

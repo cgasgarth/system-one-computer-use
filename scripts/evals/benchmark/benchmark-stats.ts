@@ -10,12 +10,17 @@ type Outcome =
   | "format"
   | "timeout"
   | "model-error"
-  | "driver-error";
+  | "driver-error"
+  | "infrastructure-invalid";
 interface TrialRecord {
   readonly modelId: string;
   readonly caseId: string;
   readonly trial: number;
   readonly outcome: Outcome;
+  readonly gradedOutcome: Outcome;
+  readonly taskStatus: "complete" | "blocked" | "error" | "not-started";
+  readonly driverErrors: readonly string[];
+  readonly initialStateHash?: string;
   readonly taskMs: number;
   readonly turns: number;
   readonly decisionRequests: number;
@@ -71,6 +76,7 @@ function summarize(modelId: string, trials: readonly TrialRecord[]): Summary {
     timeout: count("timeout"),
     "model-error": count("model-error"),
     "driver-error": count("driver-error"),
+    "infrastructure-invalid": count("infrastructure-invalid"),
   };
   return {
     modelId,

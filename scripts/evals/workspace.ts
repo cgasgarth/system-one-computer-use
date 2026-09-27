@@ -16,6 +16,7 @@ const profileInput = z.object({
 type Profile = z.infer<typeof profileInput>;
 interface Workspace {
   readonly origin: string;
+  readonly reset: () => void;
   readonly document: (id: string) => Readonly<Document> | undefined;
   readonly saves: () => number;
   readonly profile: () => Readonly<Profile>;
@@ -296,8 +297,11 @@ function readRoute(state: WorkspaceState, url: URL): Response {
   }
   return documentsPage(state, url);
 }
-function createHandler(state: WorkspaceState): (request: Request) => Promise<Response> {
+function createHandler(
+  currentState: () => WorkspaceState,
+): (request: Request) => Promise<Response> {
   return async (request): Promise<Response> => {
+    const state = currentState();
     const url = new URL(request.url);
     return (
       (request.method === "POST" ? await writeRoute(state, request, url) : undefined) ??
@@ -305,8 +309,8 @@ function createHandler(state: WorkspaceState): (request: Request) => Promise<Res
     );
   };
 }
-function startWorkspace(): Workspace {
-  const state: WorkspaceState = {
+function initialState(): WorkspaceState {
+  return {
     documents: new Map<string, Document>([
       ["r-8", { title: "Roadmap Review", body: "Discuss milestones on Tuesday." }],
       ["c-3", { title: "Release Checklist", body: "Review the release checklist." }],
@@ -334,9 +338,15 @@ function startWorkspace(): Workspace {
     duplicateChoice: "internal-high",
     duplicateSaveCount: 0,
   };
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: createHandler(state) });
+}
+function startWorkspace(): Workspace {
+  let state = initialState();
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: createHandler(() => state) });
   return {
     origin: server.url.origin,
+    reset: () => {
+      state = initialState();
+    },
     document: (id) => state.documents.get(id),
     saves: () => state.saveCount,
     profile: () => state.profile,
@@ -362,5 +372,4 @@ function startWorkspace(): Workspace {
     },
   };
 }
-export { startWorkspace };
-export type { Workspace };
+export { startWorkspace, type Workspace };

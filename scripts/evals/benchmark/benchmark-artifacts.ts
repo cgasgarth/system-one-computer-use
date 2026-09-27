@@ -1,5 +1,11 @@
-import { latestManifest } from "../../../src/app/models/artifacts.ts";
+import { z } from "zod";
+import {
+  artifactManifestSchema,
+  latestManifest,
+  validateManifest,
+} from "../../../src/app/models/artifacts.ts";
 import type { ArtifactManifest } from "../../../src/app/models/artifacts.ts";
+import { modelIdSchema } from "../../../src/app/models/catalog.ts";
 import type { Preset } from "../../../src/app/models/catalog.ts";
 import type { ReadonlyDeep } from "type-fest";
 
@@ -16,6 +22,20 @@ type ArtifactSelection =
       readonly lookupMs: number;
       readonly reason: string;
     };
+const savedSelectionSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("resolved"),
+    modelId: modelIdSchema,
+    lookupMs: z.number(),
+    manifest: artifactManifestSchema,
+  }),
+  z.object({
+    status: z.literal("lookup-failed"),
+    modelId: modelIdSchema,
+    lookupMs: z.number(),
+    reason: z.string(),
+  }),
+]);
 function sourceFingerprint(manifest: ReadonlyDeep<ArtifactManifest>, role: string): string {
   const source = manifest.sources.find((entry) => entry.role === role);
   if (source === undefined) {
@@ -76,5 +96,26 @@ function preparedArtifact(
   const found = selections.find((item) => item.modelId === model.id);
   return found?.status === "resolved" ? found.manifest : undefined;
 }
-export { checkClmWeights, preparedArtifact, resolveArtifacts };
+async function savedArtifacts(input: {
+  readonly path: string;
+  readonly models: readonly Readonly<Preset>[];
+}): Promise<{ readonly selections: readonly ArtifactSelection[]; readonly sha256: string }> {
+  const content = await Bun.file(input.path).text();
+  const saved = z
+    .object({ preparedArtifacts: z.array(savedSelectionSchema) })
+    .parse(JSON.parse(content));
+  const selections = input.models.map((model) => {
+    const found = saved.preparedArtifacts.find((item) => item.modelId === model.id);
+    if (found?.status !== "resolved") {
+      throw new Error(`The saved artifact snapshot lacks a resolved ${model.id} preset.`);
+    }
+    return { ...found, manifest: validateManifest(found.manifest, model) };
+  });
+  checkClmWeights(selections);
+  return {
+    selections,
+    sha256: new Bun.CryptoHasher("sha256").update(content).digest("hex"),
+  };
+}
+export { checkClmWeights, preparedArtifact, resolveArtifacts, savedArtifacts };
 export type { ArtifactSelection };
