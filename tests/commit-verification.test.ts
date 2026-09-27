@@ -127,6 +127,84 @@ test("allows Save after a requested field change is observed", async () => {
   expect(authorizationState).toContain('current value "Draft"');
 });
 
+test("authorization binds duplicate Save controls to their observed rows", async () => {
+  const rows: Window = {
+    ...window,
+    elements: [
+      { element_index: 0, element_token: "row-roadmap", role: "row", label: "Roadmap" },
+      {
+        element_index: 1,
+        parent_index: 0,
+        element_token: "save-roadmap",
+        role: "button",
+        label: "Save",
+        actions: ["AXPress"],
+      },
+      {
+        element_index: 2,
+        parent_index: 0,
+        element_token: "name-roadmap",
+        role: "textbox",
+        label: "Name",
+        value: "Draft",
+        editable: true,
+      },
+      { element_index: 3, element_token: "row-release", role: "row", label: "Release" },
+      {
+        element_index: 4,
+        parent_index: 3,
+        element_token: "save-release",
+        role: "button",
+        label: "Save",
+        actions: ["AXPress"],
+      },
+      {
+        element_index: 5,
+        parent_index: 3,
+        element_token: "name-release",
+        role: "textbox",
+        label: "Name",
+        value: "Existing",
+        editable: true,
+      },
+    ],
+  };
+  let authorizationState = "";
+  const fieldStates: string[] = [];
+  const result = await verifyCommit({
+    action: { ...action, element_token: "save-roadmap" },
+    input: {
+      task: "Save the Roadmap draft",
+      observation: { desktop: desktopFixture(), window: rows },
+      actions: [{ ...action, element_token: "save-roadmap" }],
+    },
+    model: "test",
+    async judge(request, phase) {
+      if (phase === "commit-authorization") {
+        authorizationState = request.state;
+      }
+      if (phase === "field-readiness") {
+        fieldStates.push(request.state);
+      }
+      return phase === "field-readiness" ? no : yes;
+    },
+  });
+  expect(result.allowed).toBe(true);
+  expect(authorizationState).toContain(
+    'Proposed action: activate button "Save" inside row "Roadmap"',
+  );
+  expect(
+    fieldStates.some((state) =>
+      state.includes('textbox "Name"; observed context inside row "Roadmap"'),
+    ),
+  ).toBe(true);
+  expect(
+    fieldStates.some((state) =>
+      state.includes('textbox "Name"; observed context inside row "Release"'),
+    ),
+  ).toBe(true);
+});
+
 test.each(["A0", "A1"] as const)(
   "uses categorical authorization and field-readiness answers (%s)",
   async (fieldChoice) => {

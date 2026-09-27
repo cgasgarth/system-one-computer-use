@@ -41,6 +41,60 @@ test("offers both surfaces and terminal choices before opening a browser", () =>
     "blocked",
   ]);
 });
+test("selects browser tools before a separate URL decision", async () => {
+  const { computer: desktop } = computerFixture();
+  let navigations = 0;
+  let decisions = 0;
+  let writerCalls = 0;
+  const browser: ManagedComputer = {
+    ...desktop,
+    async desktop() {
+      return {
+        apps: [{ name: "Google Chrome", pid: 0 }],
+        windows: [{ app_name: "Google Chrome", pid: 0, window_id: 0, title: "Blank" }],
+      };
+    },
+    async window() {
+      return {
+        app_name: "Google Chrome",
+        pid: 0,
+        window_id: 0,
+        window_title: "Blank",
+        snapshot_id: "blank",
+        url: "about:blank",
+        elements: [],
+      };
+    },
+    async navigate() {
+      navigations += 1;
+    },
+  };
+  const result = await runTask({
+    task: "Open a page in the browser",
+    applications: [],
+    computer: (mode) => (mode === "browser" ? browser : desktop),
+    text: {
+      async generate() {
+        writerCalls += 1;
+        return "https://example.test";
+      },
+    },
+    decision: {
+      async choose(input) {
+        decisions += 1;
+        if (decisions === 1) {
+          return pick(input, "select_surface", "browser");
+        }
+        expect(input.mode).toBe("browser");
+        expect(input.actions.some((action) => action.kind === "request_url")).toBe(true);
+        return pick(input, "blocked");
+      },
+    },
+  });
+  expect(result.steps.map((step) => step.action.kind)).toEqual(["select_surface", "blocked"]);
+  expect(navigations).toBe(0);
+  expect(writerCalls).toBe(0);
+});
 test("keeps switching and terminal actions available on every surface", () => {
   for (const mode of ["browser", "desktop"] as const) {
     const choices = options({
@@ -153,38 +207,6 @@ test("blocked summary reduces structured validator errors to readable text", asy
   expect(result.status).toBe("blocked");
   expect(result.summary).toContain("Invalid URL");
   expect(result.summary).not.toContain("[");
-});
-test("passes the latest completion assessment only within the current request", async () => {
-  const expectedDecisions = 2;
-  const { computer } = computerFixture();
-  let decisions = 0;
-  const result = await runTask({
-    task: "Create a project",
-    preferredSurface: "desktop",
-    applications: [],
-    computer: () => computer,
-    text: textFixture(),
-    decision: {
-      async choose(input) {
-        decisions += 1;
-        if (decisions === 1) {
-          expect(input.priorCompletionCommit).toBeUndefined();
-          return {
-            ...pick(input, "observe_window"),
-            completionCommit: { choice: "A0", probabilities: { A0: 0.54, A1: 0.46 } },
-          };
-        }
-        expect(input.priorCompletionCommit).toMatchObject({
-          answer: { choice: "A0", probabilities: { A0: 0.54, A1: 0.46 } },
-          stepIndex: 1,
-        });
-        expect(input.priorCompletionCommit?.observedState).toContain("Messages");
-        return pick(input, "blocked");
-      },
-    },
-  });
-  expect(result.status).toBe("blocked");
-  expect(decisions).toBe(expectedDecisions);
 });
 test("validates element targets against the fresh snapshot", () => {
   const action: Action = {

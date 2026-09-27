@@ -16,11 +16,6 @@ test("selects an operation before a compatible target and records both distribut
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const question = body.questions.next_action.instructions;
-      if (question.startsWith("Has this")) {
-        return Response.json({
-          answers: { next_action: { choice: "A1", probabilities: { A0: 0, A1: 1 } } },
-        });
-      }
       if (question.startsWith("Which operation")) {
         expect(
           Object.values(body.questions.next_action.criteria).some((item) =>

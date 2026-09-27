@@ -3,6 +3,21 @@ import { rm } from "node:fs/promises";
 import { z } from "zod";
 import { TaskTrace } from "../src/app/task-trace.ts";
 
+const answerSummarySchema = z.object({
+  choice: z.string(),
+  selectedProbability: z.number().optional(),
+});
+const requestAnswersSchema = z.object({
+  next_action: answerSummarySchema,
+});
+const requestEventSchema = z.object({
+  phase: z.string(),
+  status: z.string(),
+  choice: z.string().optional(),
+  selectedProbability: z.number().optional(),
+  questionCount: z.number().optional(),
+  answers: requestAnswersSchema.optional(),
+});
 const savedSchema = z.object({
   status: z.enum(["running", "stopped", "error"]),
   task: z.string(),
@@ -11,15 +26,13 @@ const savedSchema = z.object({
   modelRequests: z.object({
     total: z.number(),
     decision: z.number(),
-    active: z.object({ phase: z.string(), candidateCount: z.number(), elapsedMs: z.number() }),
-    recent: z.array(
-      z.object({
-        phase: z.string(),
-        status: z.string(),
-        choice: z.string().optional(),
-        selectedProbability: z.number().optional(),
-      }),
-    ),
+    active: z.object({
+      phase: z.string(),
+      candidateCount: z.number(),
+      questionCount: z.number(),
+      elapsedMs: z.number(),
+    }),
+    recent: z.array(requestEventSchema),
   }),
   decisions: z.number(),
 });
@@ -31,6 +44,7 @@ test("saves the active model phase before an interrupted decision finishes", asy
   const completedRequestMs = 5;
   const selectedProbability = 0.8;
   const requestCount = 2;
+  const operationQuestions = 1;
   const trace = new TaskTrace({
     decision: { modelId: "decision-qa", endpointOrigin: "http://127.0.0.1:8700" },
     text: { modelId: "text-qa", endpointOrigin: "http://127.0.0.1:8080" },
@@ -38,16 +52,25 @@ test("saves the active model phase before an interrupted decision finishes", asy
   try {
     trace.begin("Open the fixture", "qa-session");
     trace.setStage({ stage: "decision", stepIndex: 1 });
-    trace.modelRequest({ phase: "completion", status: "start", candidateCount });
     trace.modelRequest({
-      phase: "completion",
+      phase: "operation",
+      status: "start",
+      candidateCount,
+      questionCount: operationQuestions,
+    });
+    trace.modelRequest({
+      phase: "operation",
       status: "ok",
       candidateCount,
+      questionCount: operationQuestions,
       elapsedMs: completedRequestMs,
       choice: "A0",
       selectedProbability,
+      answers: {
+        next_action: { choice: "A0", selectedProbability },
+      },
     });
-    trace.modelRequest({ phase: "target", status: "start", candidateCount });
+    trace.modelRequest({ phase: "target", status: "start", candidateCount, questionCount: 1 });
     const active = savedSchema.parse(await Bun.file(trace.checkpointPath).json());
     expect(active.status).toBe("running");
     expect(active.decisions).toBe(0);
@@ -55,11 +78,19 @@ test("saves the active model phase before an interrupted decision finishes", asy
     expect(active.modelRequests.total).toBe(requestCount);
     expect(active.modelRequests.active.phase).toBe("target");
     expect(active.modelRequests.active.candidateCount).toBe(candidateCount);
+    expect(active.modelRequests.active.questionCount).toBe(1);
     expect(
       active.modelRequests.recent.find(
-        (event) => event.phase === "completion" && event.status === "ok",
+        (event) => event.phase === "operation" && event.status === "ok",
       ),
-    ).toMatchObject({ choice: "A0", selectedProbability });
+    ).toMatchObject({
+      choice: "A0",
+      selectedProbability,
+      questionCount: operationQuestions,
+      answers: {
+        next_action: { choice: "A0" },
+      },
+    });
     trace.saveFailure("stopped", "Stopped by user");
     const stopped = savedSchema.parse(await Bun.file(trace.failurePath).json());
     expect(stopped.status).toBe("stopped");

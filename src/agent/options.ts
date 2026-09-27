@@ -1,6 +1,8 @@
 import type { Action, ActionChoices, Observation, Window } from "./contracts.ts";
 import { isEditableElement, validateActions } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
+import { normalizedHttpUrl, taskUrls } from "./url-addresses.ts";
+import type { Surface } from "../app/sessions/schema.ts";
 
 const OPERATIONS = [
   { capability: "AXPress", operation: "press", verb: "Activate" },
@@ -9,7 +11,12 @@ const OPERATIONS = [
   { capability: "AXOpen", operation: "open", verb: "Open" },
 ] as const;
 const MAX_REASON = 280;
+const SINGLE_LINE_INPUT_ROLES = new Set(["AXTextField", "textbox", "searchbox"]);
+const CHOICE_ROLES = new Set(["AXPopUpButton", "AXList", "combobox", "listbox", "option"]);
+const DIALOG_ROLES = new Set(["AXDialog", "AXSheet", "AXPopover", "dialog", "alertdialog"]);
 interface OptionContext {
+  readonly task?: string;
+  readonly previousSurface?: Surface;
   readonly needsApplication?: boolean;
   readonly mode: "browser" | "desktop" | undefined;
   readonly observation: Observation;
@@ -94,11 +101,27 @@ function controlName(element: Window["elements"][number], window: Window): strin
   const value = String(element.value).trim();
   return value.length > 0 ? value : undefined;
 }
-function keyboardOptions(window: Window, actions: readonly Action[]): readonly string[] {
-  const directControl = actions.some((action) => action.kind === "click_element");
-  const focused = !directControl && window.elements.some((element) => element.focused === true);
-  const keys = focused ? ["return", "escape", "tab", "down", "up"] : [];
-  return keys;
+function keyboardOptions(
+  window: Window,
+): readonly { readonly key: string; readonly token: string }[] {
+  const focused = window.elements.filter(
+    (element) => element.focused === true && element.enabled !== false,
+  );
+  const [control] = focused;
+  if (focused.length !== 1 || control === undefined) {
+    return [];
+  }
+  const text = SINGLE_LINE_INPUT_ROLES.has(control.role) && isEditableElement(control);
+  const choice = CHOICE_ROLES.has(control.role);
+  const confirm = control.actions?.includes("AXConfirm") === true;
+  const dialog = window.elements.some((element) => DIALOG_ROLES.has(element.role));
+  const keys = [
+    ...(text || choice || confirm ? ["return"] : []),
+    ...(dialog || choice ? ["escape"] : []),
+    ...(text || choice ? ["tab"] : []),
+    ...(choice ? ["down", "up"] : []),
+  ];
+  return keys.map((key) => ({ key, token: control.element_token }));
 }
 function windowInputs(window: Window): Action[] {
   const actions: Action[] = [];
@@ -135,18 +158,48 @@ function windowInputs(window: Window): Action[] {
       }
     }
   }
-  const keys = keyboardOptions(window, actions);
-  for (const key of keys) {
+  const keys = keyboardOptions(window);
+  for (const { key, token } of keys) {
     actions.push({
       kind: "press_key",
       pid: window.pid,
       window_id: window.window_id,
+      element_token: token,
       key,
       modifiers: [],
       reason: `Press ${key}`,
     });
   }
   return actions;
+}
+function browserDestinations(context: OptionContext): Action[] {
+  const supplied = taskUrls(context.task ?? "");
+  const previous =
+    context.previousSurface?.kind === "browser"
+      ? normalizedHttpUrl(context.previousSurface.url)
+      : undefined;
+  const current = normalizedHttpUrl(context.observation.window?.url ?? "");
+  return [
+    ...supplied.map((url): Action => ({
+      kind: "navigate",
+      url,
+      reason: `Open supplied URL ${url}`.slice(0, MAX_REASON),
+    })),
+    ...(previous === undefined || previous === current || supplied.includes(previous)
+      ? []
+      : [
+          {
+            kind: "navigate" as const,
+            url: previous,
+            reason:
+              `Return to previous session browser page ${JSON.stringify(context.previousSurface?.title ?? "")} at ${previous}`.slice(
+                0,
+                MAX_REASON,
+              ),
+          },
+        ]),
+    { kind: "request_url", reason: "Open a URL in Chrome." },
+  ];
 }
 function surfaceOptions(context: OptionContext): Action[] {
   if (context.observationFailed === true) {
@@ -172,10 +225,7 @@ function surfaceOptions(context: OptionContext): Action[] {
     );
   }
   if (context.mode === "browser") {
-    actions.push({
-      kind: "request_url",
-      reason: "Open a URL in Chrome.",
-    });
+    actions.push(...browserDestinations(context));
   }
   if (context.mode !== undefined && context.observation.window !== undefined) {
     const { window } = context.observation;

@@ -1,21 +1,12 @@
 import type { Action, ActionChoices, Observation } from "../agent/contracts.ts";
-import {
-  actionDescription,
-  actionGroups,
-  criteriaFor,
-  decisionState,
-  describeControl,
-} from "./decision-context.ts";
-import { completionState, completionTargetState } from "./completion-context.ts";
+import { actionDescription, actionGroups, criteriaFor, decisionState } from "./decision-context.ts";
 import type { OperationDecision } from "./decision-context.ts";
 import type { ClickInspection } from "../computer/types.ts";
 import { requestDecision } from "./decision-request.ts";
 import type { DecisionRequestContext, DecisionRequestPhase } from "./decision-request.ts";
-import { verificationRequest } from "./decision-verification.ts";
-import { hasEditableContent, hasPendingDialogDraft } from "./completion-evidence.ts";
 import { ActionSelectionError } from "./action-selection-error.ts";
 import { verifyCommit } from "./commit-verification.ts";
-import type { ActionCheck } from "./decision-verification.ts";
+import type { ActionCheck } from "./action-check.ts";
 import { binaryAnswerSchema } from "./system-one-schema.ts";
 import type {
   ActionProbabilities,
@@ -25,22 +16,16 @@ import type {
   DecisionResponse,
 } from "./system-one-schema.ts";
 
-const COMMIT_CONTROLS_CHARS = 2200;
-const COMMIT_PRIOR_CHARS = 900;
-const COMMIT_CONTEXT_CHARS = 400;
-const COMMIT_EVIDENCE_CHARS = 500;
-const COMMIT_LOCATION_CHARS = 300;
 const PROBABILITY_TOLERANCE = 0.02;
 const COMPLETION_CLASSES = 2;
 const MAX_OPERATION_PASSES = 2;
 const MAX_TARGETS_PER_PAGE = 255;
+const MAX_REQUESTS_PER_DECISION = 20;
+const MAX_DECISION_MS = 60_000;
 interface Decision {
   readonly action: Action;
   readonly latencyMs: number;
   readonly probabilities: ActionProbabilities;
-  readonly completion?: BinaryAnswer;
-  readonly completionTarget?: BinaryAnswer;
-  readonly completionCommit?: BinaryAnswer;
   readonly checks?: readonly ActionCheck[];
   readonly operation?: OperationDecision;
   readonly rejectedOperations?: readonly OperationDecision[];
@@ -53,12 +38,6 @@ interface DecisionInput extends DecisionRequestContext {
   readonly actions: ActionChoices;
   readonly context?: string;
   readonly feedback?: string;
-  readonly completionEvidence?: string;
-  readonly priorCompletionCommit?: {
-    readonly answer: BinaryAnswer;
-    readonly observedState: string;
-    readonly stepIndex: number;
-  };
   readonly inspectClick?: (
     action: Extract<Action, { kind: "click_element" }>,
   ) => Promise<ClickInspection>;
@@ -67,12 +46,6 @@ interface DecisionInput extends DecisionRequestContext {
 interface DecisionModel {
   readonly choose: (input: DecisionInput) => Promise<Decision>;
 }
-function excerpt(value: string, limit: number): string {
-  return value.length <= limit
-    ? value
-    : `${value.slice(0, limit)} [${value.length - limit} characters omitted from this excerpt]`;
-}
-
 function validProbabilities(probabilities: ActionProbabilities, count: number): boolean {
   const keys = Object.keys(probabilities);
   const sum = Object.values(probabilities).reduce((total, value) => total + value, 0);
@@ -96,17 +69,6 @@ function decision(
   return { action, latencyMs: timing.latencyMs, probabilities: answer.probabilities };
 }
 
-function finishEligible(
-  complete: boolean,
-  target: BinaryAnswer | undefined,
-  commit: BinaryAnswer | undefined,
-): boolean {
-  return (
-    complete &&
-    (target === undefined || target.choice === "A0") &&
-    (commit === undefined || commit.choice === "A1")
-  );
-}
 class SystemOneDecisionModel implements DecisionModel {
   private readonly apiKey: string | undefined;
   private readonly endpoint: string;
@@ -118,61 +80,41 @@ class SystemOneDecisionModel implements DecisionModel {
     this.apiKey = apiKey;
   }
 
-  // Completion evidence has independent checks for target and unsubmitted dialog state.
-  // eslint-disable-next-line eslint/complexity
-  public async choose(input: DecisionInput): Promise<Decision> {
-    const checkCompletion =
-      input.observation.window !== undefined || input.observation.application !== undefined;
-    const start = performance.now();
-    const completion = checkCompletion ? await this.checkCompletion(input) : undefined;
-    const pendingDraft = hasPendingDialogDraft(input.observation.window);
-    const complete = completion?.choice === "A0";
-    const completionTarget =
-      complete && (input.context?.length ?? 0) > 0
-        ? await this.checkCompletionTarget(input)
-        : undefined;
-    const priorCommit = input.priorCompletionCommit?.answer;
-    const unresolvedCommit = priorCommit?.choice === "A0";
-    const completionCommit =
-      complete && (pendingDraft || hasEditableContent(input.observation.window) || unresolvedCommit)
-        ? await this.checkCompletionCommit(input)
-        : undefined;
-    if (completion !== undefined && finishEligible(complete, completionTarget, completionCommit)) {
-      const action = input.actions.find((candidate) => candidate.kind === "finish");
-      if (action === undefined) {
-        throw new Error("The completion decision has no Finish option");
-      }
-      return {
-        action,
-        completion,
-        ...(completionTarget === undefined ? {} : { completionTarget }),
-        ...(completionCommit === undefined ? {} : { completionCommit }),
-        probabilities: completion.probabilities,
-        latencyMs: performance.now() - start,
-      };
-    }
-    const available = checkCompletion
-      ? input.actions.filter((action) => action.kind !== "finish")
-      : input.actions;
-    const targetUnconfirmed = completionTarget?.choice === "A1";
-    const recoveryInput = targetUnconfirmed
-      ? {
-          ...input,
-          feedback: [
-            input.feedback ?? "",
-            "The current view has not been confirmed as the requested target. Locate the requested target using the observed controls. All available tools remain usable; do not treat the task as complete.",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+  // One current observation grounds completion, target identity, and persistence.
+  public async choose(initial: DecisionInput): Promise<Decision> {
+    initial.signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(MAX_DECISION_MS);
+    const signal =
+      initial.signal === undefined ? deadline : AbortSignal.any([initial.signal, deadline]);
+    let requests = 0;
+    const input: DecisionInput = {
+      ...initial,
+      signal,
+      beforeRequest: () => {
+        signal.throwIfAborted();
+        if (requests >= MAX_REQUESTS_PER_DECISION) {
+          throw new Error(
+            `Decision stalled on this observation after ${requests} model requests. Stopped before the next action. Refresh the screen or narrow the request.`,
+          );
         }
-      : input;
-    const selected = await this.chooseAvailable(recoveryInput, available, start);
-    return {
-      ...selected,
-      ...(completion === undefined ? {} : { completion }),
-      ...(completionTarget === undefined ? {} : { completionTarget }),
-      ...(completionCommit === undefined ? {} : { completionCommit }),
+        requests += 1;
+      },
     };
+    try {
+      return await this.chooseObserved(input);
+    } catch (error) {
+      if (deadline.aborted && initial.signal?.aborted !== true) {
+        throw new Error(
+          `Decision stalled on this observation after ${requests} model requests and ${MAX_DECISION_MS} ms. Stopped before the next action. Refresh the screen or narrow the request.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async chooseObserved(input: DecisionInput): Promise<Decision> {
+    return this.chooseAvailable(input, input.actions, performance.now());
   }
 
   // The bounded retry keeps operation and target evidence together.
@@ -416,125 +358,26 @@ class SystemOneDecisionModel implements DecisionModel {
     selected: Decision,
     started: number,
   ): Promise<{ readonly decision?: Decision; readonly checks: readonly ActionCheck[] }> {
-    const checks: ActionCheck[] = [];
-    const observable =
-      input.observation.window !== undefined || input.observation.application !== undefined;
     const { action } = selected;
-    if (action.kind === "finish" && !observable) {
-      return { checks };
+    if (action.kind === "finish") {
+      return { decision: { ...selected, latencyMs: performance.now() - started }, checks: [] };
     }
-    const request = verificationRequest(action, input, this.modelId);
-    let check: BinaryAnswer | undefined = undefined;
-    if (request !== undefined) {
-      const response = await this.request(input, "action-verification", request);
-      check = binaryAnswerSchema.parse(response.answers.next_action);
-      if (!validProbabilities(check.probabilities, COMPLETION_CLASSES)) {
-        throw new Error("System One returned an invalid action verification");
-      }
-      checks.push({ action, answer: check });
+    if (action.kind === "blocked") {
+      return { decision: { ...selected, latencyMs: performance.now() - started }, checks: [] };
     }
-    if (check === undefined || check.choice === "A0") {
-      // An ordinary action match does not authorize a persistent effect.
-      const commit = await verifyCommit({
-        action,
-        input,
-        model: this.modelId,
-        judge: async (query, phase) => this.judge(input, query, phase),
-      });
-      checks.push(...commit.checks);
-      if (commit.allowed) {
-        return {
+    // An ordinary action match does not authorize a persistent effect.
+    const commit = await verifyCommit({
+      action,
+      input,
+      model: this.modelId,
+      judge: async (query, phase) => this.judge(input, query, phase),
+    });
+    return commit.allowed
+      ? {
           decision: { ...selected, latencyMs: performance.now() - started },
-          checks,
-        };
-      }
-    }
-    return { checks };
-  }
-
-  private async checkCompletion(input: DecisionInput): Promise<BinaryAnswer> {
-    const response = await this.request(input, "completion", {
-      model: this.modelId,
-      state: completionState(input),
-      questions: {
-        next_action: {
-          type: "choice",
-          instructions: `Has this user request been completed: ${input.task}?`,
-          criteria: {
-            A0: "true: The request is complete.",
-            A1: "false: The request is not complete.",
-          },
-        },
-      },
-    });
-    const answer = binaryAnswerSchema.parse(response.answers.next_action);
-    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
-      throw new Error("System One returned an invalid completion decision");
-    }
-    return answer;
-  }
-
-  private async checkCompletionTarget(input: DecisionInput): Promise<BinaryAnswer> {
-    const response = await this.request(input, "completion-target", {
-      model: this.modelId,
-      state: completionTargetState(input),
-      questions: {
-        next_action: {
-          type: "choice",
-          instructions:
-            "Is the final result requested in the current request already displayed in this selected app or window? A matching row, link, or search result that can still be opened is only an available next action. Use previous session context only to resolve references left unspecified by the current request.",
-          criteria: {
-            A0: "Yes. The requested final view or content is already open or displayed.",
-            A1: "No. Only a selectable target is visible, or the requested final result is not yet displayed.",
-          },
-        },
-      },
-    });
-    const answer = binaryAnswerSchema.parse(response.answers.next_action);
-    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
-      throw new Error("System One returned an invalid target verification");
-    }
-    return answer;
-  }
-
-  private async checkCompletionCommit(input: DecisionInput): Promise<BinaryAnswer> {
-    const { window } = input.observation;
-    const controls = window?.elements.map((element) => describeControl(element)).join(" | ") ?? "";
-    const prior = input.priorCompletionCommit;
-    const response = await this.request(input, "completion-commit", {
-      model: this.modelId,
-      state: [
-        `User request: ${input.task}`,
-        `Current window: ${window === undefined ? "None" : excerpt(window.app_name, COMMIT_LOCATION_CHARS)}: ${window === undefined ? "None" : excerpt(window.window_title, COMMIT_LOCATION_CHARS)}`,
-        ...(window?.url === undefined
-          ? []
-          : [`Current URL: ${excerpt(window.url, COMMIT_LOCATION_CHARS)}`]),
-        `Current observed controls and values: ${excerpt(controls, COMMIT_CONTROLS_CHARS)}`,
-        `Prior task context: ${excerpt(input.context ?? "", COMMIT_CONTEXT_CHARS)}`,
-        `Executed actions in this request: ${excerpt(input.completionEvidence ?? "", COMMIT_EVIDENCE_CHARS)}`,
-        ...(prior === undefined
-          ? []
-          : [
-              `Earlier assessment in this request at step ${prior.stepIndex}: ${prior.answer.choice} with probabilities ${JSON.stringify(prior.answer.probabilities)}. Earlier observed state: ${excerpt(prior.observedState, COMMIT_PRIOR_CHARS)}. Re-evaluate against the current observation; this assessment is not proof of a saved result.`,
-            ]),
-        "Field contents and a successful click do not alone prove a saved result. An omitted control in an excerpt is not proof that the control is absent.",
-      ].join("\n"),
-      questions: {
-        next_action: {
-          type: "choice",
-          instructions: "Is a requested persistent result still unobserved?",
-          criteria: {
-            A0: "Yes. The user requested a created, saved, or submitted result that is not yet observed.",
-            A1: "No. The requested result is observed, or the request asks only for a view or unsubmitted draft.",
-          },
-        },
-      },
-    });
-    const answer = binaryAnswerSchema.parse(response.answers.next_action);
-    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
-      throw new Error("System One returned an invalid commit verification");
-    }
-    return answer;
+          checks: commit.checks,
+        }
+      : { checks: commit.checks };
   }
 
   private async request(

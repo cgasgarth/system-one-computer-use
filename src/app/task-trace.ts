@@ -23,15 +23,18 @@ interface RequestEvent {
   readonly phase: string;
   readonly status: "start" | "ok" | "error";
   readonly candidateCount?: number;
+  readonly questionCount?: number;
   readonly elapsedMs?: number;
   readonly choice?: string;
   readonly selectedProbability?: number;
+  readonly answers?: DecisionRequestEvent["answers"];
   readonly atMs: number;
 }
 interface ActiveRequest {
   readonly source: "decision" | "text";
   readonly phase: string;
   readonly candidateCount?: number;
+  readonly questionCount?: number;
   readonly started: number;
 }
 interface TraceDetails {
@@ -56,6 +59,7 @@ interface TraceDetails {
           readonly source: "decision" | "text";
           readonly phase: string;
           readonly candidateCount?: number;
+          readonly questionCount?: number;
           readonly elapsedMs: number;
           readonly startedAt: string;
         }
@@ -162,6 +166,7 @@ class TaskTrace {
         phase: event.phase,
         started: performance.now(),
         ...(event.candidateCount === undefined ? {} : { candidateCount: event.candidateCount }),
+        ...(event.questionCount === undefined ? {} : { questionCount: event.questionCount }),
       };
     } else {
       if (event.status === "error") {
@@ -219,6 +224,9 @@ class TaskTrace {
                 ...(this.activeRequest.candidateCount === undefined
                   ? {}
                   : { candidateCount: this.activeRequest.candidateCount }),
+                ...(this.activeRequest.questionCount === undefined
+                  ? {}
+                  : { questionCount: this.activeRequest.questionCount }),
                 startedAt: new Date(
                   Date.now() - (performance.now() - this.activeRequest.started),
                 ).toISOString(),

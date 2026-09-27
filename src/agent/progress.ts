@@ -1,6 +1,5 @@
 import type { Action, ActionChoices, Observation } from "./contracts.ts";
-import { actionKey, progressStateKey, textFieldKey, windowScopeKey } from "./state-key.ts";
-import { textTargetName } from "./controls.ts";
+import { actionKey, progressStateKey, textFieldKey, textFieldLocationKey } from "./state-key.ts";
 
 const UNCHANGED_ATTEMPTS = 2;
 const REMEMBERED_STATES = 128;
@@ -20,16 +19,7 @@ function searchFieldIdentity(observation: Observation, token: string): string | 
   ) {
     return undefined;
   }
-  const name = textTargetName(field);
-  const ordinal = window.elements
-    .filter(
-      (element) =>
-        element.role === field.role &&
-        element.subrole === field.subrole &&
-        textTargetName(element) === name,
-    )
-    .findIndex((element) => element.element_token === token);
-  return JSON.stringify([windowScopeKey(window), field.role, field.subrole, name, ordinal]);
+  return textFieldLocationKey(observation, token);
 }
 
 function searchResultScene(observation: Observation, token: string): string {
@@ -57,6 +47,7 @@ class Progress {
   private readonly satisfiedInputs = new Set<string>();
   private readonly searchScenes = new Map<string, string>();
   private readonly urls = new Set<string>();
+  private readonly navigationAttempts = new Map<string, number>();
   private readonly applications = new Set<string>();
   private readonly visits = new Map<string, Map<string, number>>();
   private readonly inspections = new Map<string, number>();
@@ -79,7 +70,16 @@ class Progress {
     this.state = current;
   }
 
+  private recordNavigationAttempt(action: Action): void {
+    if (action.kind !== "navigate") {
+      return;
+    }
+    const url = new URL(action.url).href;
+    this.navigationAttempts.set(url, (this.navigationAttempts.get(url) ?? 0) + 1);
+  }
+
   public attempted(action: Action, observation: Observation): void {
+    this.recordNavigationAttempt(action);
     const key = actionKey(action, observation);
     if (key === undefined) {
       return;
@@ -110,6 +110,9 @@ class Progress {
     if (performed && action.kind === "request_app") {
       this.applications.add(action.name);
     }
+    if (performed && (action.kind === "request_app" || action.kind === "invoke_menu")) {
+      this.navigationAttempts.clear();
+    }
     if (
       performed &&
       (action.kind === "click_element" ||
@@ -121,6 +124,9 @@ class Progress {
     ) {
       this.inspections.clear();
       this.applications.clear();
+      if (action.kind !== "navigate") {
+        this.navigationAttempts.clear();
+      }
     }
   }
 
@@ -149,7 +155,21 @@ class Progress {
     return previousScene === undefined || previousScene === searchResultScene(observation, token);
   }
 
+  private redundantNavigation(
+    action: Extract<Action, { kind: "navigate" }>,
+    observation: Observation,
+  ): boolean {
+    const target = new URL(action.url).href;
+    return (
+      (observation.window?.url !== undefined && new URL(observation.window.url).href === target) ||
+      (this.navigationAttempts.get(target) ?? 0) >= UNCHANGED_ATTEMPTS
+    );
+  }
+
   private redundant(action: Action, observation: Observation): boolean {
+    if (action.kind === "navigate" && this.redundantNavigation(action, observation)) {
+      return true;
+    }
     if (action.kind === "request_app" && this.applications.has(action.name)) {
       return true;
     }

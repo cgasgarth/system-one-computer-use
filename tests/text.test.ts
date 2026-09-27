@@ -3,12 +3,17 @@ import { ChatCompletionTextModel } from "../src/models/text.ts";
 import { textRequestSchema, textResponseSchema } from "../src/models/text-schema.ts";
 import { desktopFixture, windowFixture } from "./fixtures.ts";
 
+const URL_TOKEN_BUDGET = 128;
+const SEARCH_TOKEN_BUDGET = 256;
+const DOCUMENT_TOKEN_BUDGET = 1024;
+
 test("asks the text provider for field content with the task and session context", async () => {
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
       const body = textRequestSchema.parse(await request.json());
       expect(body.model).toBe("writer");
+      expect(body.max_tokens).toBe(DOCUMENT_TOKEN_BUDGET);
       expect(body.messages.at(-1)?.content).toContain("previous request");
       expect(body.messages.at(-1)?.content).toContain("Search");
       return Response.json({ choices: [{ message: { content: "Alex" }, finish_reason: "stop" }] });
@@ -35,6 +40,7 @@ test("asks for only an item query in an observed search field", async () => {
     port: 0,
     async fetch(request) {
       const body = textRequestSchema.parse(await request.json());
+      expect(body.max_tokens).toBe(SEARCH_TOKEN_BUDGET);
       expect(body.messages[0]?.content).toContain("shortest search query");
       expect(body.messages[1]?.content).toContain("AXSearchField");
       return Response.json({
@@ -132,6 +138,7 @@ test("supplies observed link destinations to the URL argument writer", async () 
     async fetch(request) {
       const body = textRequestSchema.parse(await request.json());
       expect(body.messages.at(-1)?.content).toContain(destination);
+      expect(body.max_tokens).toBe(URL_TOKEN_BUDGET);
       return Response.json({
         choices: [{ message: { content: destination }, finish_reason: "stop" }],
       });

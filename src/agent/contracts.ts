@@ -101,6 +101,7 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("press_key"),
     ...target,
+    element_token: z.string(),
     key: z.string().min(1),
     modifiers: z.array(z.enum(["cmd", "shift", "option", "ctrl", "fn"])).default([]),
     reason,
@@ -178,7 +179,10 @@ function validateActions(actions: readonly Action[], observation: Observation): 
       return false;
     }
     if (action.kind === "press_key") {
-      return true;
+      const focused = observation.window.elements.filter(
+        (element) => element.focused === true && element.enabled !== false,
+      );
+      return focused.length === 1 && focused[0]?.element_token === action.element_token;
     }
     if (action.kind === "invoke_menu") {
       const matches =

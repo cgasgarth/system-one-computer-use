@@ -1,16 +1,12 @@
 import { requestJson } from "./request.ts";
 import { decisionResponseSchema } from "./system-one-schema.ts";
-import type { DecisionRequest, DecisionResponse } from "./system-one-schema.ts";
+import type { DecisionAnswer, DecisionRequest, DecisionResponse } from "./system-one-schema.ts";
 
 const TIMEOUT_MS = 10_000;
 type DecisionRequestPhase =
-  | "completion"
-  | "completion-target"
-  | "completion-commit"
   | "operation"
   | "target-page"
   | "target"
-  | "action-verification"
   | "commit-classification"
   | "commit-authorization"
   | "field-readiness";
@@ -18,12 +14,21 @@ interface DecisionRequestEvent {
   readonly phase: DecisionRequestPhase;
   readonly status: "start" | "ok" | "error";
   readonly candidateCount: number;
+  readonly questionCount: number;
   readonly elapsedMs?: number;
   readonly choice?: string;
+  readonly selectedProbability?: number;
+  readonly answers?: {
+    readonly next_action: AnswerSummary;
+  };
+}
+interface AnswerSummary {
+  readonly choice: string;
   readonly selectedProbability?: number;
 }
 interface DecisionRequestContext {
   readonly signal?: Readonly<AbortSignal>;
+  readonly beforeRequest?: () => void;
   readonly onRequest?: (event: DecisionRequestEvent) => void;
 }
 interface DecisionCall {
@@ -33,10 +38,20 @@ interface DecisionCall {
   readonly endpoint: string;
   readonly apiKey: string | undefined;
 }
+function summarize(answer: DecisionAnswer): AnswerSummary {
+  return {
+    choice: answer.choice,
+    ...(answer.probabilities[answer.choice] === undefined
+      ? {}
+      : { selectedProbability: answer.probabilities[answer.choice] }),
+  };
+}
 
 async function requestDecision(call: Readonly<DecisionCall>): Promise<DecisionResponse> {
   call.context.signal?.throwIfAborted();
+  call.context.beforeRequest?.();
   const candidateCount = Object.keys(call.body.questions.next_action.criteria).length;
+  const questionCount = Object.keys(call.body.questions).length;
   const started = performance.now();
   const notify = (status: DecisionRequestEvent["status"], result?: DecisionResponse): void => {
     try {
@@ -45,12 +60,16 @@ async function requestDecision(call: Readonly<DecisionCall>): Promise<DecisionRe
         phase: call.phase,
         status,
         candidateCount,
+        questionCount,
         elapsedMs: performance.now() - started,
         ...(answer === undefined
           ? {}
           : {
               choice: answer.choice,
               selectedProbability: answer.probabilities[answer.choice],
+              answers: {
+                next_action: summarize(answer),
+              },
             }),
       });
     } catch {

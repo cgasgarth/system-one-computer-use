@@ -224,6 +224,7 @@ test("uses guarded foreground delivery only after an ambiguous background key is
       kind: "press_key",
       pid: 7,
       window_id: 9,
+      element_token: "focused-field",
       key: "return",
       modifiers: [],
       reason: "Submit",

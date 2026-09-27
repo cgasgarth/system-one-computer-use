@@ -45,17 +45,16 @@ test("keeps the primary model's observed window target without a correlated self
   }
 });
 
-test("keeps a blocked stop when the model confirms required user help", async () => {
+test("keeps the primary Blocked choice without a second model veto", async () => {
+  let requests = 0;
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      const body = decisionRequestSchema.parse(await request.json());
-      const check = body.questions.next_action.instructions.startsWith("Is there an enabled");
+      decisionRequestSchema.parse(await request.json());
+      requests += 1;
       return Response.json({
         answers: {
-          next_action: check
-            ? { choice: "A0", probabilities: { A0: 0.99, A1: 0.01 } }
-            : { choice: "A1", probabilities: { A0: 0.1, A1: 0.9 } },
+          next_action: { choice: "A1", probabilities: { A0: 0.1, A1: 0.9 } },
         },
       });
     },
@@ -71,7 +70,8 @@ test("keeps a blocked stop when the model confirms required user help", async ()
       ],
     });
     expect(result.action.kind).toBe("blocked");
-    expect(result.checks?.[0]?.answer.choice).toBe("A0");
+    expect(result.checks).toEqual([]);
+    expect(requests).toBe(1);
   } finally {
     await server.stop(true);
   }
@@ -101,9 +101,6 @@ test.each([false, true])(
       async fetch(request) {
         const body = decisionRequestSchema.parse(await request.json());
         const question = body.questions.next_action.instructions;
-        if (question.startsWith("Has this user request")) {
-          return rankedAnswer("A1", ["A0", "A1"]);
-        }
         if (
           question.startsWith("Would this exact") ||
           question.startsWith("Should the assistant activate")

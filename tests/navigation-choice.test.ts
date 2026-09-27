@@ -24,12 +24,7 @@ test("an observed navigation link can advance a task without a second relevance 
       const body = decisionRequestSchema.parse(await request.json());
       const { instructions, criteria } = body.questions.next_action;
       questions.push(instructions);
-      return answer(
-        instructions.startsWith("Has this") || instructions.startsWith("Would this exact")
-          ? "A1"
-          : "A0",
-        criteria,
-      );
+      return answer(instructions.startsWith("Would this exact") ? "A1" : "A0", criteria);
     },
   });
   try {
@@ -94,12 +89,7 @@ test.each([
         const body = decisionRequestSchema.parse(await request.json());
         const { instructions, criteria } = body.questions.next_action;
         questions.push(instructions);
-        return answer(
-          instructions.startsWith("Has this") || instructions.startsWith("Would this exact")
-            ? "A1"
-            : "A0",
-          criteria,
-        );
+        return answer(instructions.startsWith("Would this exact") ? "A1" : "A0", criteria);
       },
     });
     try {
@@ -147,9 +137,7 @@ test("a model-selected form submit still fails the separate commit gate", async 
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const { instructions, criteria } = body.questions.next_action;
-      const denied =
-        instructions.startsWith("Has this") ||
-        instructions.startsWith("Should the assistant activate");
+      const denied = instructions.startsWith("Should the assistant activate");
       return answer(denied ? "A1" : "A0", criteria);
     },
   });
@@ -200,7 +188,7 @@ test("an observed search field uses the primary grounded text choice", async () 
       const body = decisionRequestSchema.parse(await request.json());
       const { instructions, criteria } = body.questions.next_action;
       questions.push(instructions);
-      return answer(instructions.startsWith("Has this") ? "A1" : "A0", criteria);
+      return answer("A0", criteria);
     },
   });
   try {

@@ -1,4 +1,4 @@
-import type { ActionCheck } from "./decision-verification.ts";
+import type { ActionCheck } from "./action-check.ts";
 import type { OperationDecision } from "./decision-context.ts";
 
 const REJECTED_CHECK_EXCERPT = 2;

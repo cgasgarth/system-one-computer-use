@@ -26,7 +26,6 @@ for (const scenario of [...scenarios, ...validationScenarios]) {
       case: scenario.name,
       passed,
       selected: result.action.reason,
-      completion: result.completion?.probabilities["A0"],
       decisionMs: Math.round(result.latencyMs),
     }),
   );

@@ -72,6 +72,7 @@ const corpusSchema = z.object({
 const resultSchema = z.object({
   provider: z.string(),
   corpusHash: z.string(),
+  wireHash: z.string(),
   sourceHash: z.string(),
   wireOnly: z.boolean().optional(),
   rows: z.array(
@@ -79,7 +80,9 @@ const resultSchema = z.object({
       id: z.string(),
       kind: z.enum(["wire", "decision"]),
       selected: z.string().optional(),
-      correct: z.boolean(),
+      correct: z.boolean().optional(),
+      finishDiscriminationCorrect: z.boolean().optional(),
+      errorClass: z.string().optional(),
     }),
   ),
 });
@@ -87,6 +90,16 @@ type Case = z.infer<typeof caseSchema>;
 
 function sha256(value: string): string {
   return new Bun.CryptoHasher("sha256").update(value).digest("hex");
+}
+
+function requireUniqueIds(rows: readonly { readonly id: string }[]): void {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.id)) {
+      throw new Error(`Duplicate comparison case ID: ${row.id}`);
+    }
+    seen.add(row.id);
+  }
 }
 
 async function build(): Promise<void> {
@@ -142,11 +155,20 @@ async function build(): Promise<void> {
       })),
     );
   }
+  for (const item of cases) {
+    if (
+      item.kind === "wire" &&
+      !Object.hasOwn(item.body.questions.next_action.criteria, item.expectedChoice)
+    ) {
+      throw new Error(`Expected choice is absent from frozen criteria: ${item.id}`);
+    }
+  }
   const corpus = corpusSchema.parse({
     createdAt: new Date().toISOString(),
     sourceHash: await sourceHash(),
     cases,
   });
+  requireUniqueIds(corpus.cases);
   await Bun.write(CORPUS, JSON.stringify(corpus, undefined, JSON_INDENT), { createPath: true });
   console.log(
     JSON.stringify({
@@ -267,10 +289,7 @@ async function runDecision(
   kind: "decision";
   expected: boolean;
   selected: string;
-  correct: boolean;
-  completion: unknown;
-  completionTarget: unknown;
-  completionCommit: unknown;
+  finishDiscriminationCorrect: boolean;
   probabilities: Readonly<Record<string, number>>;
 }> {
   // This calls only the decision model; no computer action is executed.
@@ -280,10 +299,9 @@ async function runDecision(
     kind: item.kind,
     expected: item.expectedFinish,
     selected: answer.action.kind,
-    correct: (answer.action.kind === "finish") === item.expectedFinish,
-    completion: answer.completion,
-    completionTarget: answer.completionTarget,
-    completionCommit: answer.completionCommit,
+    // A non-Finish answer only passes this binary discriminator. It does not
+    // Establish that the selected action is safe or useful.
+    finishDiscriminationCorrect: (answer.action.kind === "finish") === item.expectedFinish,
     probabilities: answer.probabilities,
   };
 }
@@ -303,6 +321,7 @@ async function runCase(
 
 async function run(provider: "clm" | "kev", wireOnly: boolean): Promise<void> {
   const corpus = corpusSchema.parse(await Bun.file(CORPUS).json());
+  requireUniqueIds(corpus.cases);
   const currentSource = await sourceHash();
   if (!wireOnly && currentSource !== corpus.sourceHash) {
     throw new Error("Source changed after corpus freeze; rebuild and replay both providers");
@@ -326,8 +345,8 @@ async function run(provider: "clm" | "kev", wireOnly: boolean): Promise<void> {
       rows.push({
         id: item.id,
         kind: item.kind,
+        errorClass: error instanceof Error ? error.name : "UnknownError",
         error: error instanceof Error ? error.message : "Decision failed",
-        correct: false,
       });
     }
   }
@@ -349,8 +368,16 @@ async function run(provider: "clm" | "kev", wireOnly: boolean): Promise<void> {
     JSON.stringify({
       path,
       provider,
-      correct: rows.filter((row) => row.correct).length,
-      total: rows.length,
+      wireCorrect: rows.filter((row) => row.kind === "wire" && "correct" in row && row.correct)
+        .length,
+      wireTotal: rows.filter((row) => row.kind === "wire").length,
+      finishDiscriminationCorrect: rows.filter(
+        (row) =>
+          row.kind === "decision" &&
+          "finishDiscriminationCorrect" in row &&
+          row.finishDiscriminationCorrect,
+      ).length,
+      finishDiscriminationTotal: rows.filter((row) => row.kind === "decision").length,
       errors: rows.filter((row) => "error" in row).length,
     }),
   );
@@ -359,29 +386,40 @@ async function run(provider: "clm" | "kev", wireOnly: boolean): Promise<void> {
 async function compare(firstPath: string, secondPath: string): Promise<void> {
   const first = resultSchema.parse(await Bun.file(firstPath).json());
   const second = resultSchema.parse(await Bun.file(secondPath).json());
-  if (first.corpusHash !== second.corpusHash) {
-    throw new Error("Provider runs used different frozen input bodies");
-  }
+  requireUniqueIds(first.rows);
+  requireUniqueIds(second.rows);
   const wireOnly =
     first.wireOnly === true || second.wireOnly === true || first.sourceHash !== second.sourceHash;
-  const secondRows = new Map(
-    second.rows.filter((row) => !wireOnly || row.kind === "wire").map((row) => [row.id, row]),
-  );
-  const rows = first.rows
-    .filter((row) => !wireOnly || row.kind === "wire")
-    .map((row) => {
-      const other = secondRows.get(row.id);
-      if (other === undefined) {
-        throw new Error(`Missing ${row.id} in second run`);
-      }
-      return {
-        id: row.id,
-        first: row.selected,
-        second: other.selected,
-        firstCorrect: row.correct,
-        secondCorrect: other.correct,
-      };
-    });
+  if (first.wireHash !== second.wireHash) {
+    throw new Error("Provider runs used different frozen wire request bodies");
+  }
+  if (!wireOnly && first.corpusHash !== second.corpusHash) {
+    throw new Error("Provider runs used different frozen decision inputs");
+  }
+  const firstRows = first.rows.filter((row) => !wireOnly || row.kind === "wire");
+  const secondFiltered = second.rows.filter((row) => !wireOnly || row.kind === "wire");
+  const secondRows = new Map(secondFiltered.map((row) => [row.id, row]));
+  if (firstRows.length !== secondFiltered.length) {
+    throw new Error("Provider runs contain different case ID sets");
+  }
+  const rows = firstRows.map((row) => {
+    const other = secondRows.get(row.id);
+    if (other === undefined || other.kind !== row.kind) {
+      throw new Error(`Missing ${row.id} in second run`);
+    }
+    return {
+      id: row.id,
+      kind: row.kind,
+      first: row.selected,
+      second: other.selected,
+      firstWireCorrect: row.correct,
+      secondWireCorrect: other.correct,
+      firstFinishDiscrimination: row.finishDiscriminationCorrect,
+      secondFinishDiscrimination: other.finishDiscriminationCorrect,
+      firstErrorClass: row.errorClass,
+      secondErrorClass: other.errorClass,
+    };
+  });
   console.log(
     JSON.stringify({
       first: first.provider,

@@ -35,6 +35,53 @@ class ActiveGeneration:
 
 
 class SocketBoundaryTests(unittest.TestCase):
+    def test_buffered_cancelled_request_is_discarded_before_inference(self):
+        request = {"role": "text", "body": {
+            "model": "default_model", "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 8, "temperature": 0,
+        }}
+        server, client = socket.socketpair()
+        client.sendall(json.dumps(request).encode() + b"\n")
+        client.close()
+        called = []
+        with server:
+            bridge.answer_frame(server, "text", lambda *_: called.append(True))
+        self.assertEqual(called, [])
+
+    def test_cancelled_active_decision_drains_and_next_request_succeeds(self):
+        request = {"role": "decision", "body": {
+            "model": "test", "state": "Open the requested item.", "questions": {
+                "next_action": {"type": "choice", "instructions": "Choose", "criteria": {"A0": "Open"}}
+            },
+        }}
+        response = {"answers": {"next_action": {"choice": "A0", "probabilities": {"A0": 1}}}}
+        started, release, finished = Event(), Event(), Event()
+
+        def slow_answer(*_):
+            started.set()
+            self.assertTrue(release.wait(1))
+            return response
+
+        server, client = socket.socketpair()
+        client.sendall(json.dumps(request).encode() + b"\n")
+
+        def run():
+            with server:
+                bridge.answer_frame(server, "decision", slow_answer)
+            finished.set()
+
+        worker = Thread(target=run, daemon=True)
+        worker.start()
+        self.assertTrue(started.wait(1))
+        client.close()
+        release.set()
+        self.assertTrue(finished.wait(1))
+        server, client = socket.socketpair()
+        with server, client:
+            client.sendall(json.dumps(request).encode() + b"\n")
+            bridge.answer_frame(server, "decision", lambda *_: response)
+            self.assertEqual(json.loads(client.recv(1024))["body"], response)
+
     def test_decision_request_and_response_use_one_framed_message(self):
         request = {
             "role": "decision",

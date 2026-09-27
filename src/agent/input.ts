@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { Action, Desktop, Observation, Window } from "./contracts.ts";
 import { isEditableElement } from "./contracts.ts";
 import { textTargetName } from "./controls.ts";
+import { targetContainerContext } from "./target-context.ts";
+import { taskUrls } from "./url-addresses.ts";
 import { textFieldKey, windowScopeKey } from "./state-key.ts";
 import { restoreSurface } from "../app/sessions/targets.ts";
 import type { ActionResult, TaskOptions } from "./types.ts";
@@ -19,30 +21,70 @@ interface InputContext {
   readonly options: TaskOptions;
   readonly computer: Readonly<Computer>;
 }
-function sameFieldIdentity(
-  selected: Window["elements"][number],
-  candidate: Window["elements"][number],
+interface FieldBinding {
+  readonly selected: Window["elements"][number];
+  readonly candidate: Window["elements"][number];
+  readonly selectedWindow: Window;
+  readonly candidateWindow: Window;
+}
+function sameFieldLabel(
+  selected: FieldBinding["selected"],
+  candidate: FieldBinding["candidate"],
 ): boolean {
-  if (selected.role !== candidate.role) {
-    return false;
-  }
+  return (
+    selected.subrole === "AXSearchField" ||
+    selected.role === "searchbox" ||
+    candidate.label === selected.label ||
+    (selected.label === selected.value && candidate.label === candidate.value)
+  );
+}
+function sameFieldPosition(
+  selected: FieldBinding["selected"],
+  candidate: FieldBinding["candidate"],
+): boolean {
   const first = selected.frame;
   const second = candidate.frame;
-  const stableTarget =
-    first === undefined || second === undefined
-      ? selected.element_token === candidate.element_token
-      : Math.abs(first.x - second.x) < FRAME_TOLERANCE &&
+  return first === undefined || second === undefined
+    ? selected.element_token === candidate.element_token
+    : Math.abs(first.x - second.x) < FRAME_TOLERANCE &&
         Math.abs(first.y - second.y) < FRAME_TOLERANCE &&
         Math.abs(first.w - second.w) < FRAME_TOLERANCE &&
         Math.abs(first.h - second.h) < FRAME_TOLERANCE;
-  if (selected.subrole === "AXSearchField" || selected.role === "searchbox") {
-    return candidate.subrole === selected.subrole && stableTarget;
+}
+function sameFieldIdentity({
+  selected,
+  candidate,
+  selectedWindow,
+  candidateWindow,
+}: FieldBinding): boolean {
+  if (selected.role !== candidate.role || selected.subrole !== candidate.subrole) {
+    return false;
   }
-  return (
-    stableTarget &&
-    (candidate.label === selected.label ||
-      (selected.label === selected.value && candidate.label === candidate.value))
+  const firstContext = targetContainerContext(selected, selectedWindow);
+  const secondContext = targetContainerContext(candidate, candidateWindow);
+  if (firstContext !== undefined || secondContext !== undefined) {
+    return (
+      firstContext !== undefined &&
+      firstContext === secondContext &&
+      sameFieldLabel(selected, candidate)
+    );
+  }
+  return sameFieldPosition(selected, candidate) && sameFieldLabel(selected, candidate);
+}
+function uniqueSelectedField(window: Window, field: Window["elements"][number]): boolean {
+  const context = targetContainerContext(field, window);
+  const peers = window.elements.filter(
+    (entry) =>
+      entry.role === field.role &&
+      entry.subrole === field.subrole &&
+      entry.value === field.value &&
+      (field.subrole === "AXSearchField" ||
+        field.role === "searchbox" ||
+        entry.label === field.label ||
+        (field.label === field.value && entry.label === entry.value)) &&
+      (context === undefined || targetContainerContext(entry, window) === context),
   );
+  return peers.length === 1;
 }
 async function generateFieldText(
   context: InputContext,
@@ -50,6 +92,10 @@ async function generateFieldText(
   element: Window["elements"][number],
 ): Promise<string> {
   const metadata = await context.computer.inspectField?.(action);
+  const container =
+    context.observation.window === undefined
+      ? undefined
+      : targetContainerContext(element, context.observation.window);
   return context.options.text.generate({
     task: context.options.task,
     context: context.options.context ?? "",
@@ -63,6 +109,7 @@ async function generateFieldText(
       role: element.role,
       ...(element.subrole === undefined ? {} : { subrole: element.subrole }),
       label: textTargetName(element),
+      ...(container === undefined ? {} : { container }),
       value: String(element.value ?? ""),
       ...metadata,
       ...(element.placeholder === undefined ? {} : { placeholder: element.placeholder }),
@@ -75,6 +122,7 @@ async function verifyFieldValue(
     readonly pid: number;
     readonly windowId: number;
     readonly field: Window["elements"][number];
+    readonly sourceWindow: Window;
     readonly text: string;
     readonly scope: string;
   },
@@ -88,7 +136,14 @@ async function verifyFieldValue(
   }
   const { field, text } = expected;
   const matching = written.elements.filter(
-    (entry) => entry.value === text && sameFieldIdentity(field, entry),
+    (entry) =>
+      entry.value === text &&
+      sameFieldIdentity({
+        selected: field,
+        candidate: entry,
+        selectedWindow: expected.sourceWindow,
+        candidateWindow: written,
+      }),
   );
   if (matching.length !== 1) {
     throw new Error(
@@ -126,6 +181,11 @@ async function enterText({
   if (selectedWindow === undefined || element === undefined) {
     throw new Error("The selected input is no longer available");
   }
+  if (!uniqueSelectedField(selectedWindow, element)) {
+    throw new Error(
+      "The selected input is ambiguous among matching fields. Observe its container again before typing.",
+    );
+  }
   const text = await generateFieldText({ action, observation, options, computer }, action, element);
   options.signal?.throwIfAborted();
   if (text.trim().length === 0) {
@@ -138,7 +198,14 @@ async function enterText({
     );
   }
   const matches = fresh.elements.filter(
-    (entry) => entry.value === element.value && sameFieldIdentity(element, entry),
+    (entry) =>
+      entry.value === element.value &&
+      sameFieldIdentity({
+        selected: element,
+        candidate: entry,
+        selectedWindow,
+        candidateWindow: fresh,
+      }),
   );
   const [field] = matches;
   if (matches.length !== 1 || field === undefined || !isEditableElement(field)) {
@@ -153,6 +220,7 @@ async function enterText({
       ...(satisfiedInput === undefined ? {} : { satisfiedInput }),
     };
   }
+  options.signal?.throwIfAborted();
   await computer.typeText({
     kind: "type_text",
     pid: fresh.pid,
@@ -165,6 +233,7 @@ async function enterText({
     pid: fresh.pid,
     windowId: fresh.window_id,
     field,
+    sourceWindow: fresh,
     text,
     scope: windowScopeKey(fresh),
   });
@@ -188,39 +257,8 @@ function normalizedWebUrl(text: string): string | undefined {
   const normalized = webUrlSchema.safeParse(`https://${domain.data}`);
   return normalized.success ? normalized.data : undefined;
 }
-function addressTokens(task: string): string[] {
-  return task
-    .split(/\s+/u)
-    .flatMap((token) => [token, token.replaceAll(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")]);
-}
-function explicitTaskDomain(task: string): string | undefined {
-  const domains = new Set(
-    addressTokens(task).flatMap((token) => {
-      const full = webUrlSchema.safeParse(token);
-      if (full.success) {
-        return [new URL(full.data).hostname];
-      }
-      const bare = bareDomainSchema.safeParse(token);
-      return bare.success ? [bare.data.toLowerCase()] : [];
-    }),
-  );
-  return domains.size === 1 ? domains.values().next().value : undefined;
-}
-function explicitTaskUrl(task: string): string | undefined {
-  const urls = new Set(
-    addressTokens(task).flatMap((token) => {
-      const parsed = webUrlSchema.safeParse(token);
-      return parsed.success ? [new URL(parsed.data).href] : [];
-    }),
-  );
-  return urls.size === 1 ? urls.values().next().value : undefined;
-}
 function taskContainsUrl(url: string, task: string): boolean {
-  const target = new URL(url).href;
-  return addressTokens(task).some((token) => {
-    const parsed = webUrlSchema.safeParse(token);
-    return parsed.success && new URL(parsed.data).href === target;
-  });
+  return taskUrls(task).includes(new URL(url).href);
 }
 function observedExactUrl(url: string, observation: Observation): boolean {
   const candidates = [
@@ -237,14 +275,6 @@ function groundedWebUrl(url: string | undefined, context: InputContext): string 
     return undefined;
   }
   const target = new URL(url);
-  const explicitUrl = explicitTaskUrl(context.options.task);
-  if (explicitUrl !== undefined && target.href !== explicitUrl) {
-    return undefined;
-  }
-  const explicitDomain = explicitTaskDomain(context.options.task);
-  if (explicitDomain !== undefined && target.hostname !== explicitDomain) {
-    return undefined;
-  }
   if (target.pathname === "/" && target.search.length === 0 && target.hash.length === 0) {
     return url;
   }
@@ -271,7 +301,7 @@ async function generateWebAddress(context: InputContext, correction?: string): P
     );
   }
 }
-async function resolveWebAddress(context: InputContext): Promise<string> {
+async function generatedWebAddress(context: InputContext): Promise<string> {
   const { options } = context;
   const text = await generateWebAddress(context);
   options.signal?.throwIfAborted();
@@ -284,9 +314,7 @@ async function resolveWebAddress(context: InputContext): Promise<string> {
   if (direct !== undefined) {
     return direct;
   }
-  const explicitDomain = explicitTaskDomain(options.task);
-  const explicitUrl = explicitTaskUrl(options.task);
-  const correction = `Your previous output ${JSON.stringify(text.slice(0, CORRECTION_CHARS))} did not give a grounded web address for the current request.${explicitUrl === undefined ? "" : ` The request gives exact URL ${JSON.stringify(explicitUrl)}; preserve its path.`}${explicitDomain === undefined ? "" : ` The request names domain ${JSON.stringify(explicitDomain)}; use that exact host, without adjoining action words.`} Return only one complete HTTP or HTTPS URL. Do not invent an unobserved page path. Return an empty string if unknown.`;
+  const correction = `Your previous output ${JSON.stringify(text.slice(0, CORRECTION_CHARS))} did not give a grounded web address for the selected navigation action. Return one complete HTTP or HTTPS destination URL. Preserve a page path only when it is supplied in the current request or observed in a link. Do not invent a page path. Return an empty string if unknown.`;
   const corrected = await generateWebAddress(context, correction);
   options.signal?.throwIfAborted();
   if (corrected.trim().length === 0) {
@@ -307,7 +335,7 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
   if (computer.navigate === undefined) {
     throw new Error("Website navigation requires Chrome tools");
   }
-  const url = await resolveWebAddress(context);
+  const url = await generatedWebAddress(context);
   options.signal?.throwIfAborted();
   const current = await computer.window(
     observation.window?.pid ?? 0,
@@ -319,6 +347,7 @@ async function openUrl(context: InputContext): Promise<ActionResult> {
       unchanged: { kind: "url", url: new URL(url).href },
     };
   }
+  options.signal?.throwIfAborted();
   await computer.navigate(url);
   return { output: `Opened ${url}`, performedAction: true };
 }
@@ -354,6 +383,7 @@ async function openApplication(context: InputContext): Promise<OpenedApplication
       unchanged: { kind: "application", name },
     };
   }
+  options.signal?.throwIfAborted();
   await computer.launchApp(name);
   const desktop = await computer.desktop();
   const application = desktop.apps.find((app) => app.name === name);

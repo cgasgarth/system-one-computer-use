@@ -1,6 +1,7 @@
 import { describeAction, isEditableElement } from "../agent/contracts.ts";
 import type { Action, Observation, Window } from "../agent/contracts.ts";
 import { relevantControls, textTargetName } from "../agent/controls.ts";
+import { observedTargetName, targetDescriptionContext } from "../agent/target-context.ts";
 import type { ActionCriteria, DecisionAnswer } from "./system-one-schema.ts";
 import type { DecisionInput } from "./system-one.ts";
 
@@ -12,6 +13,14 @@ const LONG_LIST_HALF_CHARS = LONG_LIST_SUMMARY_CHARS / LONG_LIST_HALVES;
 const MAX_FIELD_CHARS = 100;
 const MAX_STATE_CHARS = 6000;
 const MIN_STATE_CHARS = 1200;
+const CLICK_VERBS = {
+  press: "Activate",
+  pick: "Pick",
+  confirm: "Confirm",
+  open: "Open",
+} as const;
+const MAX_URL_CHARS = 180;
+const MAX_GROUP_URLS = 6;
 
 type ActionGroupKind = Action["kind"] | "visible_controls" | "application_menu";
 interface ActionGroup {
@@ -65,24 +74,43 @@ function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
   }
   return [...grouped].map(([kind, group]) => ({
     kind,
-    description: GROUP_DESCRIPTIONS[kind],
+    description:
+      kind === "navigate"
+        ? `Navigate to a supplied URL: ${group
+            .filter(
+              (action): action is Extract<Action, { kind: "navigate" }> =>
+                action.kind === "navigate",
+            )
+            .slice(0, MAX_GROUP_URLS)
+            .map(
+              (action) =>
+                `${action.url.slice(0, MAX_URL_CHARS)} (${action.reason.slice(0, MAX_URL_CHARS)})`,
+            )
+            .join(
+              " | ",
+            )}${group.length > MAX_GROUP_URLS ? ` | and ${group.length - MAX_GROUP_URLS} more` : ""}.`
+        : GROUP_DESCRIPTIONS[kind],
     actions: group,
   }));
 }
 function actionDescription(action: Action, observation: Observation): string {
-  const target =
-    action.kind === "click_element"
-      ? observation.window?.elements.find(
-          (element) => element.element_token === action.element_token,
-        )
-      : undefined;
-  if (target !== undefined) {
-    const label = target.label?.trim();
-    return label === undefined || label.length === 0
-      ? action.reason
-      : `Activate ${target.role} ${JSON.stringify(label)}.`;
+  if (action.kind !== "click_element" && action.kind !== "compose_text") {
+    return describeAction(action);
   }
-  return describeAction(action);
+  const { window } = observation;
+  const target = window?.elements.find((element) => element.element_token === action.element_token);
+  if (window === undefined || target === undefined) {
+    return describeAction(action);
+  }
+  const observed = observedTargetName(target);
+  if (observed === undefined && action.kind === "click_element") {
+    return action.reason;
+  }
+  const label =
+    action.kind === "compose_text" ? textTargetName(target) : (observed ?? textTargetName(target));
+  const verb =
+    action.kind === "compose_text" ? "Enter text in" : CLICK_VERBS[action.operation ?? "press"];
+  return `${verb} ${target.role} ${JSON.stringify(label)}${targetDescriptionContext(target, window)}.`;
 }
 
 function describeControl(element: Window["elements"][number]): string {

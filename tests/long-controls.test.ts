@@ -38,16 +38,13 @@ test("shows a late actionable target when the page has more than one hundred con
         targetVisible =
           body.state.includes("Further actionable controls") && body.state.includes("Final Audit");
       }
-      const completion = body.questions.next_action.instructions.startsWith("Has this");
       const keys = Object.keys(body.questions.next_action.criteria);
       return Response.json({
         answers: {
-          next_action: completion
-            ? { choice: "A1", probabilities: { A0: 0, A1: 1 } }
-            : {
-                choice: "A0",
-                probabilities: Object.fromEntries(keys.map((key) => [key, Number(key === "A0")])),
-              },
+          next_action: {
+            choice: "A0",
+            probabilities: Object.fromEntries(keys.map((key) => [key, Number(key === "A0")])),
+          },
         },
       });
     },

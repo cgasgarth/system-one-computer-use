@@ -3,6 +3,7 @@ import type { Action, Desktop, Observation } from "./contracts.ts";
 import type { Surface } from "../app/sessions/schema.ts";
 import { restoreSurface } from "../app/sessions/targets.ts";
 import { WindowUnavailableError } from "../computer/window-unavailable.ts";
+import { textFieldKey } from "./state-key.ts";
 
 interface Target {
   readonly pid: number;
@@ -118,7 +119,41 @@ class SurfaceSession {
     }
   }
 }
-async function executeInput(computer: Readonly<Computer>, action: Action): Promise<void> {
+async function verifyFocusedKeyTarget(
+  computer: Readonly<Computer>,
+  action: Extract<Action, { kind: "press_key" }>,
+  context: { readonly observation: Observation; readonly signal?: Readonly<AbortSignal> },
+): Promise<void> {
+  const { observation, signal } = context;
+  const selected = observation.window?.elements.filter((element) => element.focused === true);
+  if (selected?.length !== 1 || selected[0]?.element_token !== action.element_token) {
+    throw new Error("The selected key target no longer has unique focus.");
+  }
+  const initialKey = textFieldKey(observation, action.element_token);
+  const fresh = await computer.window(action.pid, action.window_id);
+  const focused = fresh.elements.filter(
+    (element) => element.focused === true && element.enabled !== false,
+  );
+  const freshKey =
+    focused[0] === undefined
+      ? undefined
+      : textFieldKey({ ...observation, window: fresh }, focused[0].element_token);
+  if (
+    fresh.pid !== action.pid ||
+    fresh.window_id !== action.window_id ||
+    focused.length !== 1 ||
+    initialKey === undefined ||
+    initialKey !== freshKey
+  ) {
+    throw new Error("The focused control changed before key input. Observe the window again.");
+  }
+  signal?.throwIfAborted();
+}
+async function executeInput(
+  computer: Readonly<Computer>,
+  action: Action,
+  context: { readonly observation: Observation; readonly signal?: Readonly<AbortSignal> },
+): Promise<void> {
   switch (action.kind) {
     case "click_element": {
       await computer.clickElement(action);
@@ -129,6 +164,8 @@ async function executeInput(computer: Readonly<Computer>, action: Action): Promi
       break;
     }
     case "press_key": {
+      await verifyFocusedKeyTarget(computer, action, context);
+      context.signal?.throwIfAborted();
       await computer.pressKey(action);
       break;
     }

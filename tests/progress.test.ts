@@ -345,6 +345,7 @@ test("detects a repeated focus cycle across two different states", () => {
     modifiers: [],
     pid: first.window.pid,
     window_id: first.window.window_id,
+    element_token: "s1:1",
     reason: "Press Tab",
   } as const;
   for (const observation of [first, second, first, second]) {

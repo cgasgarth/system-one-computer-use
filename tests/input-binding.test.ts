@@ -245,6 +245,7 @@ test("explains an unavailable URL text helper", async () => {
 test("normalizes a domain named in the current request", async () => {
   const { computer } = computerFixture();
   const opened: string[] = [];
+  let requests = 0;
   const browser: ManagedComputer = {
     ...computer,
     async navigate(url) {
@@ -261,6 +262,7 @@ test("normalizes a domain named in the current request", async () => {
       computer: () => browser,
       text: {
         async generate() {
+          requests += 1;
           return "example.test";
         },
       },
@@ -272,44 +274,7 @@ test("normalizes a domain named in the current request", async () => {
     },
   });
   expect(opened).toEqual(["https://example.test"]);
-});
-
-test("corrects a host that joined an action word to the requested domain", async () => {
-  const { computer } = computerFixture();
-  const opened: string[] = [];
-  const corrections: string[] = [];
-  const browser: ManagedComputer = {
-    ...computer,
-    async navigate(url) {
-      opened.push(url);
-    },
-  };
-  await openUrl({
-    action: { kind: "request_url", reason: "Open the requested page" },
-    observation: { desktop: desktopFixture(), window: windowFixture() },
-    computer: browser,
-    options: {
-      task: "Open example.test in Chrome",
-      applications: [],
-      computer: () => browser,
-      text: {
-        async generate(input) {
-          if (input.purpose === "url" && input.correction !== undefined) {
-            corrections.push(input.correction);
-            return "https://example.test";
-          }
-          return "https://openexample.test";
-        },
-      },
-      decision: {
-        async choose() {
-          throw new Error("No decision needed");
-        },
-      },
-    },
-  });
-  expect(corrections).toHaveLength(1);
-  expect(opened).toEqual(["https://example.test"]);
+  expect(requests).toBe(1);
 });
 
 test("uses a site homepage when an unobserved article path was invented", async () => {
@@ -344,63 +309,28 @@ test("uses a site homepage when an unobserved article path was invented", async 
   expect(opened).toEqual(["https://reference.example"]);
 });
 
-test("preserves an explicit full URL path and rejects another host", async () => {
+test("asks the writer to choose when the request contains two different URLs", async () => {
   const { computer } = computerFixture();
   const opened: string[] = [];
-  const browser: ManagedComputer = {
-    ...computer,
-    async navigate(url) {
-      opened.push(url);
-    },
-  };
-  await openUrl({
-    action: { kind: "request_url", reason: "Open the requested page" },
-    observation: { desktop: desktopFixture(), window: windowFixture() },
-    computer: browser,
-    options: {
-      task: "Open https://example.test/library/page",
-      applications: [],
-      computer: () => browser,
-      text: {
-        async generate(input) {
-          return input.purpose === "url" && input.correction !== undefined
-            ? "https://example.test/library/page"
-            : "https://other.test";
-        },
-      },
-      decision: {
-        async choose() {
-          throw new Error("No decision needed");
-        },
-      },
-    },
-  });
-  expect(opened).toEqual(["https://example.test/library/page"]);
-});
-
-test("does not drop an exact URL path to its homepage", async () => {
-  const expectedRequests = 2;
-  const { computer } = computerFixture();
-  const opened: string[] = [];
-  const browser: ManagedComputer = {
-    ...computer,
-    async navigate(url) {
-      opened.push(url);
-    },
-  };
   let requests = 0;
+  const browser: ManagedComputer = {
+    ...computer,
+    async navigate(url) {
+      opened.push(url);
+    },
+  };
   await openUrl({
-    action: { kind: "request_url", reason: "Open the supplied URL" },
+    action: { kind: "request_url", reason: "Open one supplied URL" },
     observation: { desktop: desktopFixture(), window: windowFixture() },
     computer: browser,
     options: {
-      task: "Open https://example.test/library/page",
+      task: "Open https://example.test/first or https://example.test/second",
       applications: [],
       computer: () => browser,
       text: {
         async generate() {
           requests += 1;
-          return requests === 1 ? "https://example.test/" : "https://example.test/library/page";
+          return "https://example.test/second";
         },
       },
       decision: {
@@ -410,6 +340,6 @@ test("does not drop an exact URL path to its homepage", async () => {
       },
     },
   });
-  expect(requests).toBe(expectedRequests);
-  expect(opened).toEqual(["https://example.test/library/page"]);
+  expect(requests).toBe(1);
+  expect(opened).toEqual(["https://example.test/second"]);
 });

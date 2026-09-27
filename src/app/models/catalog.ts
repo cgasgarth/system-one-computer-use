@@ -47,7 +47,7 @@ const catalog: readonly Preset[] = [
     family: "clm",
     hub: "Contrastive-LM/CLM-v0.1-8B",
     bits: 4,
-    description: "Default · lower memory",
+    description: "Lower memory",
   },
   {
     id: "clm-8b-q8",
@@ -83,7 +83,7 @@ const catalog: readonly Preset[] = [
     family: "kev",
     hub: "jaredpalmer/kev-4b",
     bits: 0,
-    description: "Balanced Kev · MLX",
+    description: "Default · MLX",
   },
   {
     id: "kev-9b",
@@ -105,7 +105,7 @@ const catalog: readonly Preset[] = [
   },
 ];
 const defaultPreferences: z.infer<typeof preferencesSchema> = {
-  decision: { source: "local", id: "clm-8b-q4" },
+  decision: { source: "local", id: "kev-4b" },
   text: { source: "local", id: "qwen-text-2b" },
   retention: "five_minutes",
 };

@@ -3,7 +3,7 @@ import { defaultPreferences, preferencesSchema, preset } from "../src/app/models
 import { commands } from "../src/app/models/commands.ts";
 
 const SOCKET_PATH = "/tmp/system-one-model-tests/decision.sock";
-const UV_PREFIX_LENGTH = 5;
+const UV_PREFIX_LENGTH = 6;
 const paths = {
   data: "/tmp/system-one-model-tests",
   integrations: "/tmp/integrations",
@@ -68,6 +68,7 @@ test("serves all local models with the uv-managed Python after uv downloads", ()
       "--project",
       `${paths.integrations}/${project}`,
       "--frozen",
+      "--no-editable",
     ]);
     expect(command.serve[0]).toBe(`${paths.data}/runtimes/${project}/bin/python3`);
     expect(command.serve[1]).toBe(`${paths.integrations}/local-bridge/serve.py`);

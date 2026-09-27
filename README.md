@@ -85,7 +85,7 @@ Tool operations and observations are included in throughput. Initial model loadi
 
 ## Models in the app
 
-Select a model in Settings to download and load it. Presets include CLM 8B at 4-bit, 8-bit and BF16, and Kev 0.8B, 4B and 9B through the upstream MLX backend. Qwen 3.5 2B at 4-bit is available for text generation. External inference URLs are also supported.
+Select a model in Settings to download and load it. Fresh installs default to Kev 4B; saved selections are preserved. Presets include CLM 8B at 4-bit, 8-bit and BF16, and Kev 0.8B, 4B and 9B through the upstream MLX backend. Qwen 3.5 2B at 4-bit is available for text generation. External inference URLs are also supported.
 
 Choose whether to keep models loaded, unload after five idle minutes, or unload after each task. Quitting the app stops its model processes. See [model management](docs/models.md) for runtime requirements, endpoints, memory behavior and logs.
 
@@ -140,7 +140,7 @@ Opening the current URL or selected app is idempotent. Text responses must end n
 
 Actions are grouped by operation, with native menus grouped by their observed top-level menu. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
 
-Completion uses the observed app, window title, URL, and field values. Inline editors and dialogs get a separate check for an unobserved saved or submitted result, so matching text alone does not prove a save. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
+The decision model chooses the next action, including Finish and Blocked. There is no completion preflight. A selected Finish stops the task after a fresh observation confirms that the screen has not changed. The harness checks requested persistent effects before the action, and reads back typed field values. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
 
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.

@@ -282,3 +282,68 @@ A corrected, supervised live Messages task then opened the requested existing co
 Managed inference now uses private Unix sockets with JSON frames. Real Kev, CLM, and text-model requests passed through the Python bridge. A cancelled text request stopped generation and a following request succeeded. A stopped worker preserved its active phase, request counts, model identity, and timing before exit. Metrics count actual model requests and include waiting time in action throughput. Tests cover fragmented frames, invalid responses, cancellation, stale sockets, live-listener protection, failed-start idle cleanup, queued warm-up during shutdown, and detached descendant cleanup.
 
 Installed checks found and repaired two additional lifecycle problems: queued warm-up after Quit, and an editable Python package pointing into the development checkout. Serving now uses uv-managed Python directly; runtime preparation installs non-editable packages from the final app bundle. Both installed models reached Ready. The installed model processes had no TCP listeners. The local signing requirement remained unchanged and Accessibility/Screen Recording grants persisted. The final unit suite passed 181 tests, plus strict checks and native/Swift checks. This validates the listed paths; it does not establish reliability for arbitrary computer tasks.
+
+### Consult controller repair: action-first selection
+
+The completion preflight passed six small synthetic labels, then failed four of
+seven disposable browser workflows. It was rejected. The deployed design asks
+System One for the next action first, including Finish and Blocked. Finish checks
+for an unobserved requested persistent result and requires a fresh observation.
+No confidence floor or extra target-completion judge is used.
+
+The same seven browser cases with action-first selection passed six: open a
+document, fill an unsaved draft (zero stored writes), edit/save (one exact write),
+click a replaced button (one effect), select a duplicate-label option (one exact
+write), and keep an already-open editor unchanged. The context-only follow-up
+case still selected Blocked. It supplied prose history without the typed saved
+surface. That failure is retained in the report.
+
+A separate serialized SessionStore/reconnect test restored the saved document
+after the current page changed. Both tasks completed in two turns, with five and
+three model calls respectively. All seven storage/effect counters had zero delta.
+The test verifies the actual saved-surface flow; it does not replace the failed
+context-only case or establish broad task accuracy. Artifacts are under ignored
+`runs/qa/recovery/live-kev-action-first/` and
+`runs/qa/overnight/session-followup-reconnect-f20b6fec-7854-4f59-90dc-1085fa2a10be.json`.
+
+Target descriptions and input binding now carry observed container identity.
+Progress tracking follows the same named container through row reorder and does
+not transfer filled-field state between ambiguous rows. Explicit and saved URLs
+are selectable actions; surface selection does not secretly navigate. Same-target
+redirect retries are tracked across changed page states.
+
+Final review also found Stop races between a fresh read and an action. The
+harness now rechecks cancellation immediately before text entry, navigation,
+app launch, and activation. Focused keyboard options remain available beside
+unrelated buttons. Key execution and retry tracking use stable focused-field
+identity across snapshot token changes, and reject changed or ambiguous focus.
+Return follows the persistent-effect authorization path.
+
+The keyboard follow-up rerun passed the unsaved-draft and already-open-editor
+cases. The edit/save case stored the exact requested text once, then the secondary
+pending-result judge vetoed the primary Finish choice despite visible saved
+text and status. That is a controller false negative. The secondary judge was
+removed; the final policy trusts the main Finish choice after checking that the
+screen is still current. Earlier results above retain the policy used in each run.
+
+With direct Finish selection, the same three localhost cases all passed: edit/save
+(four turns, 1.72 s, one exact document write), fill-unsaved-draft (two turns,
+623 ms, no stored writes), and already-open editor (one turn, 173 ms, no stored
+writes). No unrelated write counter changed. Source SHA-256:
+`f106ce59359696171e119904d8170e4fb624c0013fa5bbeb9df45b01f6e5e6a1`.
+Artifacts: ignored `runs/qa/recovery/live-keyboard-direct-finish/`. These task
+times exclude model loading. Keyboard input itself was covered by focused tests;
+the three live runs did not need to select a key action.
+
+The final signed app completed “Open Calculator on this Mac.” from the native
+menu in 2.08 seconds, three turns and four model requests. Median model request
+time was 175.5 ms. The trace and a separate native window read both identified
+Calculator. Kev 4B and Qwen 3.5 2B reached Ready through managed Unix endpoints.
+System One Accessibility, CUA Accessibility, and CUA Screen Recording remained
+Granted with the same certificate-bound signing requirement; no grant was added.
+The installed worker SHA-256 is
+`34f60d2d7eef56b3bcafc5fb9eb5dd86048539e231752d8304e388c6a3ac1e5b`.
+All four bundled entry points matched a fresh source build. Final checks passed
+195 Bun tests, seven Python bridge tests, strict typing/lint, formatting, the
+600-line source limit, and native status/permission tests. All owned QA model
+processes and browser tabs were closed. The installed app remains running.

@@ -139,7 +139,6 @@ class Execution {
     const checking =
       event.phase.startsWith("completion") ||
       event.phase.startsWith("commit") ||
-      event.phase === "action-verification" ||
       event.phase === "field-readiness";
     this.report(checking ? "Checking the current result…" : "Choosing the next action…");
   }

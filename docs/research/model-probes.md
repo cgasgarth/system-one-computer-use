@@ -2,6 +2,10 @@
 
 [Research index](./system-one-evidence.md)
 
+This is an experiment record. Intermediate completion gates described below
+were rejected. For the selected action-first policy and current limits, see
+[the Kev/CLM assessment](./kev-clm-assessment.md) and [validation](../validation.md).
+
 ## Task-effect constraints and model probes
 
 Disposable fixtures recently exposed two unwanted commits: "open a prefilled
@@ -163,6 +167,130 @@ Transformers parity, not stock vLLM parity**; seven short strings and a
 three-option subset cannot establish broad adapter equivalence. Full token
 IDs, pooled vectors, logits, scores, and hashes are ignored at
 `runs/research/overnight/clm-parity-{mlx,hf,summary}.json`.
+
+**Expanded encoder control (September 27).** Sixteen short strings (1–86
+tokens) covered the saved Notes and Calendar questions, unequal batch lengths,
+empty/space input, Unicode, special-token-like text, and a repeated phrase.
+The pinned tokenizer IDs and CLM head SHA matched. Each 8B backend ran in a
+separate process from cached weights; there was no vLLM/CUDA run. Transformers
+5.17.0 with Torch 2.8.0 on MPS exposed a reference-path hazard: default SDPA
+singleton output for a 28-token state had cosine 0.7765 against CPU BF16 eager,
+while its padded mixed batch, MPS eager, CPU eager, and MLX BF16 agreed near
+0.9997–0.9999. Explicit attention mask and `use_cache=False` alone did not
+repair MPS SDPA. We therefore used the masked mixed-batch Torch vectors as the
+partial reference, checked against CPU eager on two lengths. This is a finding
+about this probe environment, not a general Torch or vLLM diagnosis.
+
+Against that reference, MLX BF16 had minimum pooled-vector cosine 0.999862,
+maximum vector-component difference 0.00530, and the same argmax on four
+development questions; the largest answer-probability difference was 0.0280.
+MLX q4 had minimum cosine 0.823915 on a one-token string and disagreed on the
+saved Calendar target question (A2 instead of reference A1); its maximum
+probability difference was 0.3874. This shows material quantization sensitivity
+for that question. It does not establish a general q4 task failure rate. Both
+MLX runs passed a >2,048-token rejection check, whereas the pinned upstream
+embedder requests truncation at 2,048. That intentional behavior difference
+remains; no production truncation was added. Full vectors, token IDs, head
+scores, and scripts are local ignored artifacts at
+`runs/research/overnight/clm-parity-extended-*` and
+`runs/research/overnight/clm-hf-{cpu,mps}*-control*`.
+
+The provider replay evaluator now reports exact wire-choice matches separately
+from **Finish discrimination**. For a negative Finish case, any non-Finish
+answer passes only that binary discriminator; it is not counted as a verified
+action. Comparison rejects duplicate or asymmetric case IDs and mismatched
+wire-body hashes and records error classes. These checks do not turn the
+hand-selected development corpus into a held-out task benchmark.
+
+**Completion batch protocol check.** Four synthetic states were captured from
+the current source decision model: requested target open, only a wrong view
+open with the target selectable, requested unsaved draft open, and saved result
+observed. Frozen request SHA-256:
+`4ab6f715c92bc429e908b55e3e59f3cca995cd5973c2b981d7ef778e16431cfe`.
+The same state and three questions were sent in batch and serial forms through
+isolated source Unix bridges. Kev 4B and CLM q4 each
+returned the same per-question choices and probabilities in batch and serial
+(maximum difference 0 in these 24 paired answers). Kev's combined Finish gate
+matched all four fixture labels. CLM q4's gate matched only the wrong-view
+negative: its target-current answer was “not open” in all four states, including
+the three positive ones. Kev called the target open in the wrong-view negative,
+but its separate completion answer kept Finish blocked. This supports the
+batch protocol on these short states; it does not validate either model's
+general completion judgment. The local raw answers are ignored at
+`runs/qa/recovery/completion-batch-{kev,kev-wrong-target,clm}.json`.
+
+**Two-question completion replay; do not use the earlier four-case gate result
+for deployment.** The current source folds target identity into the completion
+question and keeps the persistent-result question separate. Six exact
+source-captured synthetic states were frozen at SHA-256
+`d625cb6171e2f41b9fc950348cc320fac7d1f39da3879ab96004f941bcc47d5a`:
+open target, selectable wrong target, requested unsaved draft, required save
+still pending, failed save attempt, and observed saved result. Through isolated
+source Unix bridges, both models gave identical batch and serial choices and
+probabilities for all 12 question pairs each (maximum difference 0).
+
+The **Finish gate** matched 5/6 labels for Kev 4B and 2/6 for CLM q4. Kev
+incorrectly finished when only a link to the requested target was selectable.
+CLM q4 incorrectly blocked the open-target and leave-draft cases, and
+incorrectly finished the required-save and failed-save-attempt cases. These
+are synthetic development states, not task-level success rates. They show that
+batching itself preserved decisions here while the new two-question semantic
+gate failed several necessary distinctions. The isolated bridges were stopped;
+the installed app and user data were untouched. Raw local results are ignored
+at `runs/qa/recovery/completion-batch-v3-{kev,clm}.json`.
+
+**Bounded completion-policy comparison.** The same six synthetic states were
+paired with actual source-generated action options (input SHA-256
+`ab57432a31f490b874e680273d3fb731edb753dd5fcde217189bd22b2d7d29e9`).
+Arm A kept the v3 completion state and persistence question but restored the
+short completion question: “Is the current user request complete in the
+observed state?” Arm B made one Choice over `decisionState` and the exact
+`actionDescription` of each observed option, including Finish and Blocked.
+No action was executed.
+
+| Model  | A: correct Finish | B: correct Finish | B: clear exact action |
+| ------ | ----------------: | ----------------: | --------------------: |
+| Kev 4B |               6/6 |               5/6 |                   4/5 |
+| CLM q4 |               3/6 |               3/6 |                   2/5 |
+
+Both models chose the requested link over Finish in the wrong-target case and
+Save over Finish when saving was pending. In arm B, both chose text entry again
+for the already-filled leave-draft case; CLM also chose Refresh for the open
+target and saved result. Arm A fixed the wrong-target false Finish for Kev on
+these fixtures, but CLM still falsely finished two unsaved Save states. Arm B's
+two unsaved Save states had identical rendered decision state and options:
+only `recentResults` differed, and `decisionState` did not show that history.
+The probes cannot show that B used the failed Save event. The fixtures also
+retain a synthetic Messages app name for project tasks. These six correlated
+development cases guide a policy choice; they do not estimate live accuracy.
+Ignored answers are at `runs/qa/recovery/completion-architecture-{kev,clm}.json`.
+
+**Same-weight CLM precision on the frozen 14-wire development set.** I replayed
+the prior exact 14 wire bodies through isolated source CLM bridges, first MLX
+q4 and then MLX BF16, with the same pinned encoder, projection head, token
+template, question order, and temperature. Only the request model ID was set
+to `clm-latest` for both. Frozen wire-subset hash:
+`8865c989103ed6aa9397bd07ac7fb7532cbe473d70aacaedf04397442bffa324`;
+effective CLM body hash:
+`78b818828ea5346f9dfd37dd2e3e8d895bee6fdba9c3a68d7cfd4fce365cbf5c`.
+The longest rendered text was 893 tokens and the largest Unix frame was 7,052
+bytes. All 14 requests returned in each run, with no length or transport error.
+
+| Frozen label comparison | Correct of 14 |
+| ----------------------- | ------------: |
+| Saved Kev 4B baseline   |            13 |
+| CLM q4 replay           |             7 |
+| CLM BF16 replay         |             7 |
+
+BF16 changed three q4 argmax answers: it corrected Cancel target, made the
+previously correct create-save permission wrong, and changed Calendar operation
+from one wrong option to another. The other 11 argmax answers matched, and the
+largest per-option probability difference was 0.4978. The new q4 run matched
+all 14 saved q4 argmax answers. Quantization therefore matters for individual
+choices, but BF16 did not close this set's aggregate CLM–Kev gap. These are
+correlated hand-selected wire questions from older harness states, not current
+end-to-end task outcomes or a held-out model benchmark. Local answer and error
+details are ignored at `runs/recovery/clm-{q4,bf16}-wire14.json`.
 
 **Kev-4B provider replay.** The tester used Settings to download and load
 the app's pinned `jaredpalmer/kev-4b@139fdd94f1b6a6ad80cc15e08fcb99cac885a101`

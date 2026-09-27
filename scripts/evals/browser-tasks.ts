@@ -4,6 +4,7 @@ import { runTask } from "../../src/agent/loop.ts";
 import type { Window } from "../../src/agent/contracts.ts";
 import type { TaskStep } from "../../src/agent/types.ts";
 import type { DecisionModel } from "../../src/models/system-one.ts";
+import type { DecisionRequestEvent } from "../../src/models/decision-request.ts";
 import { startWorkspace } from "./workspace.ts";
 import { restrictedBrowser } from "./restricted-browser.ts";
 import { fixtureHash, sourceHash } from "./provenance.ts";
@@ -233,6 +234,44 @@ interface Outcome {
   readonly final?: FinalState;
   readonly error?: string;
 }
+interface TextRequestEvent {
+  readonly purpose: string;
+  readonly elapsedMs: number;
+  readonly status: "ok" | "error";
+}
+function trackedText(
+  record: (event: Readonly<TextRequestEvent>) => void,
+): ReturnType<typeof createModels>["text"] {
+  return {
+    async generate(input) {
+      const started = performance.now();
+      try {
+        const value = await models.text.generate(input);
+        record({ purpose: input.purpose, elapsedMs: performance.now() - started, status: "ok" });
+        return value;
+      } catch (error) {
+        record({ purpose: input.purpose, elapsedMs: performance.now() - started, status: "error" });
+        throw error;
+      }
+    },
+  };
+}
+function requestSummary(
+  decision: readonly DecisionRequestEvent[],
+  text: readonly TextRequestEvent[],
+): {
+  readonly decision: number;
+  readonly text: number;
+  readonly decisionEvents: readonly DecisionRequestEvent[];
+  readonly textEvents: readonly TextRequestEvent[];
+} {
+  return {
+    decision: decision.filter((event) => event.status === "start").length,
+    text: text.length,
+    decisionEvents: decision,
+    textEvents: text,
+  };
+}
 function finalState(window: Window): FinalState {
   const rawDraftValue = window.elements.find((element) => element.label === "Project name")?.value;
   return {
@@ -327,16 +366,23 @@ function decisionFor(scenario: BrowserCase): DecisionModel {
     },
   };
 }
+// The local grader records the task, all write counters, and request timing in one artifact.
+// eslint-disable-next-line eslint/max-lines-per-function
 async function executeCase(scenario: BrowserCase): Promise<boolean> {
   const startedAt = new Date().toISOString();
   const beforeWrites = writeCounts();
   const allowedWrites = expectedWrites(scenario);
   const trace: TaskStep[] = [];
+  const decisionRequests: DecisionRequestEvent[] = [];
+  const textRequests: TextRequestEvent[] = [];
   let outcome: Outcome = { status: "error", passed: false };
   try {
     await browser.navigate?.(`${workspace.origin}${scenario.start}`);
     const result = await runTask({
       ...models,
+      text: trackedText((event) => {
+        textRequests.push(event);
+      }),
       decision: decisionFor(scenario),
       task: scenario.task,
       context: scenario.context,
@@ -352,6 +398,9 @@ async function executeCase(scenario: BrowserCase): Promise<boolean> {
       onStep(step) {
         trace.push(step);
         guardWrites(beforeWrites, allowedWrites);
+      },
+      onDecisionRequest(event) {
+        decisionRequests.push(event);
       },
     });
     const final = finalState(await browser.window(0, 0));
@@ -395,6 +444,7 @@ async function executeCase(scenario: BrowserCase): Promise<boolean> {
         duplicateChoice: workspace.duplicateChoice(),
       },
       trace,
+      modelRequests: requestSummary(decisionRequests, textRequests),
     };
     await Bun.write(`${outputDirectory}/${scenario.name}.json`, JSON.stringify(artifact), {
       createPath: true,

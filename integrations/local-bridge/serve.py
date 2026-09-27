@@ -87,6 +87,24 @@ def send_response(connection: socket.socket, body: dict) -> None:
     connection.sendall(data)
 
 
+def answer_frame(connection: socket.socket, role: Literal["decision", "text"], answer) -> None:
+    raw = read_frame(connection)
+    envelope = (
+        DecisionEnvelope.model_validate(raw)
+        if role == "decision"
+        else TextEnvelope.model_validate(raw)
+    )
+    # A request can remain buffered after its caller cancels while another
+    # request is running. Do not start inference for that abandoned work.
+    if disconnected(connection):
+        return
+    result = answer(envelope.body, connection)
+    # Decision inference drains synchronously; its future is not cancelled.
+    # This keeps the upstream worker usable for the next client.
+    if not disconnected(connection):
+        send_response(connection, {"ok": True, "body": result})
+
+
 def watch_client_close(connection: socket.socket, cancelled: Event, active_context: list) -> None:
     try:
         connection.recv(1)
@@ -267,15 +285,7 @@ def serve(socket_path: Path, role: Literal["decision", "text"], answer, close) -
             connection, _ = listener.accept()
             with connection:
                 try:
-                    raw = read_frame(connection)
-                    envelope = (
-                        DecisionEnvelope.model_validate(raw)
-                        if role == "decision"
-                        else TextEnvelope.model_validate(raw)
-                    )
-                    result = answer(envelope.body, connection)
-                    if not disconnected(connection):
-                        send_response(connection, {"ok": True, "body": result})
+                    answer_frame(connection, role, answer)
                 except (ValueError, ValidationError, json.JSONDecodeError) as error:
                     if not disconnected(connection):
                         send_response(connection, {"ok": False, "error": str(error)[:500]})

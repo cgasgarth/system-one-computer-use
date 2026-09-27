@@ -2,12 +2,16 @@ import { expect, test } from "bun:test";
 import type { ActionChoices } from "../src/agent/contracts.ts";
 import { SystemOneDecisionModel } from "../src/models/system-one.ts";
 import { decisionRequestSchema } from "../src/models/system-one-schema.ts";
-import { desktopFixture, windowFixture } from "./fixtures.ts";
+import { desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
 
 const BUTTON_COUNT = 40;
 const APP_COUNT = 113;
-const EXPECTED_REQUESTS = 2;
+const EXPECTED_REQUESTS = 1;
 const EXPECTED_APP_REQUESTS = 2;
+const MANY_FIELDS = 30;
+const MAX_DECISION_REQUESTS = 20;
+const INFERENCE_DELAY_MS = 200;
+const STOP_AFTER_MS = 20;
 
 function answer(choice: string, criteria: Readonly<Record<string, string>>): Response {
   return Response.json({
@@ -58,11 +62,8 @@ test("chooses the search field among many visible controls without serial checks
       const body = decisionRequestSchema.parse(await request.json());
       const { criteria, instructions } = body.questions.next_action;
       const keys = Object.keys(criteria);
-      if (instructions.startsWith("Has this user request")) {
-        return answer("A1", criteria);
-      }
       if (instructions.startsWith("Which action")) {
-        const searchKey = keys.find((key) => criteria[key]?.includes("Search") === true);
+        const searchKey = keys.find((key) => criteria[key]?.includes("search field") === true);
         return answer(searchKey ?? "A0", criteria);
       }
       return answer("A0", criteria);
@@ -161,3 +162,145 @@ test.each([false, true])(
     }
   },
 );
+
+test("stops a long field-readiness cascade with an explicit stalled reason", async () => {
+  let requests = 0;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      requests += 1;
+      const body = decisionRequestSchema.parse(await request.json());
+      const readiness = body.questions.next_action.instructions.startsWith(
+        "Is a user-requested change",
+      );
+      return answer(readiness ? "A1" : "A0", body.questions.next_action.criteria);
+    },
+  });
+  try {
+    const window = {
+      ...windowFixture(),
+      elements: [
+        {
+          element_index: 0,
+          element_token: "save",
+          role: "button",
+          label: "Save",
+          actions: ["AXPress"],
+        },
+        ...Array.from({ length: MANY_FIELDS }, (_unused, index) => ({
+          element_index: index + 1,
+          element_token: `field-${index}`,
+          role: "textbox",
+          label: `Field ${index}`,
+          value: "ready",
+          editable: true,
+        })),
+      ],
+    };
+    await expectFailure(
+      new SystemOneDecisionModel(server.url.href, "model").choose({
+        task: "Save these fields",
+        observation: { desktop: desktopFixture(), window },
+        actions: [
+          {
+            kind: "click_element",
+            pid: window.pid,
+            window_id: window.window_id,
+            element_token: "save",
+            reason: "Save",
+          },
+        ],
+        async inspectClick() {
+          return { kind: "form_submit" };
+        },
+      }),
+      "Decision stalled on this observation",
+    );
+    expect(requests).toBe(MAX_DECISION_REQUESTS);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("caller Stop aborts a pending model request without starting another", async () => {
+  const controller = new AbortController();
+  let starts = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      return Response.json({
+        answers: {
+          next_action: { choice: "A1", probabilities: { A0: 0, A1: 1 } },
+        },
+      });
+    },
+  });
+  try {
+    let failed = false;
+    try {
+      await new SystemOneDecisionModel(server.url.href, "model").choose({
+        task: "Open the requested item",
+        observation: { desktop: desktopFixture(), window: windowFixture() },
+        actions: [
+          { kind: "finish", reason: "Done", summary: "Done" },
+          { kind: "blocked", reason: "Need user help" },
+        ],
+        signal: controller.signal,
+        onRequest(event) {
+          if (event.status === "start") {
+            starts += 1;
+            controller.abort();
+          }
+        },
+      });
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+    expect(starts).toBe(1);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("caller Stop aborts an in-flight model request", async () => {
+  const controller = new AbortController();
+  const events: string[] = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch() {
+      await Bun.sleep(INFERENCE_DELAY_MS);
+      return Response.json({
+        answers: { next_action: { choice: "A0", probabilities: { A0: 1, A1: 0 } } },
+      });
+    },
+  });
+  try {
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, STOP_AFTER_MS);
+    try {
+      await expectFailure(
+        new SystemOneDecisionModel(server.url.href, "model").choose({
+          task: "Open the requested item",
+          observation: { desktop: desktopFixture(), window: windowFixture() },
+          actions: [
+            { kind: "finish", reason: "Done", summary: "Done" },
+            { kind: "blocked", reason: "Need user help" },
+          ],
+          signal: controller.signal,
+          onRequest(event) {
+            events.push(event.status);
+          },
+        }),
+        "abort",
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(events).toEqual(["start", "error"]);
+  } finally {
+    await server.stop(true);
+  }
+});

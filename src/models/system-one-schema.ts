@@ -11,15 +11,15 @@ const answersSchema = z.object({
   next_action: answerSchema,
 });
 const decisionResponseSchema = z.object({ answers: answersSchema });
-const questionSchema = z.object({
+const questionSchema = z.strictObject({
   criteria: criteriaSchema,
   instructions: z.string(),
   type: z.literal("choice"),
 });
-const questionsSchema = z.object({
+const questionsSchema = z.strictObject({
   next_action: questionSchema,
 });
-const decisionRequestSchema = z.object({
+const decisionRequestSchema = z.strictObject({
   model: z.string(),
   questions: questionsSchema,
   state: z.string(),

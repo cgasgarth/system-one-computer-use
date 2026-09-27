@@ -38,37 +38,6 @@ function turnFeedback(lastError: string): string {
     ? ""
     : `Last tool error: ${lastError.slice(0, ERROR_CHARS)}. Other tools remain available.`;
 }
-function dialogVisible(observation: Observation): boolean {
-  return (
-    observation.window?.elements.some((element) =>
-      ["dialog", "alertdialog", "AXDialog", "AXSheet", "AXPopover"].includes(element.role),
-    ) === true
-  );
-}
-function completionEvidence(
-  history: readonly TaskStep[],
-  observation: Observation,
-): string | undefined {
-  const last = history.at(-1);
-  if (last?.performedAction !== true || last.action.kind !== "click_element") {
-    return undefined;
-  }
-  const before = last.presentedDialog;
-  const after = dialogVisible(observation);
-  if (before === undefined || before === after) {
-    return undefined;
-  }
-  const written = history
-    .slice(0, -1)
-    .findLast(
-      (step) => step.performedAction === true && step.verifiedField !== undefined,
-    )?.verifiedField;
-  const field =
-    written === undefined
-      ? ""
-      : ` Before that click, a read-back confirmed ${written.role} ${JSON.stringify(written.label)} contained ${JSON.stringify(written.value)}.`;
-  return `A click on ${last.control?.role ?? "control"} ${JSON.stringify(last.control?.label ?? "")} returned successfully. A subsequent observation shows the dialog changed from ${before ? "open" : "closed"} to ${after ? "open" : "closed"}.${field}`;
-}
 function selectedControl(action: Action, observation: Observation): TaskStep["control"] {
   if (action.kind !== "click_element") {
     return undefined;
@@ -132,7 +101,11 @@ async function applyInput({
       : { output: `${opened.name} is already open and selected.`, unchanged: opened.unchanged };
   }
   await verifyBrowserClick({ options, surfaces, observation, action });
-  await executeInput(computer, action);
+  options.signal?.throwIfAborted();
+  await executeInput(computer, action, {
+    observation,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
   return { output: describeAction(action), performedAction: true };
 }
 async function selectSurface({ options, surfaces, action }: TurnContext): Promise<ActionResult> {
@@ -140,22 +113,6 @@ async function selectSurface({ options, surfaces, action }: TurnContext): Promis
     throw new Error("Expected a surface selection");
   }
   await surfaces.select(action.surface, options.computer(action.surface), options.previousSurface);
-  const selected = await surfaces.observe(options.computer);
-  if (
-    action.surface === "browser" &&
-    selected.window?.url === "about:blank" &&
-    selected.window.elements.length === 0
-  ) {
-    return applyInput({
-      options,
-      surfaces,
-      observation: selected,
-      action: {
-        kind: "request_url",
-        reason: "Open the destination needed for the selected browser tool.",
-      },
-    });
-  }
   return { output: `Selected ${action.surface} tools` };
 }
 async function act(context: TurnContext): Promise<ActionResult> {
@@ -219,6 +176,10 @@ function chooseInput(
   const { observation, lastError, observationFailed } = snapshot;
   const actions = input.progress.choices(
     actionOptions({
+      task: options.task,
+      ...(options.previousSurface === undefined
+        ? {}
+        : { previousSurface: options.previousSurface }),
       mode: surfaces.mode,
       needsApplication: surfaces.needsApplication && options.applications.length > 0,
       observation,
@@ -237,8 +198,6 @@ function chooseInput(
       ? "The screen changed after the last tool reported an error. Its effect is uncertain, not necessarily absent. Check the current result before repeating the action."
       : "";
   const context = `${turnFeedback(lastError)}\n${changedAfterError}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
-  const executed = completionEvidence(history, observation);
-  const priorCommit = history.findLast((step) => step.completionCommit !== undefined);
   const chosenComputer = surfaces.mode === undefined ? undefined : options.computer(surfaces.mode);
   const inspectClick = chosenComputer?.inspectClick.bind(chosenComputer);
   return {
@@ -247,16 +206,6 @@ function chooseInput(
     actions,
     context: options.context?.slice(0, HISTORY_CHARS) ?? "",
     feedback: context,
-    ...(executed === undefined ? {} : { completionEvidence: executed }),
-    ...(priorCommit?.completionCommit === undefined
-      ? {}
-      : {
-          priorCompletionCommit: {
-            answer: priorCommit.completionCommit,
-            observedState: priorCommit.observation,
-            stepIndex: priorCommit.index,
-          },
-        }),
     ...(inspectClick === undefined ? {} : { inspectClick }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.onDecisionRequest === undefined ? {} : { onRequest: options.onDecisionRequest }),
@@ -339,6 +288,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   );
   options.signal?.throwIfAborted();
   await options.onStage?.({ stage: "action", stepIndex: history.length + 1 });
+  options.signal?.throwIfAborted();
   const acting = performance.now();
   const finishSurface =
     decision.action.kind === "finish" ? await verifyFinishSurface(input, observation) : undefined;
@@ -355,7 +305,6 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
   const step: TaskStep = {
     action: decision.action,
     ...(control === undefined ? {} : { control }),
-    presentedDialog: dialogVisible(observation),
     decisionMs: decision.latencyMs + (finishSurface?.decision?.latencyMs ?? 0),
     observationMs,
     actionMs: Math.max(0, performance.now() - acting - (finishSurface?.decision?.latencyMs ?? 0)),
@@ -367,13 +316,6 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     ...(decision.rejectedOperations === undefined
       ? {}
       : { rejectedOperations: decision.rejectedOperations }),
-    ...(decision.completion === undefined ? {} : { completion: decision.completion }),
-    ...(decision.completionTarget === undefined
-      ? {}
-      : { completionTarget: decision.completionTarget }),
-    ...(decision.completionCommit === undefined
-      ? {}
-      : { completionCommit: decision.completionCommit }),
     ...(decision.checks === undefined ? {} : { checks: decision.checks }),
     observation: summarizeObservation(observation),
     ...(finishSurface?.decision === undefined ? {} : { terminalDecision: finishSurface.decision }),
