@@ -22,8 +22,10 @@ const CLICK_VERBS = {
 const MAX_URL_CHARS = 180;
 const MAX_GROUP_URLS = 6;
 
+type ClickOperation = NonNullable<Extract<Action, { kind: "click_element" }>["operation"]>;
+type ActionGroupKind = Exclude<Action["kind"], "click_element"> | `click_${ClickOperation}`;
 interface ActionGroup {
-  readonly kind: Action["kind"];
+  readonly kind: ActionGroupKind;
   readonly description: string;
   readonly actions: readonly Action[];
 }
@@ -31,8 +33,11 @@ interface OperationDecision {
   readonly options: readonly string[];
   readonly answer: DecisionAnswer;
 }
-const DESCRIPTIONS: Readonly<Record<Action["kind"], string>> = {
-  click_element: "Click a button or open an existing link.",
+const DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
+  click_press: "Click a button or open an existing link.",
+  click_pick: "Pick an observed option or item.",
+  click_confirm: "Confirm an observed control.",
+  click_open: "Open an observed item.",
   compose_text: "Enter or replace text in an editable field.",
   type_text: "Enter supplied text in an editable field.",
   request_url: "Navigate to a URL.",
@@ -47,9 +52,10 @@ const DESCRIPTIONS: Readonly<Record<Action["kind"], string>> = {
   invoke_menu: "Use an observed command in this application's menu.",
 };
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
-  const grouped = new Map<Action["kind"], Action[]>();
+  const grouped = new Map<ActionGroupKind, Action[]>();
   for (const action of actions) {
-    const key = action.kind;
+    const key: ActionGroupKind =
+      action.kind === "click_element" ? `click_${action.operation ?? "press"}` : action.kind;
     const group = grouped.get(key) ?? [];
     group.push(action);
     grouped.set(key, group);

@@ -10,6 +10,30 @@ const actions: ActionChoices = [
   { kind: "compose_text", pid: 7, window_id: 9, element_token: "subject", reason: "Enter subject" },
   { kind: "click_element", pid: 7, window_id: 9, element_token: "save", reason: "Save document" },
   {
+    kind: "click_element",
+    operation: "pick",
+    pid: 7,
+    window_id: 9,
+    element_token: "option",
+    reason: "Pick High",
+  },
+  {
+    kind: "click_element",
+    operation: "open",
+    pid: 7,
+    window_id: 9,
+    element_token: "file",
+    reason: "Open file",
+  },
+  {
+    kind: "click_element",
+    operation: "confirm",
+    pid: 7,
+    window_id: 9,
+    element_token: "confirm",
+    reason: "Confirm input",
+  },
+  {
     kind: "press_key",
     pid: 7,
     window_id: 9,
@@ -32,7 +56,10 @@ test("groups text, click, and keyboard actions by their observed operation kind"
   const groups = actionGroups(actions);
   expect(groups.map((group) => group.kind)).toEqual([
     "compose_text",
-    "click_element",
+    "click_press",
+    "click_pick",
+    "click_open",
+    "click_confirm",
     "press_key",
     "invoke_menu",
     "finish",
@@ -41,8 +68,17 @@ test("groups text, click, and keyboard actions by their observed operation kind"
   expect(groups.find((group) => group.kind === "compose_text")?.description).toBe(
     "Enter or replace text in an editable field.",
   );
-  expect(groups.find((group) => group.kind === "click_element")?.description).toBe(
+  expect(groups.find((group) => group.kind === "click_press")?.description).toBe(
     "Click a button or open an existing link.",
+  );
+  expect(groups.find((group) => group.kind === "click_pick")?.description).toBe(
+    "Pick an observed option or item.",
+  );
+  expect(groups.find((group) => group.kind === "click_open")?.description).toBe(
+    "Open an observed item.",
+  );
+  expect(groups.find((group) => group.kind === "click_confirm")?.description).toBe(
+    "Confirm an observed control.",
   );
   expect(groups.find((group) => group.kind === "invoke_menu")?.description).toBe(
     "Use an observed command in this application's menu.",
