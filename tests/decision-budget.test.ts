@@ -42,7 +42,7 @@ function makeButtons(): {
   }));
 }
 
-test("chooses the search field among many visible controls without serial checks", async () => {
+test("chooses the text operation among many buttons without serial checks", async () => {
   let requests = 0;
   const buttons = makeButtons();
   const search = {
@@ -62,6 +62,12 @@ test("chooses the search field among many visible controls without serial checks
       const body = decisionRequestSchema.parse(await request.json());
       const { criteria, instructions } = body.questions.next_action;
       const keys = Object.keys(criteria);
+      const textKey = keys.find(
+        (key) => criteria[key]?.includes("Enter or replace text in an editable field") === true,
+      );
+      if (textKey !== undefined) {
+        return answer(textKey, criteria);
+      }
       if (instructions.startsWith("Which action")) {
         const searchKey = keys.find((key) => criteria[key]?.includes("search field") === true);
         return answer(searchKey ?? "A0", criteria);

@@ -22,9 +22,8 @@ const CLICK_VERBS = {
 const MAX_URL_CHARS = 180;
 const MAX_GROUP_URLS = 6;
 
-type ActionGroupKind = Action["kind"] | "visible_controls" | "application_menu";
 interface ActionGroup {
-  readonly kind: ActionGroupKind;
+  readonly kind: Action["kind"];
   readonly description: string;
   readonly actions: readonly Action[];
 }
@@ -45,29 +44,12 @@ const DESCRIPTIONS: Readonly<Record<Action["kind"], string>> = {
   blocked: "Required input or access is missing. Stop.",
   request_app: "Open an installed application.",
   observe_window: "Select a different open window.",
-  invoke_menu: "Choose an enabled command from the selected application's observed menu.",
+  invoke_menu: "Use an observed command in this application's menu.",
 };
-const GROUP_DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
-  ...DESCRIPTIONS,
-  visible_controls:
-    "Use a visible control in this window, including search and text fields, rows, and buttons.",
-  application_menu: "Use an observed command in this application's menu.",
-};
-function groupKind(action: Action): ActionGroupKind {
-  if (
-    action.kind === "click_element" ||
-    action.kind === "compose_text" ||
-    action.kind === "press_key" ||
-    action.kind === "type_text"
-  ) {
-    return "visible_controls";
-  }
-  return action.kind === "invoke_menu" ? "application_menu" : action.kind;
-}
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
-  const grouped = new Map<ActionGroupKind, Action[]>();
+  const grouped = new Map<Action["kind"], Action[]>();
   for (const action of actions) {
-    const key = groupKind(action);
+    const key = action.kind;
     const group = grouped.get(key) ?? [];
     group.push(action);
     grouped.set(key, group);
@@ -89,7 +71,7 @@ function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
             .join(
               " | ",
             )}${group.length > MAX_GROUP_URLS ? ` | and ${group.length - MAX_GROUP_URLS} more` : ""}.`
-        : GROUP_DESCRIPTIONS[kind],
+        : DESCRIPTIONS[kind],
     actions: group,
   }));
 }
