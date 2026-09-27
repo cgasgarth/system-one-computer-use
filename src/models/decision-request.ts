@@ -5,7 +5,6 @@ import type { DecisionAnswer, DecisionRequest, DecisionResponse } from "./system
 const TIMEOUT_MS = 10_000;
 type DecisionRequestPhase =
   | "operation"
-  | "target-page"
   | "target"
   | "commit-classification"
   | "commit-authorization"
