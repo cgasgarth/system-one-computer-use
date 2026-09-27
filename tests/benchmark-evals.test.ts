@@ -12,7 +12,12 @@ import {
   writeCounts,
   zeroWrites,
 } from "../scripts/evals/benchmark/benchmark-cases.ts";
-import { decisionPresets, plan } from "../scripts/evals/benchmark/benchmark-plan.ts";
+import {
+  decisionPresets,
+  plan,
+  selectedCases,
+  selectedPresets,
+} from "../scripts/evals/benchmark/benchmark-plan.ts";
 import { median, summarize } from "../scripts/evals/benchmark/benchmark-stats.ts";
 import type { TrialRecord } from "../scripts/evals/benchmark/benchmark-stats.ts";
 import { startWorkspace } from "../scripts/evals/workspace.ts";
@@ -102,6 +107,15 @@ describe("benchmark matrix", () => {
     expect(decisionPresets()).toHaveLength(SEVEN_PRESETS);
     expect(cases).toHaveLength(FOUR_CASES);
     expect(matrix).toMatchObject({ trialsPerCase: THREE_REPEATS, totalTasks: EIGHTY_FOUR });
+  });
+  test("a bounded development plan uses one trial without changing the default matrix", () => {
+    const subset = plan({
+      models: selectedPresets(["kev-4b", "kev-0.8b"]),
+      scenarios: selectedCases(["open-document", "fill-unsaved-draft"]),
+      trialCount: 1,
+    });
+    expect(subset).toMatchObject({ trialsPerCase: 1, totalTasks: 4 });
+    expect(plan()).toMatchObject({ trialsPerCase: THREE_REPEATS, totalTasks: EIGHTY_FOUR });
   });
   test("an early Finish fails the unsaved draft case", () => {
     const fixture = workspace();

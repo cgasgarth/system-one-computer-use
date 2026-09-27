@@ -24,7 +24,7 @@ import {
 } from "./benchmark-guards.ts";
 import { machineProfile } from "./benchmark-machine.ts";
 import { fixtureHash, recordEvidence, recordTrial } from "./benchmark-output.ts";
-import { TRIALS_PER_CASE, plan, selectionFromEnvironment, textPreset } from "./benchmark-plan.ts";
+import { plan, selectionFromEnvironment, textPreset } from "./benchmark-plan.ts";
 import { modelProvenance } from "./benchmark-provenance.ts";
 import { ModelCleanupError } from "./benchmark-errors.ts";
 import { BenchmarkRuntime } from "./benchmark-runtime.ts";
@@ -77,6 +77,7 @@ async function runModel(input: {
   readonly workspace: Readonly<Workspace>;
   readonly expectedHashes: Map<string, string>;
   readonly scenarios: readonly BenchmarkCase[];
+  readonly trialCount: number;
   readonly output: string;
   readonly paths: Readonly<ConstructorParameters<typeof BenchmarkRuntime>[0]["paths"]>;
   readonly trials: TrialRecord[];
@@ -90,6 +91,7 @@ async function runModel(input: {
     workspace,
     expectedHashes,
     scenarios,
+    trialCount,
     output,
     paths,
     trials,
@@ -119,7 +121,7 @@ async function runModel(input: {
       metrics: active.metrics,
       postDecisionTextProbeMs,
     });
-    for (let trial = 1; trial <= TRIALS_PER_CASE; trial += 1) {
+    for (let trial = 1; trial <= trialCount; trial += 1) {
       for (const scenario of scenarios) {
         const expectedInitialHash = expectedHashes.get(scenario.id);
         // All model and browser actions are intentionally serial.
@@ -163,6 +165,7 @@ async function runPreset(input: {
   readonly workspace: Readonly<Workspace>;
   readonly expectedHashes: Map<string, string>;
   readonly scenarios: readonly BenchmarkCase[];
+  readonly trialCount: number;
   readonly output: string;
   readonly paths: Readonly<ConstructorParameters<typeof BenchmarkRuntime>[0]["paths"]>;
   readonly trials: TrialRecord[];
@@ -176,6 +179,7 @@ async function runPreset(input: {
     workspace,
     expectedHashes,
     scenarios,
+    trialCount,
     output,
     paths,
     trials,
@@ -202,6 +206,7 @@ async function runPreset(input: {
       workspace,
       expectedHashes,
       scenarios,
+      trialCount,
       output,
       paths,
       trials,
@@ -245,7 +250,7 @@ async function runBenchmark(): Promise<void> {
   const trials: TrialRecord[] = [];
   const startups: StartupRecord[] = [];
   const selection = selectionFromEnvironment();
-  const { models: presets, scenarios } = selection;
+  const { models: presets, scenarios, trialCount } = selection;
   const manifest = {
     runId,
     sourceHash: await sourceHash(),
@@ -321,6 +326,7 @@ async function runBenchmark(): Promise<void> {
         workspace,
         expectedHashes,
         scenarios,
+        trialCount,
         output,
         paths,
         trials,
@@ -343,7 +349,7 @@ async function runBenchmark(): Promise<void> {
       cleanupFailure = "Benchmark cleanup failed; inspect run-status.json before starting the app.";
     }
     const failedLoads = startups.filter((record) => record.status === "load-failed").length;
-    const expectedTrials = presets.length * scenarios.length * TRIALS_PER_CASE;
+    const expectedTrials = presets.length * scenarios.length * trialCount;
     await Bun.write(
       path.join(output, "startup.json"),
       JSON.stringify(startups, undefined, JSON_INDENT),

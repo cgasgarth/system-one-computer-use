@@ -1,9 +1,11 @@
 import { DEFAULT_MAX_CHOICES, catalog } from "../../../src/app/models/catalog.ts";
 import type { Preset } from "../../../src/app/models/catalog.ts";
+import { z } from "zod";
 import { cases } from "./benchmark-cases.ts";
 import type { BenchmarkCase } from "./benchmark-cases.ts";
 
 const TRIALS_PER_CASE = 3;
+const MIN_TRIALS = 1;
 const MIN_PRESETS = 7;
 function decisionPresets(): readonly Preset[] {
   const found = catalog.filter((entry) => entry.role === "decision");
@@ -43,19 +45,28 @@ function selectedCases(ids: readonly string[] | undefined): readonly BenchmarkCa
 function selectionFromEnvironment(): {
   readonly models: readonly Preset[];
   readonly scenarios: readonly BenchmarkCase[];
+  readonly trialCount: number;
 } {
   const modelIds = Bun.env["BENCHMARK_MODELS"]?.split(",").map((value) => value.trim());
   const caseIds = Bun.env["BENCHMARK_CASES"]?.split(",").map((value) => value.trim());
-  return { models: selectedPresets(modelIds), scenarios: selectedCases(caseIds) };
+  const trialCount = z.coerce
+    .number()
+    .int()
+    .min(MIN_TRIALS)
+    .max(TRIALS_PER_CASE)
+    .parse(Bun.env["BENCHMARK_TRIALS"] ?? TRIALS_PER_CASE);
+  return { models: selectedPresets(modelIds), scenarios: selectedCases(caseIds), trialCount };
 }
 function plan(
   input: {
     readonly models?: readonly Preset[];
     readonly scenarios?: readonly BenchmarkCase[];
+    readonly trialCount?: number;
   } = {},
 ): object {
   const models = input.models ?? decisionPresets();
   const scenarios = input.scenarios ?? cases;
+  const trialCount = input.trialCount ?? TRIALS_PER_CASE;
   return {
     decisionPresets: models.map((model) => ({
       id: model.id,
@@ -64,8 +75,8 @@ function plan(
     })),
     textPreset: textPreset().id,
     cases: scenarios.map((scenario) => scenario.id),
-    trialsPerCase: TRIALS_PER_CASE,
-    totalTasks: models.length * scenarios.length * TRIALS_PER_CASE,
+    trialsPerCase: trialCount,
+    totalTasks: models.length * scenarios.length * trialCount,
     modelOrder: "catalog order; one decision provider at a time",
     modelStartup: "excluded from warm task seconds and recorded separately",
     runGuard: "installed host stopped; private isolated Chrome context; localhost actions only",
