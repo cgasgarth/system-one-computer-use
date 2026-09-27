@@ -113,31 +113,13 @@ test("reports when even the page choices exceed a model limit", async () => {
   }
 });
 
-test("requires a real model choice for a sole action", async () => {
-  let requests = 0;
-  const server = Bun.serve({
-    port: 0,
-    async fetch(request) {
-      requests += 1;
-      const body = decisionRequestSchema.parse(await request.json());
-      expect(Object.values(body.questions.next_action.criteria)).toEqual([
-        `Open ${TARGET}`,
-        "None of these actions; do not execute the sole remaining target.",
-      ]);
-      return answer("A0", Object.keys(body.questions.next_action.criteria));
-    },
+test("uses the already-selected sole target without asking a two-choice model", async () => {
+  const model = new SystemOneDecisionModel("http://127.0.0.1:1", "julia-latest", {
+    maxChoices: MAX_JULIA_CHOICES,
   });
-  try {
-    const result = await new SystemOneDecisionModel(server.url.href, "julia-latest", {
-      maxChoices: MAX_JULIA_CHOICES,
-    }).choose({
-      ...input,
-      actions: [{ kind: "request_app", name: TARGET, reason: `Open ${TARGET}` }],
-    });
-    expect(result.action).toMatchObject({ kind: "request_app", name: TARGET });
-    expect(result.probabilities).toEqual({ A0: 1, A1: 0 });
-    expect(requests).toBe(1);
-  } finally {
-    await server.stop(true);
-  }
+  const result = await model.choose({
+    ...input,
+    actions: [{ kind: "request_app", name: TARGET, reason: `Open ${TARGET}` }],
+  });
+  expect(result.action).toMatchObject({ kind: "request_app", name: TARGET });
 });

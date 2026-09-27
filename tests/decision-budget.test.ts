@@ -7,7 +7,7 @@ import { desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
 const BUTTON_COUNT = 40;
 const APP_COUNT = 113;
 const EXPECTED_REQUESTS = 1;
-const EXPECTED_APP_REQUESTS = 1;
+const EXPECTED_APP_REQUESTS = 2;
 const MANY_FIELDS = 30;
 const MAX_DECISION_REQUESTS = 20;
 const INFERENCE_DELAY_MS = 200;
@@ -60,10 +60,13 @@ test("chooses the search field among many visible controls without serial checks
     async fetch(request) {
       requests += 1;
       const body = decisionRequestSchema.parse(await request.json());
-      const { criteria } = body.questions.next_action;
+      const { criteria, instructions } = body.questions.next_action;
       const keys = Object.keys(criteria);
-      const searchKey = keys.find((key) => criteria[key]?.includes("search field") === true);
-      return answer(searchKey ?? "A0", criteria);
+      if (instructions.startsWith("Which action")) {
+        const searchKey = keys.find((key) => criteria[key]?.includes("search field") === true);
+        return answer(searchKey ?? "A0", criteria);
+      }
+      return answer("A0", criteria);
     },
   });
   try {
@@ -120,9 +123,11 @@ test.each([false, true])(
       async fetch(request) {
         requests += 1;
         const body = decisionRequestSchema.parse(await request.json());
-        const { criteria } = body.questions.next_action;
+        const { criteria, instructions } = body.questions.next_action;
         const keys = Object.keys(criteria);
-        const selected = keys.find((key) => criteria[key]?.includes("Messages") === true);
+        const selected = instructions.startsWith("Which operation")
+          ? keys.find((key) => criteria[key]?.includes("Open an installed application") === true)
+          : keys.find((key) => criteria[key]?.includes("Messages") === true);
         return answer(selected ?? "A0", criteria);
       },
     });

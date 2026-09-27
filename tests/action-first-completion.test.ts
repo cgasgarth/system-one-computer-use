@@ -135,25 +135,13 @@ test.each([
   }
 });
 
-test("a sole Blocked action still requires a primary model choice", async () => {
-  const server = Bun.serve({
-    port: 0,
-    async fetch(request) {
-      const body = decisionRequestSchema.parse(await request.json());
-      expect(Object.keys(body.questions.next_action.criteria)).toEqual(["A0", "A1"]);
-      return response("A0", body.questions.next_action.criteria);
-    },
+test("a primary Blocked selection stops", async () => {
+  const result = await new SystemOneDecisionModel("http://127.0.0.1:1", "unused").choose({
+    task: "Open a missing item",
+    observation: { desktop: desktopFixture() },
+    actions: [blocked],
   });
-  try {
-    const result = await new SystemOneDecisionModel(server.url.href, "unused").choose({
-      task: "Open a missing item",
-      observation: { desktop: desktopFixture() },
-      actions: [blocked],
-    });
-    expect(result.action.kind).toBe("blocked");
-  } finally {
-    await server.stop(true);
-  }
+  expect(result.action.kind).toBe("blocked");
 });
 
 test("the action decision keeps a middle constraint in the full current request", () => {

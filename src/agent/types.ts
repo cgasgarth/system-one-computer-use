@@ -7,7 +7,6 @@ import type { Action, Surface } from "./contracts.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { ActionCheck } from "../models/action-check.ts";
 import type { OperationDecision } from "../models/decision-context.ts";
-import type { RejectedAction } from "../models/action-selection-error.ts";
 
 interface ActionResult {
   readonly output: string;
@@ -51,7 +50,6 @@ interface TaskStep {
   readonly candidates?: readonly Action[];
   readonly operation?: OperationDecision;
   readonly rejectedOperations?: readonly OperationDecision[];
-  readonly rejectedActions?: readonly RejectedAction[];
   readonly checks?: readonly ActionCheck[];
 }
 interface TaskResult {

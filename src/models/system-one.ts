@@ -5,7 +5,6 @@ import type { ClickInspection } from "../computer/types.ts";
 import { requestDecision } from "./decision-request.ts";
 import type { DecisionRequestContext, DecisionRequestPhase } from "./decision-request.ts";
 import { ActionSelectionError } from "./action-selection-error.ts";
-import type { RejectedAction } from "./action-selection-error.ts";
 import { verifyCommit } from "./commit-verification.ts";
 import type { ActionCheck } from "./action-check.ts";
 import { binaryAnswerSchema } from "./system-one-schema.ts";
@@ -30,7 +29,6 @@ interface Decision {
   readonly checks?: readonly ActionCheck[];
   readonly operation?: OperationDecision;
   readonly rejectedOperations?: readonly OperationDecision[];
-  readonly rejectedActions?: readonly RejectedAction[];
   readonly candidates?: readonly Action[];
 }
 
@@ -77,38 +75,6 @@ function decision(
     throw new Error("System One returned an invalid action probability distribution");
   }
   return { action, latencyMs: timing.latencyMs, probabilities: answer.probabilities };
-}
-function rejectedActionFeedback(
-  action: Action,
-  checks: readonly ActionCheck[],
-  observation: Observation,
-): string {
-  const reasons = checks.flatMap((check) => {
-    if (check.phase === "commit-authorization" && check.answer.choice === "A1") {
-      return ["authorization for its stored effect was not established"];
-    }
-    if (check.phase === "field-readiness" && check.answer.choice === "A0") {
-      return ["a requested field change was judged still missing"];
-    }
-    return [];
-  });
-  const reason =
-    reasons.length === 0 ? "it did not pass its current action check" : reasons.join("; ");
-  return `The proposed action ${actionDescription(action, observation)} was not executed because ${reason}. Choose another observed action.`;
-}
-function declinedSoleTarget(
-  remaining: readonly Action[],
-  checks: readonly ActionCheck[],
-  rejected: readonly RejectedAction[],
-): ActionSelectionError {
-  const [sole] = remaining;
-  return new ActionSelectionError(checks, [], {
-    groupCount: 1,
-    rejectedActions:
-      sole === undefined
-        ? rejected
-        : [...rejected, { action: sole, reason: "The model selected None for this target." }],
-  });
 }
 
 class SystemOneDecisionModel implements DecisionModel {
@@ -166,72 +132,7 @@ class SystemOneDecisionModel implements DecisionModel {
   }
 
   private async chooseObserved(input: DecisionInput): Promise<Decision> {
-    if (input.actions.length <= this.maxChoices) {
-      return this.chooseDirect(input, performance.now());
-    }
     return this.chooseAvailable(input, input.actions, performance.now());
-  }
-
-  private async chooseDirect(input: DecisionInput, started: number): Promise<Decision> {
-    let remaining: readonly Action[] = input.actions;
-    let feedback = input.feedback ?? "";
-    const rejectedChecks: ActionCheck[] = [];
-    const rejectedActions: RejectedAction[] = [];
-    while (remaining.length > 0) {
-      const currentInput = { ...input, feedback };
-      // Each retry removes only the rejected action; other operations remain available.
-      // eslint-disable-next-line no-await-in-loop
-      const { answer, optionCount } = await this.directAnswer(currentInput, remaining);
-      if (answer.choice === `A${remaining.length}`) {
-        throw declinedSoleTarget(remaining, rejectedChecks, rejectedActions);
-      }
-      const selected = decision(answer, remaining, {
-        latencyMs: performance.now() - started,
-        optionCount,
-      });
-      // eslint-disable-next-line no-await-in-loop
-      const attempt = await this.verifySelected(currentInput, selected, started);
-      if (attempt.decision !== undefined) {
-        return {
-          ...attempt.decision,
-          checks: [...rejectedChecks, ...attempt.checks],
-          rejectedActions,
-          candidates: remaining,
-        };
-      }
-      rejectedChecks.push(...attempt.checks);
-      const rejected = rejectedActionFeedback(selected.action, attempt.checks, input.observation);
-      rejectedActions.push({ action: selected.action, reason: rejected });
-      feedback = [input.feedback ?? "", rejected].filter(Boolean).join("\n");
-      remaining = remaining.filter((action) => action !== selected.action);
-    }
-    throw new ActionSelectionError(rejectedChecks, [], { groupCount: 1, rejectedActions });
-  }
-
-  private async directAnswer(
-    input: DecisionInput,
-    actions: readonly Action[],
-  ): Promise<{ readonly answer: DecisionAnswer; readonly optionCount: number }> {
-    const descriptions = actions.map((action) => actionDescription(action, input.observation));
-    if (actions.length === 1) {
-      descriptions.push("None of these actions; do not execute the sole remaining target.");
-    }
-    const response = await this.request(input, "target", {
-      model: this.modelId,
-      state: decisionState(input),
-      questions: {
-        next_action: {
-          type: "choice",
-          instructions: `Which action best advances this goal: ${input.task}`,
-          criteria: criteriaFor(descriptions),
-        },
-      },
-    });
-    const answer = response.answers.next_action;
-    if (!validProbabilities(answer.probabilities, descriptions.length)) {
-      throw new Error("System One returned an invalid direct-action distribution");
-    }
-    return { answer, optionCount: descriptions.length };
   }
 
   // The bounded retry keeps operation and target evidence together.
@@ -294,7 +195,7 @@ class SystemOneDecisionModel implements DecisionModel {
           .join("\n"),
       };
     }
-    throw new ActionSelectionError(rejectedChecks, rejectedOperations, { groupCount });
+    throw new ActionSelectionError(rejectedChecks, rejectedOperations, groupCount);
   }
 
   private async pageActions(
