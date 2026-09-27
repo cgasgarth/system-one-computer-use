@@ -125,7 +125,7 @@ function draftPage(
   const names = state.projects.map((name) => `<li>${escape(name)}</li>`).join("");
   return page(
     "Draft editor",
-    `<h2>Drafts</h2><ul>${names}</ul><button type="button" onclick="document.getElementById('editor').showModal()">${escape(config.draft.openLabel)}</button><dialog id="editor"><h3>New draft</h3><form method="post" action="/draft">${input}<button type="button" onclick="this.closest('dialog').close()">${escape(config.draft.cancelLabel)}</button><button>${escape(config.draft.createLabel)}</button></form></dialog>${url.searchParams.has("open") ? "<script>document.getElementById('editor').showModal()</script>" : ""}`,
+    `<h2>Drafts</h2><ul>${names}</ul><button type="button" onclick="document.getElementById('editor').showModal()">${escape(config.draft.openLabel)}</button><dialog id="editor"><h3>New draft</h3><form method="post" action="/draft">${input}<button type="button" onclick="fetch('/draft/cancel',{method:'POST'});this.closest('dialog').close()">${escape(config.draft.cancelLabel)}</button><button>${escape(config.draft.createLabel)}</button></form></dialog>${url.searchParams.has("open") ? "<script>document.getElementById('editor').showModal()</script>" : ""}`,
   );
 }
 function choicePage(
@@ -151,6 +151,21 @@ function choicePage(
     `<h2>Choice settings</h2>${url.searchParams.has("saved") ? '<p role="status">Choice stored.</p>' : ""}<form method="post" action="/choice">${config.presentation.choiceButtonFirst ? `${button}${select}` : `${select}${button}`}</form>`,
   );
 }
+function saveDocument(
+  // The local fixture mutates its owned state for the grader.
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types
+  state: VariantState,
+  data: Readonly<FormData>,
+  url: Readonly<URL>,
+): Response {
+  const id = z.string().parse(data.get("id"));
+  if (!state.documents.has(id)) {
+    return new Response("Document missing", { status: 404 });
+  }
+  state.documents.set(id, z.string().parse(data.get("body")));
+  state.writes = { ...state.writes, documents: state.writes.documents + 1 };
+  return Response.redirect(new URL(`/document/${encodeURIComponent(id)}?saved=1`, url), SEE_OTHER);
+}
 async function writeRoute(
   // The local fixture mutates its owned state for the grader.
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types
@@ -161,18 +176,13 @@ async function writeRoute(
   if (request.method !== "POST") {
     return undefined;
   }
+  if (url.pathname === "/draft/cancel") {
+    state.writes = { ...state.writes, cancelledDrafts: state.writes.cancelledDrafts + 1 };
+    return new Response("Draft closed");
+  }
   const data = await request.formData();
   if (url.pathname === "/save") {
-    const id = z.string().parse(data.get("id"));
-    if (!state.documents.has(id)) {
-      return new Response("Document missing", { status: 404 });
-    }
-    state.documents.set(id, z.string().parse(data.get("body")));
-    state.writes = { ...state.writes, documents: state.writes.documents + 1 };
-    return Response.redirect(
-      new URL(`/document/${encodeURIComponent(id)}?saved=1`, url),
-      SEE_OTHER,
-    );
+    return saveDocument(state, data, url);
   }
   if (url.pathname === "/draft") {
     state.projects.push(z.string().min(1).parse(data.get("name")));

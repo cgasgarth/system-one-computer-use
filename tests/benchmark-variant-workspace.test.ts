@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { startVariantWorkspace } from "../scripts/evals/benchmark/variant-workspace.ts";
 import { zeroWrites } from "../scripts/evals/benchmark/benchmark-cases.ts";
+import { gradeVariant, variantCases } from "../scripts/evals/benchmark/variant-cases.ts";
+import {
+  canonicalVariantStart,
+  variantStateHash,
+} from "../scripts/evals/benchmark/variant-state.ts";
+import type { Window } from "../src/agent/contracts.ts";
 
 const dummy = {
   document: {
@@ -36,6 +42,7 @@ const dummy = {
     choiceButtonFirst: true,
   },
 };
+// oxlint-disable-next-line max-lines-per-function -- Independent fixture checks share one synthetic configuration.
 describe("generic validation workspace", () => {
   test("changes layout and labels while reset restores every stored effect", async () => {
     const workspace = startVariantWorkspace(dummy);
@@ -70,6 +77,94 @@ describe("generic validation workspace", () => {
       expect(workspace.documentBody("quartz-1")).toBe("Read the first note.");
       expect(workspace.choiceValue()).toBe("local-fast");
       expect(workspace.projects()).toHaveLength(0);
+    } finally {
+      await workspace.close();
+    }
+  });
+  test("uses changed task terms and rejects closing an unsaved editor", async () => {
+    const workspace = startVariantWorkspace(dummy);
+    try {
+      const scenarios = variantCases(workspace);
+      expect(scenarios.map((scenario) => scenario.id)).toEqual([
+        "open-document",
+        "fill-unsaved-draft",
+        "edit-and-save",
+        "select-duplicate-label",
+      ]);
+      const [, draft] = scenarios;
+      if (draft === undefined) {
+        throw new Error("Missing dummy draft case");
+      }
+      expect(draft.task).toContain("Pending Memo");
+      expect(draft.task).toContain("Memo title");
+      await fetch(`${workspace.origin}/draft/cancel`, { method: "POST" });
+      expect(workspace.writes().cancelledDrafts).toBe(1);
+      const window: Window = {
+        app_name: "Google Chrome",
+        elements: [],
+        pid: 0,
+        snapshot_id: "dummy",
+        window_id: 0,
+        window_title: "Draft editor",
+        url: `${workspace.origin}/draft?open=1`,
+      };
+      expect(
+        gradeVariant({
+          scenario: draft,
+          window,
+          status: "complete",
+          writes: workspace.writes(),
+        }),
+      ).toEqual({ passed: false, failure: "unintended-write" });
+    } finally {
+      await workspace.close();
+    }
+  });
+  test("binds a canonical start and stable reset hash to the variant", async () => {
+    const workspace = startVariantWorkspace(dummy);
+    try {
+      const [open] = variantCases(workspace);
+      if (open === undefined) {
+        throw new Error("Missing dummy document case");
+      }
+      const window: Window = {
+        app_name: "Google Chrome",
+        elements: [
+          {
+            element_index: 0,
+            element_token: "first-token",
+            role: "link",
+            label: "Quartz Memo",
+            href: `${workspace.origin}/document/quartz-1`,
+          },
+        ],
+        pid: 0,
+        snapshot_id: "first-snapshot",
+        window_id: 0,
+        window_title: "Documents",
+        url: `${workspace.origin}/`,
+      };
+      expect(canonicalVariantStart({ scenario: open, workspace, window })).toBe(true);
+      const originalHash = variantStateHash(workspace, window);
+      await fetch(`${workspace.origin}/save`, {
+        method: "POST",
+        body: new URLSearchParams({ id: "quartz-1", body: "Read the revised note." }),
+      });
+      expect(canonicalVariantStart({ scenario: open, workspace, window })).toBe(false);
+      workspace.reset();
+      const [link] = window.elements;
+      if (link === undefined) {
+        throw new Error("Missing dummy document link");
+      }
+      const rotatedWindow: Window = {
+        ...window,
+        snapshot_id: "second-snapshot",
+        elements: [{ ...link, element_token: "second-token" }],
+      };
+      expect(canonicalVariantStart({ scenario: open, workspace, window: rotatedWindow })).toBe(
+        true,
+      );
+      expect(variantStateHash(workspace, rotatedWindow)).toBe(originalHash);
     } finally {
       await workspace.close();
     }

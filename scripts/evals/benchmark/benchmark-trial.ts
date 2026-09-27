@@ -2,6 +2,7 @@
 import { runTask } from "../../../src/agent/loop.ts";
 import { ZodError } from "zod";
 import type { TaskStep } from "../../../src/agent/types.ts";
+import type { Window } from "../../../src/agent/contracts.ts";
 import type { Models } from "./benchmark-types.ts";
 import type { ManagedComputer } from "../../../src/computer/types.ts";
 import type {
@@ -31,6 +32,28 @@ interface TrialInput {
   readonly models: Readonly<Models>;
   readonly workspace: Readonly<Workspace>;
   readonly expectedInitialHash?: string;
+}
+interface TrialScenario {
+  readonly id: string;
+  readonly task: string;
+  readonly start: string;
+  readonly expectedWrites: WriteCounts;
+}
+interface TrialFixture {
+  readonly origin: string;
+  readonly reset: () => void;
+  readonly writeCounts: () => WriteCounts;
+  readonly canonicalStart: (window: Readonly<Window>) => boolean;
+  readonly initialStateHash: (window: Readonly<Window>) => string;
+  readonly grade: (
+    window: Readonly<Window>,
+    status: "complete" | "blocked",
+    writes: Readonly<WriteCounts>,
+  ) => { readonly passed: boolean; readonly failure?: FailureKind };
+}
+interface CoreTrialInput extends Omit<TrialInput, "scenario" | "workspace"> {
+  readonly scenario: Readonly<TrialScenario>;
+  readonly fixture: Readonly<TrialFixture>;
 }
 interface TrialOutcome {
   readonly record: TrialRecord;
@@ -96,11 +119,11 @@ function textTiming(
 }
 // Each trial gets new in-memory data. A model can only act within this localhost origin.
 // oxlint-disable-next-line max-statements, max-lines-per-function -- The trial owns the fixture and its final write audit.
-async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
-  const { modelId, trial, scenario, computer, models, workspace, expectedInitialHash } = input;
-  workspace.reset();
-  const browser = restrictedBrowser(computer, workspace.origin);
-  const before = writeCounts(workspace);
+async function runTrialCore(input: Readonly<CoreTrialInput>): Promise<TrialOutcome> {
+  const { modelId, trial, scenario, computer, models, fixture, expectedInitialHash } = input;
+  fixture.reset();
+  const browser = restrictedBrowser(computer, fixture.origin);
+  const before = fixture.writeCounts();
   const steps: TaskStep[] = [];
   const requests: DecisionRequestEvent[] = [];
   const wireRequests: { phase: DecisionWireEvent["phase"]; bodyJson: string; sha256: string }[] =
@@ -117,12 +140,12 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
   let stopMatrix = false;
   try {
     await browser.navigate?.("about:blank");
-    await browser.navigate?.(`${workspace.origin}${scenario.start}`);
+    await browser.navigate?.(`${fixture.origin}${scenario.start}`);
     const initial = await browser.window(0, 0);
-    if (!canonicalStart({ scenario, workspace, window: initial })) {
+    if (!fixture.canonicalStart(initial)) {
       throw new FixtureStateError("The reset fixture did not show its canonical start state.");
     }
-    observedInitialHash = initialStateHash(workspace, initial);
+    observedInitialHash = fixture.initialStateHash(initial);
     if (expectedInitialHash !== undefined && observedInitialHash !== expectedInitialHash) {
       throw new FixtureStateError(
         "Fixture reset changed the initial observed state for this case.",
@@ -158,7 +181,7 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
         if (step.error !== undefined && externalTargetKind(step.error) === "observed-escape") {
           throw new Error(step.error);
         }
-        const writes = subtractWrites(writeCounts(workspace), before);
+        const writes = subtractWrites(fixture.writeCounts(), before);
         if (excessWrites(writes, scenario.expectedWrites)) {
           throw new Error("The fixture received an unintended persistent write.");
         }
@@ -174,15 +197,9 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
     });
     taskStatus = result.status;
     taskMs = performance.now() - taskStarted;
-    const writes = subtractWrites(writeCounts(workspace), before);
+    const writes = subtractWrites(fixture.writeCounts(), before);
     const final = await browser.window(0, 0);
-    const resultGrade = grade({
-      scenario,
-      workspace,
-      window: final,
-      status: result.status,
-      writes,
-    });
+    const resultGrade = fixture.grade(final, result.status, writes);
     outcome = resultOutcome(resultGrade.passed, resultGrade.failure);
     if (result.status === "blocked") {
       const failedStep = steps.findLast((step) => step.error !== undefined);
@@ -205,12 +222,12 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
       error instanceof FixtureStateError ||
       (taskStarted === undefined && observedInitialHash === undefined);
   } finally {
-    const writes = subtractWrites(writeCounts(workspace), before);
+    const writes = subtractWrites(fixture.writeCounts(), before);
     if (excessWrites(writes, scenario.expectedWrites)) {
       outcome = "unintended-write";
     }
   }
-  const writeDelta: WriteCounts = subtractWrites(writeCounts(workspace), before);
+  const writeDelta: WriteCounts = subtractWrites(fixture.writeCounts(), before);
   const gradedOutcome = outcome;
   const infrastructure = infrastructureGrade(gradedOutcome, steps, errorMessage);
   const guardedExternalAttempts = steps.filter(
@@ -247,5 +264,20 @@ async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
     },
   };
 }
-export { runTrial };
-export type { TrialOutcome };
+async function runTrial(input: Readonly<TrialInput>): Promise<TrialOutcome> {
+  const { scenario, workspace, ...rest } = input;
+  return runTrialCore({
+    ...rest,
+    scenario,
+    fixture: {
+      origin: workspace.origin,
+      reset: workspace.reset,
+      writeCounts: () => writeCounts(workspace),
+      canonicalStart: (window) => canonicalStart({ scenario, workspace, window }),
+      initialStateHash: (window) => initialStateHash(workspace, window),
+      grade: (window, status, writes) => grade({ scenario, workspace, window, status, writes }),
+    },
+  });
+}
+export { runTrial, runTrialCore };
+export type { TrialFixture, TrialOutcome, TrialScenario };
