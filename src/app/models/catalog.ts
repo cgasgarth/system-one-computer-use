@@ -7,9 +7,11 @@ const modelIdSchema = z.enum([
   "kev-0.8b",
   "kev-4b",
   "kev-9b",
+  "julia-1",
   "qwen-text-2b",
 ]);
 const roleSchema = z.enum(["decision", "text"]);
+const DEFAULT_MAX_CHOICES = 255;
 const retentionSchema = z.enum(["warm", "five_minutes", "cold"]);
 const selectionSchema = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("local"), id: modelIdSchema }),
@@ -35,9 +37,10 @@ interface Preset {
   readonly name: string;
   readonly role: z.infer<typeof roleSchema>;
   readonly description: string;
-  readonly family: "clm" | "kev" | "text";
+  readonly family: "clm" | "kev" | "julia" | "text";
   readonly hub: string;
   readonly bits: number;
+  readonly maxChoices?: number;
 }
 const catalog: readonly Preset[] = [
   {
@@ -95,6 +98,16 @@ const catalog: readonly Preset[] = [
     description: "Largest preset · MLX",
   },
   {
+    id: "julia-1",
+    name: "Julia 1 · CPU",
+    role: "decision",
+    family: "julia",
+    hub: "SupersonicLabs/Julia-1",
+    bits: 0,
+    maxChoices: 20,
+    description: "144M · CPU FP32",
+  },
+  {
     id: "qwen-text-2b",
     name: "Qwen 3.5 2B · 4-bit",
     role: "text",
@@ -122,6 +135,7 @@ type ModelPreferences = z.infer<typeof preferencesSchema>;
 
 export {
   catalog,
+  DEFAULT_MAX_CHOICES,
   defaultPreferences,
   modelIdSchema,
   preferencesSchema,

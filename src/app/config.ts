@@ -11,6 +11,8 @@ import type { TextModel } from "../models/text.ts";
 import { driverModeSchema } from "./task-schema.ts";
 import { endpointSchema } from "../models/transport/endpoint.ts";
 
+const MIN_MODEL_CHOICES = 2;
+const MAX_MODEL_CHOICES = 255;
 const optionalKey = z.string().min(1).optional();
 const configSchema = z.object({
   CUA_DRIVER_BIN: z.string().default("cua-driver"),
@@ -19,6 +21,12 @@ const configSchema = z.object({
   PLAYWRIGHT_MCP_EXTENSION_TOKEN: optionalKey,
   SYSTEM_ONE_API_KEY: optionalKey,
   SYSTEM_ONE_MODEL: z.string().min(1),
+  SYSTEM_ONE_MAX_CHOICES: z.coerce
+    .number()
+    .int()
+    .min(MIN_MODEL_CHOICES)
+    .max(MAX_MODEL_CHOICES)
+    .default(MAX_MODEL_CHOICES),
   SYSTEM_ONE_TRACE: z.enum(["0", "1"]).default("0"),
   SYSTEM_ONE_URL: endpointSchema,
   TEXT_MODEL_API_KEY: optionalKey,
@@ -37,11 +45,10 @@ function loadConfig(): Config {
 
 function createModels(config: Config): Models {
   return {
-    decision: new SystemOneDecisionModel(
-      config.SYSTEM_ONE_URL,
-      config.SYSTEM_ONE_MODEL,
-      config.SYSTEM_ONE_API_KEY,
-    ),
+    decision: new SystemOneDecisionModel(config.SYSTEM_ONE_URL, config.SYSTEM_ONE_MODEL, {
+      apiKey: config.SYSTEM_ONE_API_KEY,
+      maxChoices: config.SYSTEM_ONE_MAX_CHOICES,
+    }),
     text: new ChatCompletionTextModel(
       config.TEXT_MODEL_URL,
       config.TEXT_MODEL_ID,

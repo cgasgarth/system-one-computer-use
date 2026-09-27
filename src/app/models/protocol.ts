@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { preferencesSchema } from "./catalog.ts";
+import { preferencesSchema, roleSchema } from "./catalog.ts";
 
 const commandSchema = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("warm") }),
   z.strictObject({ operation: z.literal("configure"), preferences: preferencesSchema }),
+  z.strictObject({ operation: z.literal("update"), role: roleSchema }),
   z.strictObject({ operation: z.literal("prepare"), requestId: z.uuid() }),
   z.strictObject({ operation: z.literal("release") }),
   z.strictObject({ operation: z.literal("status") }),

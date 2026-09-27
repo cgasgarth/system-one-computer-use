@@ -1,9 +1,7 @@
 # Kev on MLX
 
-This environment runs the upstream Kev server. No model training or custom Kev kernels are included.
+This environment uses the published [Kev](https://github.com/jaredpalmer/kev) model library with its MLX backend. It does not train a model or add custom Kev kernels. The upstream software dependencies are fixed in `uv.lock`; checkpoint revisions are resolved at fresh download or explicit update time.
 
-The app pins `jaredpalmer/kev` to commit `09ff745d52a0f23954e3b0f5a608bf4c7c6aebb4`, sets `KEV_BACKEND=mlx`, and selects an immutable checkpoint revision from the model catalog. Dependencies are locked in `uv.lock`.
+`download.py` resolves the selected checkpoint and the exact base revision declared by that checkpoint, without loading GPU weights. The app records both identities in its private artifact manifest. The model manager then loads those exact cached assets through the private Unix socket bridge. It does not start a local HTTP server. A loaded model is not changed during a task.
 
-`download.py` resolves the selected adapter and its pinned base without loading GPU weights. The model manager then starts `python -m kev.serve` on its private backend port.
-
-Sources: [Kev](https://github.com/jaredpalmer/kev), [released checkpoints](https://huggingface.co/collections/jaredpalmer/kev).
+Published checkpoint collection: [Kev models](https://huggingface.co/collections/jaredpalmer/kev).

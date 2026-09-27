@@ -10,10 +10,16 @@ Open **Settings** from the menu. Selecting a local model downloads its files and
 | Kev 0.8B       | BF16               | Upstream Kev MLX backend                         |
 | Kev 4B         | BF16               | Upstream Kev MLX backend                         |
 | Kev 9B         | BF16               | Upstream Kev MLX backend                         |
+| Julia 1        | FP32               | Published 144M Julia model on CPU                |
 
 The text-generation preset is Qwen 3.5 2B at 4-bit precision. Only one decision model and one text model are loaded at a time. Changing a model stops the previous process before loading its replacement.
 
-CLM downloads its pinned full encoder once, then quantizes it during loading when a quantized preset is selected. Startup can therefore use more memory than steady-state inference. The Kev presets use upstream BF16 weights; they are different model sizes, not quantized variants.
+Fresh downloads resolve the current published checkpoint. The app records the exact repository revision and a fingerprint of runtime files under its private `models/artifacts/` directory. A loaded model keeps that revision until it is unloaded. On launch, the app checks downloaded models for newer runtime files in the background. If an update is available, **Update model** in Settings downloads and loads it. The app does not change a loaded model during a task. A failed update check does not block a cached model; a failed update keeps the prior accepted manifest and attempts to restore the prior model. Benchmark records must name the exact resolved revisions used for every trial.
+
+CLM downloads its resolved full encoder once, then quantizes it during loading when a quantized preset is selected. Startup can therefore use more memory than steady-state inference. The Kev presets use upstream BF16 weights; they are different model sizes, not quantized variants.
+CLM resolves its published head and named Qwen encoder repository at download time and records both exact revisions. The upstream head does not declare an encoder commit; the recorded pair is the one actually loaded, not a compatibility guarantee. Kev checkpoints declare their base revision; the app resolves that exact base instead of replacing it with the latest base. Julia carries its own source, encoder, tokenizer, and weights in one repository snapshot. Its downloaded weight bytes are checked against that snapshot's published SHA-256 policy.
+
+Julia's native API accepts 2–20 choices. The decision adapter pages larger target sets with short group labels and a full observed group map. It does not truncate choices or invent probabilities for the full target set. Julia's strict encoder also rejects an option over 48 tokens, a question and its options over 512 head tokens, or a state over 8,192 tokens; these are reported as capacity errors. The published Julia CPU evaluation used a 1,024-token total limit and a 512-token head, so this app's longer accepted state limit does not imply validated decision quality. Julia uses a private Unix socket for inference, like the other local presets; it does not start an HTTP server.
 
 ## Memory policy
 

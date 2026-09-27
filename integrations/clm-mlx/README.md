@@ -1,49 +1,9 @@
 # CLM on Apple Silicon
 
-An optional serving adapter for the published [Contrastive Language Model](https://github.com/Contrastive-LM/CLM).
-It uses MLX for Qwen3-8B last-token pooling and the upstream CLM projection heads,
-vector cache, and scoring rules. It does not train a new model.
+This optional adapter serves the published [Contrastive Language Model](https://github.com/Contrastive-LM/CLM) through the app's private Unix socket bridge. It uses MLX for the Qwen3-8B encoder and the published CLM heads. It does not train a model.
 
-Select a CLM preset in the app's model settings. The app downloads the model and
-starts `integrations/local-bridge/serve.py` with this integration's Python
-environment. Requests use private Unix sockets and JSON messages, without HTTP.
-The manager owns startup, warm-up, idle unloading, and shutdown.
+Select a CLM preset in Settings. A fresh download resolves the current CLM head and named Qwen encoder repositories, records their exact revisions, and loads that recorded pair. Settings checks for changed runtime files on launch and offers an explicit update. The CLM head names the base repository but does not declare a base commit, so the manifest records the pair actually used; it is not a source-proven compatibility guarantee. A failed update leaves the prior accepted pair available.
 
-`--bits 0` keeps the BF16 encoder; `--bits 4` and `--bits 8` use MLX quantization.
-The published projection heads remain unchanged. MLX embedding calls are serialized;
-the upstream projection cache remains bounded to 64 MiB, and raw embeddings to
-4,096 entries. Inputs over 2,048 tokens are rejected rather than silently truncated.
+`--bits 0` retains BF16; `--bits 4` and `--bits 8` quantize the encoder during loading. The published head architecture and scoring path remain in use. Inputs over 2,048 tokens are rejected rather than silently truncated. First loading may need more memory than resident inference because the full encoder is downloaded before quantization.
 
-## Pinned inputs
-
-| Component                    | Revision                                   |
-| ---------------------------- | ------------------------------------------ |
-| CLM code                     | `7956937c58ed5839c06ddc4dc6b6b61c3a3e4094` |
-| `Qwen/Qwen3-8B`              | `b968826d9c46dd6066d109eabc6255188de91218` |
-| `Contrastive-LM/CLM-v0.1-8B` | `87655cb835bd76fd66c2da78e1e3709f7fa11a94` |
-
-The first run downloads roughly 16 GB of encoder weights and the CLM heads.
-On the development M5 Pro, the 4-bit encoder used about 4.0 GiB of active MLX
-memory. Conversion at startup reached about 15.3 GiB. BF16 used about 14.1 GiB
-after loading. Leave room for startup conversion and other applications.
-
-## Local response-time probe
-
-Historical loopback HTTP medians on the M5 Pro, before the Unix transport change:
-10 requests per condition, MLX 0.32.2, mlx-lm 0.31.3, and the 4-bit encoder:
-
-| Input                                | State and actions uncached | New state, cached actions | Everything cached |
-| ------------------------------------ | -------------------------: | ------------------------: | ----------------: |
-| Short three-option question          |                     104 ms |                     50 ms |           0.30 ms |
-| Captured calendar decision           |                     273 ms |                    182 ms |           0.32 ms |
-| Captured note decision               |                     250 ms |                    164 ms |           0.30 ms |
-| Captured flight decision, 16 options |                     590 ms |                    279 ms |           0.35 ms |
-
-These are response times for fixed probe inputs, not full computer-task times.
-The model was resident and kernels were warm. Reusing the entire state is much
-cheaper than evaluating a new screen. The source probe matched 11 of 17 captured
-reference choices; this is an integration check, not a general accuracy score.
-
-This adapter is experimental. The published CLM server targets NVIDIA/vLLM;
-this integration replaces its embedding backend with MLX while keeping the
-released head architecture and scoring path.
+Python dependencies and the upstream CLM source package are fixed by `uv.lock`. Model revisions are resolved at download or explicit update time and recorded in private app data. Local inference does not start an HTTP server.

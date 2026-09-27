@@ -66,6 +66,10 @@ final class LocalModels {
         do { try send(ModelCommand(operation: .configure, preferences: preferences)) }
         catch { onError?(error.localizedDescription) }
     }
+    func update(_ role: ModelRole) {
+        do { try send(ModelCommand(operation: .update, role: role)) }
+        catch { onError?(error.localizedDescription) }
+    }
     func prepare(_ completion: @escaping () -> Void) {
         let id = UUID().uuidString
         pending = (id, completion)

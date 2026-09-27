@@ -36,18 +36,26 @@ struct ModelStatus: Decodable {
     let state: State
     let message: String
 }
+struct ModelUpdate: Decodable {
+    enum State: String, Decodable { case current, available, unknown }
+    let id: String
+    let state: State
+    let message: String
+}
 struct ModelEvent: Decodable {
     enum Kind: String, Decodable { case status, prepared, warmed, error }
     let event: Kind
     let preferences: ModelPreferences?
     let catalog: [ModelPreset]?
     let models: [ModelStatus]?
+    let updates: [ModelUpdate]?
     let message: String?
     let requestId: String?
 }
 struct ModelCommand: Encodable {
-    enum Operation: String, Encodable { case configure, prepare, warm, release, status, shutdown }
+    enum Operation: String, Encodable { case configure, update, prepare, warm, release, status, shutdown }
     let operation: Operation
     var preferences: ModelPreferences? = nil
     var requestId: String? = nil
+    var role: ModelRole? = nil
 }

@@ -46,6 +46,10 @@ interface DecisionInput extends DecisionRequestContext {
 interface DecisionModel {
   readonly choose: (input: DecisionInput) => Promise<Decision>;
 }
+interface DecisionModelOptions {
+  readonly apiKey?: string | undefined;
+  readonly maxChoices?: number;
+}
 function validProbabilities(probabilities: ActionProbabilities, count: number): boolean {
   const keys = Object.keys(probabilities);
   const sum = Object.values(probabilities).reduce((total, value) => total + value, 0);
@@ -73,11 +77,21 @@ class SystemOneDecisionModel implements DecisionModel {
   private readonly apiKey: string | undefined;
   private readonly endpoint: string;
   private readonly modelId: string;
+  private readonly maxChoices: number;
 
-  public constructor(endpoint: string, modelId: string, apiKey?: string) {
+  public constructor(endpoint: string, modelId: string, options: DecisionModelOptions = {}) {
+    const maxChoices = options.maxChoices ?? MAX_TARGETS_PER_PAGE;
+    if (
+      !Number.isInteger(maxChoices) ||
+      maxChoices < COMPLETION_CLASSES ||
+      maxChoices > MAX_TARGETS_PER_PAGE
+    ) {
+      throw new Error("The decision model choice limit must be an integer from 2 to 255.");
+    }
     this.endpoint = endpoint;
     this.modelId = modelId;
-    this.apiKey = apiKey;
+    this.apiKey = options.apiKey;
+    this.maxChoices = maxChoices;
   }
 
   // One current observation grounds completion, target identity, and persistence.
@@ -134,10 +148,10 @@ class SystemOneDecisionModel implements DecisionModel {
       // Retry with another operation group, never mix targets from different operations.
       // eslint-disable-next-line no-await-in-loop
       const { actions, operation } = await this.operationActions(currentInput, remaining);
+      const otherOperations = operation !== undefined && remaining.length > actions.length;
       // Large target sets are paged by observed descriptions; System One picks the page.
       // eslint-disable-next-line no-await-in-loop
-      const page = await this.pageActions(currentInput, actions);
-      const otherOperations = operation !== undefined && remaining.length > actions.length;
+      const page = await this.pageActions(currentInput, actions, otherOperations);
       // eslint-disable-next-line no-await-in-loop
       const target = await this.targetChoice(currentInput, page, { otherOperations });
       if (!target.rejectGroup) {
@@ -183,25 +197,33 @@ class SystemOneDecisionModel implements DecisionModel {
   private async pageActions(
     input: DecisionInput,
     actions: readonly Action[],
+    otherOperations: boolean,
   ): Promise<readonly Action[]> {
-    if (actions.length <= MAX_TARGETS_PER_PAGE) {
+    const pageSize = this.maxChoices - Number(otherOperations);
+    if (actions.length <= pageSize) {
       return actions;
     }
     const pages: Action[][] = [];
-    for (let index = 0; index < actions.length; index += MAX_TARGETS_PER_PAGE) {
-      pages.push(actions.slice(index, index + MAX_TARGETS_PER_PAGE));
+    for (let index = 0; index < actions.length; index += pageSize) {
+      pages.push(actions.slice(index, index + pageSize));
+    }
+    if (pages.length > this.maxChoices) {
+      throw new Error(
+        `capacity_choices: This decision model supports at most ${this.maxChoices} choice pages; ${pages.length} are needed for the current screen. Narrow the visible controls or choose another model.`,
+      );
     }
     const descriptions = pages.map((page) =>
       page.map((action) => actionDescription(action, input.observation)).join(" | "),
     );
+    const groups = descriptions.map((description, index) => `A${index}: ${description}`);
     const response = await this.request(input, "target-page", {
       model: this.modelId,
-      state: decisionState(input),
+      state: `${decisionState(input)}\nTarget groups and their observed actions:\n${groups.join("\n")}`,
       questions: {
         next_action: {
           type: "choice",
           instructions: `Which group contains the exact observed target needed next for this request: ${input.task}?`,
-          criteria: criteriaFor(descriptions),
+          criteria: criteriaFor(groups.map((_group, index) => `Target group A${index}`)),
         },
       },
     });
@@ -285,6 +307,11 @@ class SystemOneDecisionModel implements DecisionModel {
         ? `${description} Available targets: ${group.actions.map((action) => actionDescription(action, input.observation)).join(" | ")}`
         : description;
     });
+    if (descriptions.length > this.maxChoices) {
+      throw new Error(
+        `capacity_choices: This decision model supports at most ${this.maxChoices} operation choices; ${descriptions.length} are available. Choose another model for this screen.`,
+      );
+    }
     const response = await this.request(input, "operation", {
       model: this.modelId,
       state: decisionState(input),
@@ -385,6 +412,12 @@ class SystemOneDecisionModel implements DecisionModel {
     phase: DecisionRequestPhase,
     body: DecisionRequest,
   ): Promise<DecisionResponse> {
+    const count = Object.keys(body.questions.next_action.criteria).length;
+    if (count > this.maxChoices) {
+      throw new Error(
+        `capacity_choices: This decision model supports at most ${this.maxChoices} choices; ${count} were offered.`,
+      );
+    }
     return requestDecision({
       context: input,
       phase,

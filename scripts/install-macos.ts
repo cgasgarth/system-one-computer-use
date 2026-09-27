@@ -194,7 +194,7 @@ async function prepareRuntime(): Promise<void> {
   await cp(process.execPath, path.join(contents, "MacOS", "bun"));
   await cp(uv, path.join(contents, "MacOS", "uv"));
   await Promise.all(
-    ["clm-mlx", "kev-mlx"].map(async (project) => {
+    ["clm-mlx", "kev-mlx", "julia-cpu"].map(async (project) => {
       const destination = path.join(contents, "Resources", "integrations", project);
       await mkdir(destination, { recursive: true });
       await Promise.all(
@@ -212,6 +212,15 @@ async function prepareRuntime(): Promise<void> {
   await cp(
     path.join(root, "integrations/kev-mlx/download.py"),
     path.join(contents, "Resources", "integrations/kev-mlx/download.py"),
+  );
+  await cp(
+    path.join(root, "integrations/julia-cpu/download.py"),
+    path.join(contents, "Resources", "integrations/julia-cpu/download.py"),
+  );
+  await cp(
+    path.join(root, "integrations/julia-cpu/src"),
+    path.join(contents, "Resources", "integrations/julia-cpu/src"),
+    { recursive: true },
   );
   await mkdir(path.join(contents, "Resources", "integrations/local-bridge"), { recursive: true });
   await cp(
@@ -268,21 +277,28 @@ async function buildSignedApp(selectedIdentity: string): Promise<void> {
 
 async function syncManagedRuntimes(): Promise<void> {
   const uv = path.join(installedApp, "Contents", "MacOS", "uv");
+  const projects = [
+    { directory: "clm-mlx", packageName: "system-one-clm-mlx" },
+    { directory: "kev-mlx", packageName: "system-one-kev-mlx" },
+    { directory: "julia-cpu", packageName: "system-one-julia-cpu" },
+  ] as const;
   const results = await Promise.allSettled(
-    ["clm-mlx", "kev-mlx"].map(async (project) =>
+    projects.map(async (project) =>
       command(
         [
           uv,
           "sync",
           "--project",
-          path.join(installedApp, "Contents", "Resources", "integrations", project),
+          path.join(installedApp, "Contents", "Resources", "integrations", project.directory),
           "--frozen",
           "--no-editable",
+          "--reinstall-package",
+          project.packageName,
           "--quiet",
         ],
         {
           ...Bun.env,
-          UV_PROJECT_ENVIRONMENT: path.join(data, "runtimes", project),
+          UV_PROJECT_ENVIRONMENT: path.join(data, "runtimes", project.directory),
         },
       ),
     ),

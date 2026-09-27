@@ -4,7 +4,16 @@ import type { ReadonlyDeep } from "type-fest";
 import { preset } from "./catalog.ts";
 import type { ModelRole, ModelSelection } from "./catalog.ts";
 import { commands } from "./commands.ts";
-import type { RuntimePaths } from "./commands.ts";
+import type { ModelCommand, RuntimePaths } from "./commands.ts";
+import {
+  hasNewerArtifacts,
+  latestManifest,
+  readBaseOutput,
+  readManifest,
+  resolvedBaseFingerprint,
+  writeManifest,
+} from "./artifacts.ts";
+import type { ArtifactManifest } from "./artifacts.ts";
 import { startProcess } from "./process.ts";
 import type { ModelProcess } from "./process.ts";
 import { verifySocketReady } from "./ready.ts";
@@ -12,8 +21,24 @@ import { clearStaleSocket } from "./sockets.ts";
 
 const STARTUP_TIMEOUT_MS = 180_000;
 const PRIVATE_SOCKET = 0o600;
-type ModelCommand = ReturnType<typeof commands>;
 type LoadState = "unloaded" | "downloading" | "loading" | "ready" | "error";
+async function selectedBase(
+  command: ReadonlyDeep<ModelCommand>,
+  manifest: ReadonlyDeep<ArtifactManifest>,
+): Promise<ArtifactManifest["base"]> {
+  if (command.baseOutput === undefined) {
+    return undefined;
+  }
+  const declared = await readBaseOutput(command.baseOutput);
+  if (
+    manifest.base?.repository === declared.repository &&
+    manifest.base.revision === declared.revision &&
+    manifest.base.assetFingerprint !== undefined
+  ) {
+    return manifest.base;
+  }
+  return resolvedBaseFingerprint(declared);
+}
 interface SlotStatus {
   readonly role: ModelRole;
   readonly state: LoadState;
@@ -68,11 +93,37 @@ class ModelSlot {
     this.loading ??= this.loadTracked();
     await this.loading;
   }
-  private async loadTracked(): Promise<void> {
+  public async updateLatest(): Promise<boolean> {
+    this.assertOpen();
+    if (this.selection.source !== "local") {
+      throw new Error("External model endpoints are not managed by this app.");
+    }
+    if (this.loading !== undefined) {
+      throw new Error("Wait for the model to finish loading before updating it.");
+    }
+    const model = preset(this.selection.id);
+    const previous = await readManifest(this.paths.data, model);
+    const latest = await latestManifest(model);
+    if (previous !== undefined && !hasNewerArtifacts(previous, latest)) {
+      return false;
+    }
+    await this.unload();
+    try {
+      this.loading = this.loadTracked(latest);
+      await this.loading;
+    } catch (error) {
+      if (previous !== undefined) {
+        await this.ensure();
+      }
+      throw error;
+    }
+    return true;
+  }
+  private async loadTracked(candidate?: ReadonlyDeep<ArtifactManifest>): Promise<void> {
     this.assertOpen();
     this.abort = new AbortController();
     try {
-      await this.load();
+      await this.load(candidate);
     } catch (error) {
       this.abort.abort();
       await this.child?.stop();
@@ -89,7 +140,7 @@ class ModelSlot {
     }
     throw new Error(`Model stopped. See ${log}`);
   }
-  private async load(): Promise<void> {
+  private async load(candidate?: ReadonlyDeep<ArtifactManifest>): Promise<void> {
     if (this.selection.source === "endpoint") {
       this.update("ready", "Using external endpoint");
       return;
@@ -98,11 +149,19 @@ class ModelSlot {
     if (model.role !== this.role) {
       throw new Error("This model does not support the selected role");
     }
-    const command = commands(model, this.socketPath, this.paths);
+    const manifest =
+      candidate ?? (await readManifest(this.paths.data, model)) ?? (await latestManifest(model));
+    const command = commands({ model, socket: this.socketPath, paths: this.paths, manifest });
     const log = path.join(this.paths.data, "logs", `${model.id}.log`);
     await this.download(command, log, model.name);
     this.abort.signal.throwIfAborted();
     await this.serve(command, log, model.name);
+    const base = await selectedBase(command, manifest);
+    await writeManifest(
+      this.paths.data,
+      model,
+      base === undefined ? manifest : { ...manifest, base },
+    );
   }
   private async download(
     command: ReadonlyDeep<ModelCommand>,

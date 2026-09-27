@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             case .ready: statusActivity.update(.idle)
             }
             content.setActive(phase != .ready)
+            settings.setActive(phase != .ready)
         }
     }
     private let statusActivity = StatusActivity()
@@ -59,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.popover.contentSize = size
         }
         settings.onModelsChange = { [weak self] preferences in self?.runner.cancel(); self?.models.configure(preferences) }
+        settings.onModelUpdate = { [weak self] role in self?.models.update(role) }
         settings.back.target = self
         settings.back.action = #selector(showTasks)
         settings.save.target = self

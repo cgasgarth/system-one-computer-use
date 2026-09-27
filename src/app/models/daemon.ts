@@ -19,6 +19,7 @@ const host = new ModelHost({
 await host.boot();
 const ingress = new ModelIngress(host);
 await ingress.start();
+void host.checkUpdates();
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let closing = false;
 function isClosing(): boolean {
@@ -42,39 +43,45 @@ process.once("SIGTERM", () => {
 process.once("SIGINT", () => {
   void close();
 });
+async function dispatch(command: z.infer<typeof commandSchema>): Promise<void> {
+  switch (command.operation) {
+    case "warm": {
+      await host.warm();
+      break;
+    }
+    case "configure": {
+      await host.configure(command.preferences);
+      break;
+    }
+    case "update": {
+      await host.updateModel(command.role);
+      break;
+    }
+    case "prepare": {
+      await host.prepare(command.requestId);
+      break;
+    }
+    case "release": {
+      host.release();
+      break;
+    }
+    case "status": {
+      host.snapshot();
+      break;
+    }
+    case "shutdown": {
+      await close();
+      break;
+    }
+  }
+}
 async function execute(line: string): Promise<void> {
   try {
     const parsed = commandSchema.safeParse(JSON.parse(line));
     if (!parsed.success) {
       throw new Error(parsed.error.issues[0]?.message ?? "Check the model settings and try again.");
     }
-    const command = parsed.data;
-    switch (command.operation) {
-      case "warm": {
-        await host.warm();
-        break;
-      }
-      case "configure": {
-        await host.configure(command.preferences);
-        break;
-      }
-      case "prepare": {
-        await host.prepare(command.requestId);
-        break;
-      }
-      case "release": {
-        host.release();
-        break;
-      }
-      case "status": {
-        host.snapshot();
-        break;
-      }
-      case "shutdown": {
-        await close();
-        break;
-      }
-    }
+    await dispatch(parsed.data);
   } catch (error) {
     if (!closing) {
       ModelHost.report(error);

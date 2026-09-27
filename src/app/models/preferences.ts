@@ -1,5 +1,5 @@
 import { chmod, rename } from "node:fs/promises";
-import { defaultPreferences, preferencesSchema } from "./catalog.ts";
+import { DEFAULT_MAX_CHOICES, defaultPreferences, preferencesSchema, preset } from "./catalog.ts";
 import type { ModelPreferences, ModelSelection } from "./catalog.ts";
 import { localModelEndpoint } from "./sockets.ts";
 import type { SocketPaths } from "./sockets.ts";
@@ -20,7 +20,15 @@ function modelName(selection: ModelSelection): string {
   if (selection.id.startsWith("kev-")) {
     return "kev-latest";
   }
+  if (selection.id === "julia-1") {
+    return "julia-latest";
+  }
   return "default_model";
+}
+function maxChoices(selection: ModelSelection): number {
+  return selection.source === "local"
+    ? (preset(selection.id).maxChoices ?? DEFAULT_MAX_CHOICES)
+    : DEFAULT_MAX_CHOICES;
 }
 async function writePreferences(
   preferences: Readonly<ModelPreferences>,
@@ -35,6 +43,7 @@ async function writePreferences(
   const values = {
     SYSTEM_ONE_URL: localModelEndpoint(sockets.ingress, "decision"),
     SYSTEM_ONE_MODEL: modelName(preferences.decision),
+    SYSTEM_ONE_MAX_CHOICES: String(maxChoices(preferences.decision)),
     TEXT_MODEL_URL: localModelEndpoint(sockets.ingress, "text"),
     TEXT_MODEL_ID: modelName(preferences.text),
   };
@@ -48,4 +57,4 @@ async function writePreferences(
   );
   await chmod(".env", PRIVATE_MODE);
 }
-export { modelName, readPreferences, writePreferences };
+export { maxChoices, modelName, readPreferences, writePreferences };

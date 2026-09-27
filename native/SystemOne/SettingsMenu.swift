@@ -25,6 +25,8 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     private let retention = NSPopUpButton()
     private let decisionStatus = NSTextField(wrappingLabelWithString: "")
     private let writerStatus = NSTextField(wrappingLabelWithString: "")
+    private let decisionUpdate = NSButton(title: "Update model", target: nil, action: nil)
+    private let writerUpdate = NSButton(title: "Update model", target: nil, action: nil)
     private let decisionUrl = NSTextField()
     private let decisionName = NSTextField()
     private let textUrl = NSTextField()
@@ -33,8 +35,11 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     private let textEndpoint = NSStackView()
     private var catalog: [ModelPreset] = []
     private var pendingEndpoints: Set<ModelRole> = []
+    private var updatingRole: ModelRole?
+    private var modelsBusy = false
     var maximumHeight: CGFloat?
     var onModelsChange: ((ModelPreferences) -> Void)?
+    var onModelUpdate: ((ModelRole) -> Void)?
     var onSizeChange: ((NSSize) -> Void)?
 
     override func loadView() {
@@ -145,11 +150,11 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     }
 
     private func buildModels() {
-        add(modelGroup(title: "Decision model", picker: decision, detail: decisionStatus), to: modelsPage)
+        add(modelGroup(title: "Decision model", picker: decision, detail: decisionStatus, update: decisionUpdate), to: modelsPage)
         endpoints(decisionEndpoint, url: decisionUrl, name: decisionName)
         add(decisionEndpoint, to: modelsPage)
         add(separator(), to: modelsPage)
-        add(modelGroup(title: "Text generation", picker: writer, detail: writerStatus), to: modelsPage)
+        add(modelGroup(title: "Text generation", picker: writer, detail: writerStatus, update: writerUpdate), to: modelsPage)
         endpoints(textEndpoint, url: textUrl, name: textName)
         add(textEndpoint, to: modelsPage)
     }
@@ -203,12 +208,18 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
         field.lineBreakMode = .byWordWrapping
     }
 
-    private func modelGroup(title: String, picker: NSPopUpButton, detail: NSTextField) -> NSStackView {
+    private func modelGroup(title: String, picker: NSPopUpButton, detail: NSTextField, update: NSButton) -> NSStackView {
         picker.setAccessibilityLabel(title)
         picker.target = self
         picker.action = #selector(modelChanged)
         styleDetail(detail)
-        let group = NSStackView(views: [label(title, weight: .semibold), picker, detail])
+        update.bezelStyle = .rounded
+        update.font = .systemFont(ofSize: 11)
+        update.setAccessibilityLabel("Update \(title.lowercased())")
+        update.target = self
+        update.action = #selector(updateSelectedModel(_:))
+        update.isHidden = true
+        let group = NSStackView(views: [row([label(title, weight: .semibold), spacer(), update]), picker, detail])
         group.orientation = .vertical
         group.alignment = .leading
         group.spacing = 7
@@ -304,8 +315,45 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
         } else if event.event == .status && status.stringValue == "Applying settings…" {
             status.stringValue = ""
             status.toolTip = nil
+        } else if event.event == .status && status.stringValue == "Updating model…" && updateFinished(event.updates) {
+            status.stringValue = ""
+            status.toolTip = nil
+            updatingRole = nil
         }
+        updateButton(decisionUpdate, picker: decision, updates: event.updates)
+        updateButton(writerUpdate, picker: writer, updates: event.updates)
         updateFields()
+    }
+
+    private func updateButton(_ button: NSButton, picker: NSPopUpButton, updates: [ModelUpdate]?) {
+        let selected = picker.selectedItem?.representedObject as? String
+        let available = updates?.first(where: { $0.id == selected })
+        button.isHidden = available?.state != .available
+        button.isEnabled = available?.state == .available && !modelsBusy
+        button.toolTip = available?.message
+    }
+
+    private func updateFinished(_ updates: [ModelUpdate]?) -> Bool {
+        guard let role = updatingRole else { return false }
+        let picker = role == .decision ? decision : writer
+        let selected = picker.selectedItem?.representedObject as? String
+        return updates?.contains(where: { $0.id == selected && $0.state == .current }) == true
+    }
+
+    @objc private func updateSelectedModel(_ sender: NSButton) {
+        guard !modelsBusy else { return }
+        let role: ModelRole = sender === decisionUpdate ? .decision : .text
+        updatingRole = role
+        sender.isEnabled = false
+        status.stringValue = "Updating model…"
+        status.textColor = .secondaryLabelColor
+        onModelUpdate?(role)
+    }
+
+    func setActive(_ active: Bool) {
+        modelsBusy = active
+        decisionUpdate.isEnabled = !active && !decisionUpdate.isHidden
+        writerUpdate.isEnabled = !active && !writerUpdate.isHidden
     }
 
     private func populate(_ picker: NSPopUpButton, role: ModelRole) {
@@ -339,10 +387,12 @@ final class SettingsMenu: NSViewController, NSTextFieldDelegate {
     @objc private func modelChanged(_ sender: NSControl) {
         updateFields()
         if sender === decision {
+            decisionUpdate.isHidden = true
             if !decisionEndpoint.isHidden { pendingEndpoints.insert(.decision) }
             else { pendingEndpoints.remove(.decision) }
         }
         if sender === writer {
+            writerUpdate.isHidden = true
             if !textEndpoint.isHidden { pendingEndpoints.insert(.text) }
             else { pendingEndpoints.remove(.text) }
         }

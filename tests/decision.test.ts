@@ -23,11 +23,9 @@ test.each(["clm-latest", "jev-latest", "another-system-one-model"])(
       port: 0,
     });
     try {
-      const model = new SystemOneDecisionModel(
-        new URL("/v1/systemone", server.url).href,
-        modelId,
-        "test-token",
-      );
+      const model = new SystemOneDecisionModel(new URL("/v1/systemone", server.url).href, modelId, {
+        apiKey: "test-token",
+      });
       const actions: ActionChoices = [
         { kind: "request_app", name: "Messages", reason: "Open an application" },
         { kind: "finish", reason: "Already complete", summary: "Done" },

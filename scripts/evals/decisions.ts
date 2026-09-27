@@ -9,11 +9,9 @@ const config = z
     SYSTEM_ONE_API_KEY: z.string().optional(),
   })
   .parse(Bun.env);
-const model = new SystemOneDecisionModel(
-  config.SYSTEM_ONE_URL,
-  config.SYSTEM_ONE_MODEL,
-  config.SYSTEM_ONE_API_KEY,
-);
+const model = new SystemOneDecisionModel(config.SYSTEM_ONE_URL, config.SYSTEM_ONE_MODEL, {
+  apiKey: config.SYSTEM_ONE_API_KEY,
+});
 let failures = 0;
 for (const scenario of [...scenarios, ...validationScenarios]) {
   // Fixed observations only: this evaluation never executes computer tools.

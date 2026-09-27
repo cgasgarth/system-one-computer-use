@@ -1,5 +1,6 @@
-import { catalog } from "./catalog.ts";
+import { catalog, preset } from "./catalog.ts";
 import type { ModelPreferences } from "./catalog.ts";
+import { hasNewerArtifacts, latestManifest, readManifest } from "./artifacts.ts";
 import type { RuntimePaths } from "./commands.ts";
 import { ModelSlot } from "./slot.ts";
 import { writePreferences } from "./preferences.ts";
@@ -12,6 +13,11 @@ interface HostOptions {
   readonly paths: RuntimePaths;
   readonly preferences: ModelPreferences;
 }
+interface UpdateStatus {
+  readonly id: string;
+  readonly state: "current" | "available" | "unknown";
+  readonly message: string;
+}
 class ModelHost {
   public readonly decision: ModelSlot;
   public readonly text: ModelSlot;
@@ -23,7 +29,13 @@ class ModelHost {
   private closed = false;
   private closing: Promise<void> | undefined = undefined;
   private activeRequests = 0;
+  private updating = false;
+  private updateGeneration = 0;
+  private updates: readonly UpdateStatus[] = [];
+  private readonly updateAbort = new AbortController();
+  private readonly data: string;
   public constructor(options: HostOptions) {
+    this.data = options.paths.data;
     this.preferences = options.preferences;
     this.sockets = socketPaths(options.paths.data);
     this.decision = new ModelSlot({
@@ -55,6 +67,7 @@ class ModelHost {
         preferences: this.preferences,
         catalog,
         models: [this.decision.status(), this.text.status()],
+        updates: this.updates,
       }),
     );
   }
@@ -83,6 +96,7 @@ class ModelHost {
       this.assertOpen();
       await this.text.ensure();
       this.assertOpen();
+      void this.checkUpdates();
     } finally {
       this.schedule();
     }
@@ -144,11 +158,69 @@ class ModelHost {
     this.held = false;
     this.schedule();
   }
+  public async checkUpdates(): Promise<void> {
+    this.updateGeneration += 1;
+    const generation = this.updateGeneration;
+    const results = await Promise.all(
+      catalog.map(async (model): Promise<UpdateStatus | undefined> => {
+        try {
+          const current = await readManifest(this.data, model);
+          if (current === undefined) {
+            return undefined;
+          }
+          const latest = await latestManifest(model, fetch, this.updateAbort.signal);
+          return {
+            id: model.id,
+            state: hasNewerArtifacts(current, latest) ? "available" : "current",
+            message: hasNewerArtifacts(current, latest)
+              ? "A newer model is available."
+              : "Model files are current.",
+          };
+        } catch {
+          return { id: model.id, state: "unknown", message: "Could not check for updates." };
+        }
+      }),
+    );
+    if (this.closed || generation !== this.updateGeneration) {
+      return;
+    }
+    this.updates = results.filter((item): item is UpdateStatus => item !== undefined);
+    this.snapshot();
+  }
+  public async updateModel(role: "decision" | "text"): Promise<void> {
+    this.assertOpen();
+    if (this.held || this.activeRequests > 0 || this.updating) {
+      throw new Error("Stop the current task before updating a model.");
+    }
+    this.updating = true;
+    clearTimeout(this.timer);
+    try {
+      const slot = this[role];
+      if (slot.selection.source !== "local") {
+        throw new Error("External model endpoints cannot be updated by this app.");
+      }
+      const selected = preset(slot.selection.id);
+      this.updates = this.updates.filter((update) => update.id !== selected.id);
+      this.snapshot();
+      try {
+        await slot.updateLatest();
+      } catch (error) {
+        await this.checkUpdates();
+        throw error;
+      }
+      this.assertOpen();
+      await this.checkUpdates();
+    } finally {
+      this.updating = false;
+      this.schedule();
+    }
+  }
   private schedule(): void {
     clearTimeout(this.timer);
     if (
       this.closed ||
       this.held ||
+      this.updating ||
       this.activeRequests > 0 ||
       this.preferences.retention === "warm"
     ) {
@@ -179,6 +251,9 @@ class ModelHost {
     signal: Readonly<AbortSignal>,
   ): ReturnType<typeof forwardRequest> {
     this.assertOpen();
+    if (this.updating) {
+      throw new Error("A model update is in progress. Retry the request after it finishes.");
+    }
     this.activeRequests += 1;
     clearTimeout(this.timer);
     try {
@@ -205,6 +280,7 @@ class ModelHost {
       return this.closing;
     }
     this.closed = true;
+    this.updateAbort.abort();
     clearTimeout(this.timer);
     this.closing = this.closeSlots();
     await this.closing;
