@@ -138,7 +138,7 @@ The loop remembers recent state/action pairs. Repeated controls in the same stat
 
 Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. Native text areas need an explicit writable capability before they become typing targets; some native editors need more driver support. Browser text areas expose that capability through Playwright.
 
-Actions are grouped by operation, with native menus grouped by their observed top-level menu. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
+Actions are grouped by operation; observed native menu paths share an application-menu group. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
 
 The decision model chooses the next action, including Finish and Blocked. There is no completion preflight. A selected Finish stops the task after a fresh observation confirms that the screen has not changed. The harness checks requested persistent effects before the action, and reads back typed field values. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
 
@@ -159,36 +159,32 @@ bun run app:install
 
 TypeScript extends `@tsconfig/strictest`. Oxlint enables all categories at error
 severity with type-aware checks and zero warnings. Source files, including Swift,
-have a hard 600-line limit. See [engineering rules](docs/engineering.md).
+have a hard 600-line limit. See [engineering rules](docs/engineering.md)
+and [architecture](docs/architecture.md) for module ownership and lifetimes.
 
 ```text
 src/
   agent/       tool options, turn execution, surface state and task loop
-  app/         CLI, native worker, settings and configuration boundaries
+  app/         CLI, worker, settings, sessions, model and driver lifetime
   computer/    CUA and Playwright adapters
   models/      decision and text model adapters
 native/
   SystemOne/   AppKit menu-bar UI, settings, shortcuts, IPC
 integrations/
-  clm-mlx/     optional local CLM serving adapter
+  clm-mlx/     optional local CLM model adapter
+  local-bridge/ private Unix socket model service
 ```
 
 Keep recordings and experiments under ignored `runs/`. Demo videos use real app
 footage and remain local. No GitHub Actions or YouTube uploads.
 
-### Driver overhead
+### Driver behavior
 
 The app disables CUA's decorative agent cursor for its own session. Native
 accessibility and input checks still run. Chrome uses Playwright directly with
 `--timeout-settle 0`; it retains Playwright's actionability checks. If no next
 control is available after an action, the loop re-observes for up to 1.5 seconds
 instead of waiting after every successful action.
-
-A local button test on the development Mac used 12 clicks per configuration:
-median Playwright click latency was 547 ms with its 500 ms settle window and
-28 ms with zero settle. All 24 resulting counts were verified. This isolates
-driver overhead and is not a model or full-task throughput benchmark. A delayed
-page update was checked separately to verify the bounded observation retry.
 
 Task traces separate `observationMs`, `decisionMs`, and `actionMs`. Request
 latency varies with screen size and cache state; a large Calendar observation

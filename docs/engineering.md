@@ -5,8 +5,8 @@ tool-result types. Model requests and responses have explicit schemas. Internal
 functions accept those types and do not repeat shape checks.
 
 Action grounding is a separate runtime check: even a well-typed action must refer
-to the current window and snapshot. Completion checks assess task state; they do
-not replace boundary validation.
+to the current window and snapshot. A Finish choice uses a fresh observation;
+it is not an independent proof of the requested result.
 
 TypeScript extends `@tsconfig/strictest`, checks library declarations, and enables
 erasable syntax, unchecked side-effect-import checks, and consistent filename
@@ -16,7 +16,7 @@ All Oxlint categories, including nursery, have error severity. The 600-line file
 limit includes blank lines and comments. Warnings and unused disable directives
 fail checks. Complexity and function-size limits keep responsibilities small.
 
-The configuration makes explicit compatibility choices:
+The configuration makes explicit rule choices:
 
 - Modern Bun code uses async/await, optional chaining, and object spread. The
   legacy syntax-ban rules are disabled.
@@ -29,9 +29,9 @@ The configuration makes explicit compatibility choices:
 - Exhaustive TypeScript switches replace the generic default-case requirement.
   `undefined` is the standard optional-value representation.
 - SDK-owned `Request` and Zod schema objects retain their library types. Named
-  compatibility allowances do not weaken checks on application data.
+  rule allowances do not weaken checks on application data.
 - Top-level await and console output are allowed in app entry points. The agent
-  loop and browser-startup polling intentionally await dependent operations in order.
+  loop and browser startup await dependent operations in order.
 - Explicit `void` is allowed for DOM event handlers whose async body handles errors.
   The event handler itself remains synchronous.
 

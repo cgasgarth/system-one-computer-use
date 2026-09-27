@@ -1,51 +1,7 @@
-# Native menu discovery: read-only probe
+# Native menu capability
 
-On 2026-09-26, a Swift CLI under ignored `runs/qa/overnight/` read macOS
-Accessibility menu trees for an arbitrary running PID or app name. It called
-`AXIsProcessTrusted`, then read `AXMenuBar`, child roles, titles, enabled state,
-and shortcut attributes. It did not open a menu, press a key, invoke a command,
-or change focus. The CLI host was Accessibility-trusted. This does not confirm
-the installed app's pending Accessibility grant.
+The native adapter reads enabled menu paths from the selected application's macOS Accessibility menu tree. It offers a path as an `invoke_menu` action only when the current read provides a complete, unique enabled path. Before invocation, it reads the same application's menu paths again. CUA Driver then resolves each exact immediate-child path; missing, ambiguous, disabled, or changed paths fail closed. This replaces guessed app-wide keyboard commands.
 
-| App      | Top menus | AX rows | Menu items | Enabled leaf paths with at least two labels | Shortcut items |
-| -------- | --------: | ------: | ---------: | ------------------------------------------: | -------------: |
-| Calendar |         7 |     257 |        233 |                                          95 |             65 |
-| Finder   |         8 |     337 |        296 |                                         107 |            117 |
+The read-only development probe found menu trees in Calendar and Finder, with 95 and 107 enabled leaf paths respectively. Those counts show that menu discovery can work without opening a menu. They do not show that every app exposes its menus or that a discovered command will perform the intended task. The native helper is scoped to a PID and the selected window; a failed menu read leaves other observed controls usable.
 
-The artifacts `runs/qa/overnight/menu-calendar.json` and `menu-finder.json`
-contain the local paths. The counts show that these two apps expose many menu
-items without a UI action. They do not prove that every path remains available
-after a state change or that another app exposes its menu in the same way.
-Finder also returned AX read errors on some non-menu descendants; a consumer
-must use only complete, enabled menu-item paths from the current read.
-The Finder capture also contains a duplicate enabled full path. A discovered
-path is not necessarily unique. Exclude ambiguous paths and paths with a
-disabled ancestor before offering an action to the model.
-
-CUA Driver 0.28.2 already offers `invoke_menu(pid, window_id, path, session)`.
-It resolves an **exact immediate-child path** one live level at a time. Labels
-are case-sensitive after trimming surrounding whitespace. Missing, ambiguous,
-disabled, or structurally mismatched segments fail closed, with no pixel
-fallback. CUA exposes no read-only menu enumeration tool: its desktop read
-lists apps and windows, while `get_window_state` is scoped to one window.
-The current harness offers `open_document` in every selected desktop app and
-implements it as Command+O. The existing CUA menu tool alone cannot ground a
-replacement path.
-
-## Smallest safe integration to evaluate
-
-1. Add a bounded, read-only menu subcommand to
-   `native/NativeAccess/MenuItems.swift` and `main.swift`. Return exact path,
-   enabled state, role, and shortcut metadata through a strict boundary schema.
-2. Attach only current, complete menu paths to the native observation. Offer
-   them as explicit `invoke_menu` actions. Validate the selected path against
-   that observation before calling CUA's existing `invoke_menu` tool.
-3. Remove unconditional `open_document`/Command+O once the observed menu
-   action is usable. Keep CUA's live fail-closed path check at execution.
-
-Before that change is accepted, test disabled, ambiguous, stale, and missing
-paths; wrong application PID and no-window cases; exact path transport;
-read-only discovery in more than one app; and a
-supervised menu action that does not change user data after the installed app's
-Accessibility grant is confirmed. No production code or installed app was
-changed during this probe.
+This capability is intentionally generic. The harness does not name a particular app's menu command in its task policy. Exact menu paths can still change between observation and execution, and some native controls are absent from Accessibility. A supervised task must verify the effect after invocation.

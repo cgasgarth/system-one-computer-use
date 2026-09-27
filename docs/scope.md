@@ -27,7 +27,7 @@ performance and avoid unsupported speed or quality claims.
 
 Keep the original app colors and make the action sequence easy to follow. Do
 not show memory graphs. Open the completed video in QuickTime for review. Do
-not upload to YouTube; the user deleted the previous draft.
+not upload to YouTube without explicit authorization.
 
 ## Native interaction
 

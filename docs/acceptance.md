@@ -17,7 +17,7 @@ site, or test fixture.
 | Grounding   | Every executed target comes from a current observation. Reordering or replacing controls during inference causes a fresh decision rather than a write to the wrong target.                  |
 | Forms       | Text, select options, checkboxes, and radio controls use the operation supported by the control. Verified values are not entered again without a state change.                              |
 | Dialogs     | Background controls do not compete with an active modal. Open-editor, unsaved-draft, and committed-result requests have different success conditions.                                       |
-| Completion  | DONE requires observed evidence of the requested result. Tool return status alone does not prove completion. A wrong target or failed observation cannot become success.                    |
+| Completion  | Finish is an explicit model choice followed by a fresh observation. Tool return status alone does not prove task success; a real-task grader checks the requested result.                   |
 | Recovery    | Failed calls and unsupported actions return useful feedback. An unchanged failed action cannot spin indefinitely. There is no total task action cap.                                        |
 | Sessions    | Automatic continuation reuses a session within one hour. The last three sessions preserve request context and target references. A changed request is rebound before editing.               |
 | Stop        | Stop prevents subsequent actions, survives late model/tool responses, returns the menu to a usable state, and leaves no active task driver.                                                 |
