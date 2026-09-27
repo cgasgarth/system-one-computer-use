@@ -384,7 +384,7 @@ async function openApplication(context: InputContext): Promise<OpenedApplication
     };
   }
   options.signal?.throwIfAborted();
-  await computer.launchApp(name);
+  await computer.launchApp(name, options.signal);
   const desktop = await computer.desktop();
   const application = desktop.apps.find((app) => app.name === name);
   const windows = desktop.windows.filter((window) => window.app_name === name);

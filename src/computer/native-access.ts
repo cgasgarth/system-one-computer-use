@@ -54,17 +54,45 @@ interface WindowWait {
   readonly binary: string;
   readonly application: string;
   readonly mode: "available" | "created";
+  readonly signal?: Readonly<AbortSignal>;
+  readonly timeoutMs?: number;
   readonly act: () => Promise<void>;
+}
+function cancellationWait(
+  signal: Readonly<AbortSignal> | undefined,
+  stop: () => void,
+): { readonly promise: Promise<never>; readonly dispose: () => void } {
+  const cancelled = Promise.withResolvers<never>();
+  const abort = (): void => {
+    cancelled.reject(
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new Error("Native window observation stopped."),
+    );
+    stop();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted === true) {
+    abort();
+  }
+  return {
+    promise: cancelled.promise,
+    dispose: () => signal?.removeEventListener("abort", abort),
+  };
 }
 
 async function waitForNativeWindow(input: WindowWait): Promise<void> {
+  input.signal?.throwIfAborted();
   const child = Bun.spawn([input.binary, "watch", input.application, input.mode], {
     stdout: "pipe",
     stderr: "ignore",
-    timeout: TIMEOUT_MS,
+    timeout: input.timeoutMs ?? TIMEOUT_MS,
   });
   const ready = Promise.withResolvers<NativeEvent>();
   const ended = Promise.withResolvers<EndEvent>();
+  const cancellation = cancellationWait(input.signal, () => {
+    child.kill("SIGKILL");
+  });
   const accept = (event: NativeEvent): void => {
     ready.resolve(event);
     if (event.event !== "ready") {
@@ -95,16 +123,18 @@ async function waitForNativeWindow(input: WindowWait): Promise<void> {
     }
   })();
   try {
-    const start = await ready.promise;
+    const start = await Promise.race([ready.promise, cancellation.promise]);
     if (start.event === "error") {
       throw new CuaError(start.message);
     }
+    input.signal?.throwIfAborted();
     await input.act();
-    const result = await ended.promise;
+    const result = await Promise.race([ended.promise, cancellation.promise]);
     if (result.event === "error") {
       throw new CuaError(result.message);
     }
   } finally {
+    cancellation.dispose();
     child.kill();
     await child.exited;
     await reading;

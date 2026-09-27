@@ -40,7 +40,8 @@ function sameMenuPath(left: readonly string[], right: readonly string[]): boolea
   return left.length === right.length && left.every((part, index) => part === right[index]);
 }
 
-async function openMacApplication(name: string): Promise<void> {
+async function openMacApplication(name: string, signal?: Readonly<AbortSignal>): Promise<void> {
+  signal?.throwIfAborted();
   const process = Bun.spawn(["/usr/bin/open", "-a", name], { stdout: "ignore", stderr: "pipe" });
   const [status, error] = await Promise.all([process.exited, new Response(process.stderr).text()]);
   if (status !== 0) {
@@ -184,12 +185,13 @@ class CuaMcpComputer implements Computer {
     };
   }
 
-  public async launchApp(name: string): Promise<void> {
+  public async launchApp(name: string, signal?: Readonly<AbortSignal>): Promise<void> {
     await waitForNativeWindow({
       binary: this.nativeAccess,
       application: name,
       mode: "available",
-      act: async () => openMacApplication(name),
+      ...(signal === undefined ? {} : { signal }),
+      act: async () => openMacApplication(name, signal),
     });
   }
   public async focusWindow(pid: number, windowId: number): Promise<void> {
