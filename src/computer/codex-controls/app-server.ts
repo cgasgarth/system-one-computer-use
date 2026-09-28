@@ -234,7 +234,10 @@ class CodexControlsSession {
         try {
           await this.endGroup();
         } catch (error) {
-          cleanupError = new Error("Could not release native computer control", { cause: error });
+          cleanupError = new Error(
+            `Could not release native computer control: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
         }
         await this.request("thread/unsubscribe", { threadId: this.threadId }).catch(() => false);
       }

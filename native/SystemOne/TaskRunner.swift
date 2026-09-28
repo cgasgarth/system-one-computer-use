@@ -117,7 +117,7 @@ final class TaskRunner {
         if let child = process, child.isRunning {
             retiring.insert(child)
             child.terminate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
                 if child.isRunning { kill(child.processIdentifier, SIGKILL) }
             }
         }

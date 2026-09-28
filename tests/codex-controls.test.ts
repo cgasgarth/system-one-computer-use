@@ -199,3 +199,17 @@ test("Stop aborts an active controls call and closes its owned process", async (
   expect(messages.some((item) => item.params?.tool === "js_reset")).toBe(true);
   expect(messages.some((item) => item.params?.arguments?.code === "later")).toBe(false);
 });
+
+test("reports native cleanup failure after closing the owned tool session", async () => {
+  const session = new CodexControlsSession({
+    ...options,
+    async notifyNativeTurn(): Promise<void> {
+      throw new Error("native helper failed");
+    },
+  });
+  await session.invoke({ server: "cua_repl", code: "setup", title: "Setup" });
+  await assertRejected(session.close(), "native helper failed");
+  const messages = await readMessages();
+  expect(messages.some((item) => item.params?.tool === "js_reset")).toBe(true);
+  expect(messages.some((item) => item.method === "thread/unsubscribe")).toBe(true);
+});

@@ -96,6 +96,7 @@ async function executeTask(
     JSON.stringify({ ...result, sessionId: session.id, activity: execution.trace.diagnostics() }),
     { createPath: true },
   );
+  execution.report("Releasing computer control…");
   await computers.release();
   console.log(
     JSON.stringify({
