@@ -1,11 +1,10 @@
 import { CodexChromeComputer } from "../../../src/computer/codex-chrome/computer.ts";
-import { terminalApproval } from "../../../src/app/terminal-approval.ts";
 import { cases } from "./benchmark-cases.ts";
 import { canonicalStart } from "./benchmark-state.ts";
 import { startWorkspace } from "../workspace.ts";
 
 const workspace = startWorkspace();
-const browser = new CodexChromeComputer({ approval: terminalApproval });
+const browser = new CodexChromeComputer({});
 let outcome: object = { passed: false };
 try {
   await browser.desktop();

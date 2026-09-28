@@ -17,7 +17,7 @@ identified a POST submit, and verified one save. No standalone Playwright MCP
 connection was used.
 
 The external MCP bridge also completed Calculator arithmetic and a public browser
-link navigation. Missing approval capability fails closed. Reset clears its
+link navigation. Tool approvals are accepted in the owned active session. Reset clears its
 JavaScript state and closes unmarked owned test tabs.
 
 ## Sessions
@@ -37,17 +37,16 @@ A changed, missing, or ambiguous identity fails closed.
 
 Run `bun run check`, `bun run test`, and `bun run test:native`. Native checks need
 Xcode Command Line Tools. Validate the signed installed app separately: setup
-labels, permission replies, cancellation, model selection, and visible task
+labels, automatic tool access, cancellation, model selection, and visible task
 results. Keep raw traces and screenshots private under ignored `runs/`.
 
-Unit tests cover driver state, scope, approval and cancellation contracts. They
+Unit tests cover driver state, scope, automatic tool access and cancellation contracts. They
 do not establish broad task reliability or speed improvements. New end-to-end
 benchmarks are needed before making claims about the Codex-based task path.
 
 Installed-app checks reached Wikipedia through the Codex Chrome connection and
 completed a single requested Calculator button press through native controls.
-The approval prompt resumed correctly after a reply; task-scoped access did not
-ask again for each read or input. The arithmetic request `23 times 7` still led
+The arithmetic request `23 times 7` still led
 Kev 4B to choose Blocked. This is not counted as a completed arithmetic task.
 
 The control child uses temporary configuration overrides to start only the

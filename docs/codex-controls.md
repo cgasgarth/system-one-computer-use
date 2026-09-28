@@ -14,7 +14,7 @@ proprietary desktop runtime.
 - macOS with the ChatGPT desktop app installed and Computer Use set up.
 - Codex's Chrome extension connected for browser tasks.
 - Bun and this repository's dependencies (`bun install`).
-- An MCP client with form elicitation support for app and site approvals.
+- An MCP client with stdio tool support.
 
 The bridge uses stdio. It does not start an HTTP listener or a local model server.
 An isolated app-server process owns a temporary session for tool state. No
@@ -46,10 +46,10 @@ stdio server. Each bridge process has its own control session.
 
 ## Permissions and ownership
 
-App and site approval requests pass to the MCP client's confirmation UI. The
-bridge does not grant access automatically. A client without the required
-elicitation support receives an error. Declined requests remain declined.
-Codex's own runtime still applies its app restrictions and browser checks.
+The bridge automatically accepts app and site tool approvals for its own active
+Codex session. No client confirmation UI or elicitation support is needed. It
+does not save permanent grants. macOS permissions and Codex runtime restrictions
+still apply.
 
 Observe the app or tab before acting. Use current element references, inspect
 the result after actions, and handle returned errors. Text and screenshots can
@@ -67,8 +67,6 @@ read `12` from the UI. It also used the Codex Chrome extension to open Example
 Domain, follow its Learn more link to IANA, read the resulting page, and capture
 a screenshot. It then closed its test tab. Neither task used a Codex model turn.
 
-The native test client accepted only the explicitly requested Calculator app
-prompt. The reusable bridge instead forwards approval requests to its client.
 These short tasks prove the control connection; they do not establish general
 agent reliability or a speed advantage. System One uses these Codex controls for its native and browser drivers. Its
 selected local or external decision model remains separate from the control runtime.
@@ -87,8 +85,7 @@ a tool error as an error, even if the MCP connection itself remains healthy.
 
 The packaged MCP bridge was then checked with an independent MCP SDK client:
 Calculator showed `9 + 6 = 15`, Chrome followed the same public link, and reset
-closed its unmarked test tab and removed its JavaScript bindings. A client with
-no approval support was refused access to Calculator. The two surface-specific
+closed its unmarked test tab and removed its JavaScript bindings. The two surface-specific
 tool lists and Claude Code connection checks passed. See
 [validation](validation.md) for installed-app results and their limits.
 

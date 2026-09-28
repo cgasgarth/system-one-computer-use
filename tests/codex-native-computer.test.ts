@@ -64,7 +64,6 @@ class FakeCodexSession {
     this.closed = true;
   }
 }
-const approval = async (): Promise<{ action: "cancel" }> => ({ action: "cancel" });
 async function assertRejected(task: Promise<unknown>, message: string): Promise<void> {
   try {
     await task;
@@ -76,7 +75,7 @@ async function assertRejected(task: Promise<unknown>, message: string): Promise<
 
 test("binds the active app window and acts only on a fresh matching control", async () => {
   const fake = new FakeCodexSession();
-  const computer = new CodexNativeComputer({ approval }, fake);
+  const computer = new CodexNativeComputer({}, fake);
   await computer.launchApp("Editor");
   const desktop = await computer.desktop();
   const [target] = desktop.windows;
@@ -109,7 +108,7 @@ test("binds the active app window and acts only on a fresh matching control", as
 
 test("opens an observed menu and never invokes its disabled command", async () => {
   const fake = new FakeCodexSession();
-  const computer = new CodexNativeComputer({ approval }, fake);
+  const computer = new CodexNativeComputer({}, fake);
   await computer.launchApp("Editor");
   const desktop = await computer.desktop();
   const [target] = desktop.windows;
@@ -153,7 +152,7 @@ test("opens an observed menu and never invokes its disabled command", async () =
 
 test("rejects input when a different active app window takes the scope", async () => {
   const fake = new FakeCodexSession();
-  const computer = new CodexNativeComputer({ approval }, fake);
+  const computer = new CodexNativeComputer({}, fake);
   await computer.launchApp("Editor");
   const desktop = await computer.desktop();
   const [target] = desktop.windows;
@@ -177,7 +176,7 @@ test("rejects input when a different active app window takes the scope", async (
 test("rejects a deterministic internal window-ID collision", async () => {
   const fake = new FakeCodexSession();
   fake.state = BASE.replaceAll("Document", "Doc574");
-  const computer = new CodexNativeComputer({ approval }, fake);
+  const computer = new CodexNativeComputer({}, fake);
   await computer.launchApp("Editor");
   const desktop = await computer.desktop();
   const [target] = desktop.windows;
@@ -193,7 +192,7 @@ test("rejects a deterministic internal window-ID collision", async () => {
 test("sends documented Codex key names for a footer-focused native field", async () => {
   const fake = new FakeCodexSession();
   fake.state = `${BASE.replace("(settable, focused)", "(settable)")}\nThe focused UI element is 2 text field (settable) Description: Title, Value: Draft`;
-  const computer = new CodexNativeComputer({ approval }, fake);
+  const computer = new CodexNativeComputer({}, fake);
   await computer.launchApp("Editor");
   const desktop = await computer.desktop();
   const [target] = desktop.windows;

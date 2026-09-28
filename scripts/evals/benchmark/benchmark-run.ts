@@ -9,7 +9,6 @@ import { DEFAULT_MAX_CHOICES } from "../../../src/app/models/catalog.ts";
 import type { Preset } from "../../../src/app/models/catalog.ts";
 import { modelName } from "../../../src/app/models/preferences.ts";
 import { CodexChromeComputer } from "../../../src/computer/codex-chrome/computer.ts";
-import { terminalApproval } from "../../../src/app/terminal-approval.ts";
 import type { ManagedComputer } from "../../../src/computer/types.ts";
 import { sourceHash } from "../provenance.ts";
 import { preparedArtifact, resolveArtifacts, savedArtifacts } from "./benchmark-artifacts.ts";
@@ -236,7 +235,7 @@ async function runBenchmark(): Promise<void> {
   };
   const initialDiskFreeGiB = await freeDiskGiB(data);
   const runtime = new BenchmarkRuntime({ paths, output, initialDiskFreeGiB });
-  const computer = new CodexChromeComputer({ approval: terminalApproval });
+  const computer = new CodexChromeComputer({});
   const expectedHashes = new Map<string, string>();
   const trials: TrialRecord[] = [];
   const startups: StartupRecord[] = [];

@@ -22,14 +22,8 @@ const options = {
   timeoutMs: 250,
   configPath: configFixture,
 };
-const relay = async (): Promise<{ action: "cancel" }> => ({ action: "cancel" });
-const APPROVAL_DELAY_MS = 400;
 const READY_TIMEOUT_MS = 1000;
 const TWO_SESSIONS = 2;
-async function delayedRelay(): Promise<{ action: "accept"; content: Record<string, never> }> {
-  await Bun.sleep(APPROVAL_DELAY_MS);
-  return { action: "accept", content: {} };
-}
 async function assertRejected(task: Promise<unknown>, message: string): Promise<void> {
   try {
     await task;
@@ -102,16 +96,15 @@ test("starts an owned session and keeps one operation ID until reset", async () 
       tool: "computer",
       code: "first action",
       title: "First",
-      relay,
     });
     expect(docs.content.some((item) => item.type === "text" && item.text.includes("not run"))).toBe(
       true,
     );
-    await bridge.execute({ tool: "computer", code: "step one", title: "One", relay });
-    await bridge.execute({ tool: "computer", code: "step two", title: "Two", relay });
+    await bridge.execute({ tool: "computer", code: "step one", title: "One" });
+    await bridge.execute({ tool: "computer", code: "step two", title: "Two" });
     await bridge.reset();
-    await bridge.execute({ tool: "computer", code: "", title: "Docs", relay });
-    await bridge.execute({ tool: "computer", code: "step three", title: "Three", relay });
+    await bridge.execute({ tool: "computer", code: "", title: "Docs" });
+    await bridge.execute({ tool: "computer", code: "step three", title: "Three" });
   } finally {
     await bridge.dispose();
   }
@@ -138,42 +131,24 @@ test("starts an owned session and keeps one operation ID until reset", async () 
   expect(messages.some((item) => item.params?.tool === "js_reset")).toBe(true);
 });
 
-test("relays approval to the caller and fails closed on denial", async () => {
-  const session = new CodexControlsSession(options);
-  try {
-    const result = await session.invoke({
-      server: "cua_repl",
-      code: "needsApproval",
-      title: "Approval",
-      relay,
-    });
-    expect(result.content).toEqual([{ type: "text", text: "cancel" }]);
-  } finally {
-    await session.close();
-  }
-});
-
-test("allows time for a real approval response", async () => {
-  const session = new CodexControlsSession(options);
-  try {
-    const result = await session.invoke({
-      server: "cua_repl",
-      code: "needsApproval",
-      title: "Approval",
-      relay: delayedRelay,
-    });
-    expect(result.content).toEqual([{ type: "text", text: "accept" }]);
-  } finally {
-    await session.close();
-  }
-});
+for (const server of ["cua_repl", "node_repl"] as const) {
+  test(`automatically accepts ${server} tool access and resumes the call`, async () => {
+    const session = new CodexControlsSession(options);
+    try {
+      const result = await session.invoke({ server, code: "needsApproval", title: "Access" });
+      expect(result.content).toEqual([{ type: "text", text: "accept" }]);
+    } finally {
+      await session.close();
+    }
+  });
+}
 
 test("end releases one session and the next call starts a fresh one", async () => {
   const bridge = new CodexControlsBridge(options);
   try {
-    await bridge.execute({ tool: "computer", code: "", title: "Docs", relay });
+    await bridge.execute({ tool: "computer", code: "", title: "Docs" });
     await bridge.end();
-    await bridge.execute({ tool: "computer", code: "", title: "Docs", relay });
+    await bridge.execute({ tool: "computer", code: "", title: "Docs" });
   } finally {
     await bridge.dispose();
   }
@@ -184,13 +159,13 @@ test("end releases one session and the next call starts a fresh one", async () =
 test("closes an execution that exceeds its timeout", async () => {
   const session = new CodexControlsSession(options);
   try {
-    await session.invoke({ server: "cua_repl", code: "hang", title: "Timeout", relay });
+    await session.invoke({ server: "cua_repl", code: "hang", title: "Timeout" });
     throw new Error("Expected a timeout");
   } catch (error) {
     expect(error instanceof Error && error.message.includes("timed out")).toBe(true);
   }
   try {
-    await session.invoke({ server: "cua_repl", code: "later", title: "Later", relay });
+    await session.invoke({ server: "cua_repl", code: "later", title: "Later" });
     throw new Error("Expected a closed session");
   } catch (error) {
     expect(error instanceof Error && error.message.includes("closed")).toBe(true);
@@ -205,16 +180,12 @@ test("Stop aborts an active controls call and closes its owned process", async (
     server: "cua_repl",
     code: "hang",
     title: "Stop",
-    relay,
     signal: controller.signal,
   });
   await ready;
   controller.abort();
   await assertRejected(task, "cancelled");
-  await assertRejected(
-    session.invoke({ server: "cua_repl", code: "later", title: "Later", relay }),
-    "",
-  );
+  await assertRejected(session.invoke({ server: "cua_repl", code: "later", title: "Later" }), "");
   const messages = await readMessages();
   expect(messages.some((item) => item.params?.arguments?.code === "later")).toBe(false);
 });

@@ -1,21 +1,11 @@
-/* oxlint-disable eslint/no-underscore-dangle -- _meta is an MCP wire field. */
-
-/* oxlint-disable typescript/prefer-readonly-parameter-types -- SDK and AbortSignal types are mutable external contracts. */
-/* oxlint-disable typescript/no-deprecated -- Claude Code uses MCP form elicitation on the 2025 protocol. */
 /* oxlint-disable unicorn/prefer-add-event-listener -- The SDK transport exposes onclose, not EventTarget. */
 import { McpServer } from "@modelcontextprotocol/server";
-import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { CodexControlsBridge } from "../computer/codex-controls/bridge.ts";
-import {
-  approvalResultSchema,
-  clientElicitationSchema,
-} from "../computer/codex-controls/protocol.ts";
-import type { ApprovalRequest, ApprovalResult } from "../computer/codex-controls/protocol.ts";
 
 const MAX_TITLE_LENGTH = 120;
-const APPROVAL_TIMEOUT_MS = 600_000;
 const surfaceFlag = Bun.argv.indexOf("--surface");
 const surface = surfaceFlag === -1 ? "both" : Bun.argv[surfaceFlag + 1];
 if (surface !== "both" && surface !== "computer" && surface !== "chrome") {
@@ -35,32 +25,13 @@ function failure(error: unknown): CallToolResult {
   };
 }
 
-function approval(
-  ctx: Readonly<ServerContext>,
-): (request: Readonly<ApprovalRequest>) => Promise<ApprovalResult> {
-  return async (request): Promise<ApprovalResult> => {
-    const params = clientElicitationSchema.parse({
-      mode: "form",
-      message: request.message,
-      requestedSchema: request.requestedSchema,
-      _meta: request._meta,
-    });
-    try {
-      const answer = await ctx.mcpReq.elicitInput(params, { timeout: APPROVAL_TIMEOUT_MS });
-      return approvalResultSchema.parse(answer);
-    } catch {
-      return { action: "cancel" };
-    }
-  };
-}
-
 if (surface === "both" || surface === "computer") {
   server.registerTool(
     "computer_js",
     {
       title: "Computer controls",
       description:
-        "Run persistent computer-use JavaScript. The first call returns the API and screen state; resubmit code after setup. Native actions can request your approval.",
+        "Run persistent computer-use JavaScript. The first call returns the API and screen state; resubmit code after setup. Tool access is approved automatically.",
       inputSchema,
     },
     async ({ code, title }, ctx) => {
@@ -69,7 +40,6 @@ if (surface === "both" || surface === "computer") {
           tool: "computer",
           code,
           title,
-          relay: approval(ctx),
           signal: ctx.mcpReq.signal,
         });
       } catch (error) {
@@ -93,7 +63,6 @@ if (surface === "both" || surface === "chrome") {
           tool: "chrome",
           code,
           title,
-          relay: approval(ctx),
           signal: ctx.mcpReq.signal,
         });
       } catch (error) {

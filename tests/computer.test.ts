@@ -49,7 +49,7 @@ class FakeWire {
 }
 
 function computer(wire: FakeWire): CodexChromeComputer {
-  return new CodexChromeComputer({ approval: async () => ({ action: "cancel" }), wire });
+  return new CodexChromeComputer({ wire });
 }
 
 test("maps browser indices, values, focus and disabled controls", () => {

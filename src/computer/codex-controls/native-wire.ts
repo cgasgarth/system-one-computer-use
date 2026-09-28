@@ -48,7 +48,6 @@ class NativeWire {
       server: "cua_repl",
       code,
       title,
-      relay: this.options.approval,
       ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
     });
     this.options.signal?.throwIfAborted();

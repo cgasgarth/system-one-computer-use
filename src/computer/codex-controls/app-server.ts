@@ -1,7 +1,6 @@
 /* oxlint-disable typescript/prefer-readonly-parameter-types -- SDK and AbortSignal types are mutable external contracts. */
 /* oxlint-disable promise/avoid-new -- JSON-RPC replies resolve from the child stdout event. */
 /* oxlint-disable unicorn/no-null -- The upstream approval protocol uses JSON null on cancellation. */
-/* oxlint-disable eslint/no-underscore-dangle -- _meta is an upstream JSON-RPC wire field. */
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -15,12 +14,11 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import { controlConfigOverrides } from "./config-scope.ts";
 import {
   approvalRequestSchema,
-  approvalResultSchema,
   rpcMessageSchema,
   startedSchema,
   toolResultSchema,
 } from "./protocol.ts";
-import type { ApprovalRequest, ApprovalResult, RpcMessage } from "./protocol.ts";
+import type { RpcMessage } from "./protocol.ts";
 
 const CODEX_CLI =
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -29,7 +27,6 @@ const EXIT_TIMEOUT_MS = 2000;
 const MAX_LINE_LENGTH = 25_165_824;
 const BLOCKED_ENV = /CODEX|CUA|SKY|BROWSER|MCP|NODE_REPL/iu;
 
-type ApprovalRelay = (request: Readonly<ApprovalRequest>) => Promise<ApprovalResult>;
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -41,7 +38,6 @@ type InvokeRequest = Readonly<{
   server: "cua_repl" | "node_repl";
   code: string;
   title: string;
-  relay: ApprovalRelay;
   signal?: AbortSignal | undefined;
 }>;
 interface AppServerOptions {
@@ -67,10 +63,8 @@ class CodexControlsSession {
   private threadId: string | undefined;
   private operationId = randomUUID();
   private sequence = 0;
-  private activeToolRequestId: number | undefined;
   private readonly pending = new Map<number, Pending>();
   private readonly usedServers = new Set<"cua_repl" | "node_repl">();
-  private approval: ApprovalRelay | undefined;
   private active = false;
   private closed = false;
   private booting: Promise<void> | undefined;
@@ -169,7 +163,6 @@ class CodexControlsSession {
       throw new Error("Controls call was cancelled");
     }
     this.active = true;
-    this.approval = request.relay;
     this.usedServers.add(request.server);
     try {
       const result = await this.request(
@@ -194,7 +187,6 @@ class CodexControlsSession {
       );
       return toolResultSchema.parse(result);
     } finally {
-      this.approval = undefined;
       this.active = false;
     }
   }
@@ -272,9 +264,6 @@ class CodexControlsSession {
     }
     this.sequence += 1;
     const id = this.sequence;
-    if (method === "mcpServer/tool/call") {
-      this.activeToolRequestId = id;
-    }
     return new Promise<unknown>((resolve, reject) => {
       const timer = this.armTimeout(id, method, reject);
       const abort = (): void => {
@@ -313,25 +302,6 @@ class CodexControlsSession {
     }, this.options.timeoutMs ?? RPC_TIMEOUT_MS);
   }
 
-  private suspendToolTimeout(): void {
-    const pending =
-      this.activeToolRequestId === undefined
-        ? undefined
-        : this.pending.get(this.activeToolRequestId);
-    if (pending?.timer !== undefined) {
-      clearTimeout(pending.timer);
-      pending.timer = undefined;
-    }
-  }
-
-  private resumeToolTimeout(): void {
-    const id = this.activeToolRequestId;
-    const pending = id === undefined ? undefined : this.pending.get(id);
-    if (id !== undefined && pending !== undefined && pending.timer === undefined) {
-      pending.timer = this.armTimeout(id, pending.method, pending.reject);
-    }
-  }
-
   private send(message: unknown): void {
     if (this.child?.stdin.writable !== true) {
       throw new Error("Codex controls process is unavailable");
@@ -360,7 +330,7 @@ class CodexControlsSession {
 
   private dispatch(message: RpcMessage): void {
     if ("method" in message && "id" in message) {
-      void this.answerRequest(message.id, message.method, message.params);
+      this.answerRequest(message.id, message.method, message.params);
       return;
     }
     if (!("id" in message)) {
@@ -375,9 +345,6 @@ class CodexControlsSession {
       clearTimeout(pending.timer);
     }
     pending.releaseAbort?.();
-    if (this.activeToolRequestId === Number(message.id)) {
-      this.activeToolRequestId = undefined;
-    }
     if ("error" in message) {
       pending.reject(new Error(message.error.message));
     } else if ("result" in message) {
@@ -385,37 +352,20 @@ class CodexControlsSession {
     }
   }
 
-  private async answerRequest(id: string | number, method: string, params: unknown): Promise<void> {
+  private answerRequest(id: string | number, method: string, params: unknown): void {
     const parsed =
       method === "mcpServer/elicitation/request"
         ? approvalRequestSchema.safeParse(params)
         : undefined;
-    if (
-      parsed?.success !== true ||
-      parsed.data.threadId !== this.threadId ||
-      this.approval === undefined
-    ) {
-      this.send({ id, result: { action: "cancel", content: null } });
-      return;
-    }
-    this.suspendToolTimeout();
-    try {
-      const answer = approvalResultSchema.parse(await this.approval(parsed.data));
-      this.send({
-        id,
-        result: {
-          action: answer.action,
-          content: answer.action === "accept" ? (answer.content ?? {}) : null,
-          ...(answer.action === "accept" && answer._meta !== undefined
-            ? { _meta: answer._meta }
-            : {}),
-        },
-      });
-    } catch {
-      this.send({ id, result: { action: "cancel", content: null } });
-    } finally {
-      this.resumeToolTimeout();
-    }
+    const accepted =
+      parsed?.success === true &&
+      parsed.data.threadId === this.threadId &&
+      this.active &&
+      !this.closed;
+    this.send({
+      id,
+      result: accepted ? { action: "accept", content: {} } : { action: "cancel", content: null },
+    });
   }
 
   private failAll(error: Readonly<Error>): void {
@@ -427,7 +377,6 @@ class CodexControlsSession {
       pending.reject(error);
     }
     this.pending.clear();
-    this.activeToolRequestId = undefined;
   }
 }
 

@@ -36,7 +36,6 @@ class FakeSession {
 test("boots once and carries a persistent tab binding across structured calls", async () => {
   const session = new FakeSession();
   const wire = new ChromeWire({
-    approval: async (): Promise<{ readonly action: "cancel" }> => ({ action: "cancel" }),
     session,
   });
   const schema = z.object({ value: z.literal("ready") });
@@ -61,7 +60,6 @@ test("boots once and carries a persistent tab binding across structured calls", 
 test("reports one actionable field error for an invalid Chrome response", async () => {
   const session = new FakeSession();
   const wire = new ChromeWire({
-    approval: async (): Promise<{ readonly action: "cancel" }> => ({ action: "cancel" }),
     session,
   });
   expect(

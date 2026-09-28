@@ -1,5 +1,3 @@
-/* oxlint-disable import/max-dependencies -- Evaluation composes model, control, trace, and fixture modules. */
-import { terminalApproval } from "../../src/app/terminal-approval.ts";
 import { createComputer, createModels, loadConfig } from "../../src/app/config.ts";
 import { runTask } from "../../src/agent/loop.ts";
 import { describeAction } from "../../src/agent/contracts.ts";
@@ -17,10 +15,7 @@ const runId = crypto.randomUUID();
 const models = createModels(config);
 const workspace = startWorkspace();
 const reconnect = Bun.env["EVAL_RECONNECT"] === "1";
-let browser = restrictedBrowser(
-  createComputer("browser", { approval: terminalApproval }),
-  workspace.origin,
-);
+let browser = restrictedBrowser(createComputer("browser", {}), workspace.origin);
 const sessions = new SessionStore(`runs/qa/overnight/session-followup-${runId}`);
 const traces: TaskStep[][] = [];
 const modelRequests: DecisionRequestEvent[][] = [];
@@ -87,10 +82,7 @@ try {
   });
   if (reconnect) {
     await browser.close();
-    browser = restrictedBrowser(
-      createComputer("browser", { approval: terminalApproval }),
-      workspace.origin,
-    );
+    browser = restrictedBrowser(createComputer("browser", {}), workspace.origin);
     await browser.desktop();
   }
   await browser.navigate?.(`${workspace.origin}/item/c-3`);

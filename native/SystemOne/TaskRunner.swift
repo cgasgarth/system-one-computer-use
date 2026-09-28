@@ -8,28 +8,6 @@ struct TaskInput: Encodable {
     let submittedAt: Int64
 }
 
-struct ApprovalPrompt: Decodable {
-    enum Status: String, Decodable { case approvalRequested = "approval_requested" }
-    let status: Status
-    let requestId: UUID
-    let message: String
-    let canAllowTask: Bool
-    let app: String?
-    let site: String?
-    let tool: String?
-}
-
-struct ApprovalResponse: Encodable {
-    enum Decision: String, Encodable {
-        case allowOnce = "allow_once"
-        case allowTask = "allow_task"
-        case decline
-    }
-    let kind = "approval_response"
-    let requestId: UUID
-    let decision: Decision
-}
-
 struct TaskEvent: Decodable {
     enum Status: String, Decodable { case running, complete, blocked, error }
     let status: Status
@@ -47,9 +25,7 @@ final class TaskRunner {
     private var ended = false
     private var generation = UUID()
     private var input: FileHandle?
-    private var pendingApprovalId: UUID?
     var onEvent: ((TaskEvent) -> Void)?
-    var onApproval: ((ApprovalPrompt) -> Void)?
     var onError: ((String) -> Void)?
 
     func start(_ request: TaskInput) throws {
@@ -79,7 +55,6 @@ final class TaskRunner {
         child.standardError = FileHandle.nullDevice
         buffer.removeAll()
         ended = false
-        pendingApprovalId = nil
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil }
@@ -115,14 +90,8 @@ final class TaskRunner {
             let line = buffer.prefix(upTo: newline)
             buffer.removeSubrange(...newline)
             do {
-                if let approval = try? JSONDecoder().decode(ApprovalPrompt.self, from: line) {
-                    pendingApprovalId = approval.requestId
-                    onApproval?(approval)
-                    continue
-                }
                 let event = try JSONDecoder().decode(TaskEvent.self, from: line)
                 ended = event.status != .running
-                if ended { pendingApprovalId = nil }
                 onEvent?(event)
             } catch {
                 onError?("Invalid response from task process: \(error.localizedDescription)")
@@ -130,22 +99,9 @@ final class TaskRunner {
         }
     }
 
-    func respond(to prompt: ApprovalPrompt, decision: ApprovalResponse.Decision) throws {
-        guard process != nil, !ended, pendingApprovalId == prompt.requestId else {
-            throw CocoaError(.userCancelled)
-        }
-        if decision == .allowTask && !prompt.canAllowTask { throw CocoaError(.userCancelled) }
-        try send(ApprovalResponse(
-            requestId: prompt.requestId,
-            decision: decision
-        ))
-        pendingApprovalId = nil
-    }
-
     func cancel() {
         generation = UUID()
         ended = true
-        pendingApprovalId = nil
         process?.terminate()
         process = nil
         try? input?.close()

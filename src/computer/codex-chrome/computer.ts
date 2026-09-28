@@ -8,7 +8,6 @@ import type {
   ManagedComputer,
   TypeAction,
 } from "../types.ts";
-import type { ApprovalRelay } from "../codex-controls/protocol.ts";
 import { ChromeWire } from "./wire.ts";
 import { axIndex, parseAxWindow } from "./snapshot.ts";
 import { bookmarkTab, restoreTab, tabSchema } from "./tabs.ts";
@@ -58,7 +57,6 @@ interface SelectChoice {
   readonly value: string;
 }
 interface ChromeOptions {
-  readonly approval: ApprovalRelay;
   readonly signal?: Readonly<AbortSignal>;
   readonly wire?: ChromeControl;
 }

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { CodexControlsSession } from "../codex-controls/app-server.ts";
-import type { ApprovalRelay } from "../codex-controls/protocol.ts";
 
 const PREFIX = "S1DATA:";
 const ERROR_CHARS = 300;
@@ -19,7 +18,6 @@ var s1Tab;
 nodeRepl.write(await s1Chrome.documentation());`;
 
 interface ChromeWireOptions {
-  readonly approval: ApprovalRelay;
   readonly session?: Pick<CodexControlsSession, "invoke" | "close">;
   readonly signal?: Readonly<AbortSignal>;
 }
@@ -27,7 +25,6 @@ interface ChromeWireOptions {
 class ChromeWire {
   private readonly session: Pick<CodexControlsSession, "invoke" | "close">;
   private readonly owned: boolean;
-  private readonly approval: ApprovalRelay;
   private readonly signal: Readonly<AbortSignal> | undefined;
   private booted = false;
   private booting: Promise<void> | undefined;
@@ -35,7 +32,6 @@ class ChromeWire {
   public constructor(options: Readonly<ChromeWireOptions>) {
     this.session = options.session ?? new CodexControlsSession();
     this.owned = options.session === undefined;
-    this.approval = options.approval;
     this.signal = options.signal;
   }
 
@@ -44,7 +40,6 @@ class ChromeWire {
       server: "node_repl",
       code,
       title,
-      relay: this.approval,
       ...(this.signal === undefined ? {} : { signal: this.signal }),
     });
     const output = result.content

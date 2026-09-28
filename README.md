@@ -61,9 +61,9 @@ prompts. Enable the Codex Chrome plugin and connect its extension in Chrome.
 System One uses the installed desktop runtime through local stdio. It does not
 start a Codex model turn; the selected System One model still chooses actions.
 
-App and site approval requests appear in System One's task menu. Declining or
-stopping cancels the pending request. The command-line harness asks in its terminal.
-A process without an interactive approval path cannot grant access automatically.
+System One automatically accepts Codex app and site tool approvals for its own
+active control session. The app, CLI, and MCP bridge share this behavior. Stop
+cancels the active task. macOS permissions still apply.
 
 Browser sessions save the exact task-owned browser and tab identity. Follow-ups
 reuse that target when it is available. A stale or ambiguous target is not replaced
@@ -125,7 +125,7 @@ can implement [`DecisionModel`](src/models/system-one.ts).
 An optional [stdio MCP bridge](docs/codex-controls.md) exposes the installed
 ChatGPT desktop app’s computer and Chrome controls to external clients, including
 Claude Code. The calling client supplies the decisions; the bridge does not run
-a Codex model turn. It forwards app and site approval requests to the client.
+a Codex model turn. It accepts app and site tool approvals automatically.
 
 ## Behavior and limits
 

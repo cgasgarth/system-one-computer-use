@@ -8,10 +8,9 @@ const taskLine = JSON.stringify({
   session: { mode: "auto" },
 });
 
-test("accepts a user approval reply while the task is still running", async () => {
+test("keeps the active task running when a second task arrives", async () => {
   const taskDone = Promise.withResolvers<boolean>();
   const started = Promise.withResolvers<boolean>();
-  const responseId = crypto.randomUUID();
   const holder: { controller?: ReadableStreamDefaultController<string> } = {};
   const lines = new ReadableStream<string>({
     start(value): void {
@@ -29,16 +28,13 @@ test("accepts a user approval reply while the task is still running", async () =
       started.resolve(true);
       await taskDone.promise;
     },
-    respond: (response) => {
-      seen.push(response.decision);
-      taskDone.resolve(true);
-    },
     cancel: () => {
       seen.push("cancelled");
       taskDone.resolve(true);
     },
     busy: () => {
       seen.push("busy");
+      taskDone.resolve(true);
     },
     error: () => {
       seen.push("error");
@@ -47,17 +43,15 @@ test("accepts a user approval reply while the task is still running", async () =
   });
   controller.enqueue(taskLine);
   await started.promise;
-  controller.enqueue(
-    JSON.stringify({ kind: "approval_response", requestId: responseId, decision: "allow_once" }),
-  );
+  controller.enqueue(taskLine);
   await taskDone.promise;
   await Bun.sleep(0);
   controller.close();
   await consumed;
-  expect(seen).toEqual(["Read a menu", "allow_once"]);
+  expect(seen).toEqual(["Read a menu", "busy"]);
 });
 
-test("closing worker input cancels a task waiting for approval", async () => {
+test("closing worker input cancels an active task", async () => {
   const taskDone = Promise.withResolvers<boolean>();
   const started = Promise.withResolvers<boolean>();
   const holder: { controller?: ReadableStreamDefaultController<string> } = {};
@@ -75,9 +69,6 @@ test("closing worker input cancels a task waiting for approval", async () => {
     run: async () => {
       started.resolve(true);
       await taskDone.promise;
-    },
-    respond: () => {
-      throw new Error("No approval reply was sent.");
     },
     cancel: () => {
       cancellations += 1;

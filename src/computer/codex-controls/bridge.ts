@@ -2,7 +2,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { CodexControlsSession } from "./app-server.ts";
 import type { AppServerOptions } from "./app-server.ts";
-import type { ApprovalRequest, ApprovalResult } from "./protocol.ts";
 
 const NATIVE_SETUP = "await cua.getState();";
 const CHROME_SETUP = `var { setupBrowserRuntime } = await import("/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs");
@@ -10,13 +9,11 @@ var agent = await setupBrowserRuntime();
 var chrome = await agent.browsers.get("chrome");
 nodeRepl.write(await chrome.documentation());`;
 
-type ApprovalRelay = (request: Readonly<ApprovalRequest>) => Promise<ApprovalResult>;
 type ControlTool = "computer" | "chrome";
 type ExecuteRequest = Readonly<{
   tool: ControlTool;
   code: string;
   title: string;
-  relay: ApprovalRelay;
   signal?: AbortSignal;
 }>;
 
@@ -34,7 +31,7 @@ class CodexControlsBridge {
   }
 
   public async execute(request: ExecuteRequest): Promise<CallToolResult> {
-    const { tool, code, title, relay, signal } = request;
+    const { tool, code, title, signal } = request;
     if (tool === "computer") {
       const first = !this.nativeReady;
       if (first) {
@@ -42,7 +39,6 @@ class CodexControlsBridge {
           server: "cua_repl",
           code: NATIVE_SETUP,
           title: "Computer control setup",
-          relay,
           signal,
         });
         if (this.nativeDocs.isError === true) {
@@ -65,7 +61,7 @@ class CodexControlsBridge {
           ],
         };
       }
-      return this.session.invoke({ server: "cua_repl", code, title, relay, signal });
+      return this.session.invoke({ server: "cua_repl", code, title, signal });
     }
     const first = !this.chromeReady;
     if (first) {
@@ -73,7 +69,6 @@ class CodexControlsBridge {
         server: "node_repl",
         code: CHROME_SETUP,
         title: "Chrome control setup",
-        relay,
         signal,
       });
       if (this.chromeDocs.isError === true) {
@@ -96,7 +91,7 @@ class CodexControlsBridge {
         ],
       };
     }
-    return this.session.invoke({ server: "node_repl", code, title, relay, signal });
+    return this.session.invoke({ server: "node_repl", code, title, signal });
   }
 
   public async reset(): Promise<void> {

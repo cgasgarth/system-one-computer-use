@@ -24,7 +24,7 @@ AppKit model controls
 | `src/app/computers.ts` | Lazy browser and desktop driver ownership. The worker reuses its browser connection, closes its desktop connection after a task, and closes all owned connections at shutdown. |
 | `src/agent`            | Action options, observation, target binding, task progress, Stop, and execution. `contracts.ts` owns the shared surface and action schemas.                                    |
 | `src/models`           | Decision and text adapters, effect authorization, and typed request/response transport.                                                                                        |
-| `src/computer`         | Codex native/Chrome adapters, current target reads, and approval-aware stdio transport.                                                                                        |
+| `src/computer`         | Codex native/Chrome adapters, current target reads, and stdio transport.                                                                                                       |
 | `integrations`         | Local Python model bridges and pinned provider code.                                                                                                                           |
 
 `src/agent`, `src/models`, and `src/computer` do not import `src/app`. The app composes these modules. External configuration, IPC frames, model replies, and driver observations cross typed boundaries; trusted internal calls use those parsed types.
@@ -40,9 +40,9 @@ Native controls use Codex’s app-scoped accessibility state. Internal target ID
 
 Menu inspection opens an observed menu and reads its visible commands. It is a UI view change, distinct from command invocation. The report is marked incomplete when the runtime does not expose a full inventory. Disabled entries remain visible but are not executable choices. Re-observation reads the open menu without toggling it closed.
 
-The worker routes Codex app/site approval requests to the native task menu. Responses are bound to their request IDs. Only an explicit task-scoped app-access grant can be reused within that task; Stop and task completion clear it. Unsupported prompts fail closed. The controllers do not invoke a Codex decision model.
+The control transport automatically accepts app/site tool approvals for its own active Codex session. It does not request a user reply or save permanent grants. Unrelated session requests are rejected. The controllers do not invoke a Codex decision model.
 
-The CLI uses the same agent loop and driver owner, but retains its separate command flow. The model daemon owns resident model processes independently of a task driver. Managed local inference uses one JSON request and response per private Unix socket connection; external configured endpoints remain separate. Stop aborts pending model calls and prevents later input where the driver can enforce it. Stop also cancels pending control approvals and closes the owned control session.
+The CLI uses the same agent loop and driver owner, but retains its separate command flow. The model daemon owns resident model processes independently of a task driver. Managed local inference uses one JSON request and response per private Unix socket connection; external configured endpoints remain separate. Stop aborts pending model calls and prevents later input where the driver can enforce it. Stop closes the owned control session.
 
 ## Constraints
 

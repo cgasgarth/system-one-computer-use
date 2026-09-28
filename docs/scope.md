@@ -38,7 +38,7 @@ shortcut changes, saved default targets, and model connection settings.
 
 Show median decision latency and successful tool actions per second. Failed
 attempts, waits, and internal decisions do not count as tool actions. Keep a persistent Codex Chrome connection and preserve exact task-owned tab identity.
-Require the user's Codex setup and relay its approval requests to the native menu.
+Require the user's Codex setup and automatically accept tool approvals for the active control session.
 Validate task behavior, menu interaction, settings persistence, cancellation,
 and the voice handoff with concrete evidence and report unverified limits.
 

@@ -1,6 +1,5 @@
-import { CallToolResultSchema, ElicitRequestFormParamsSchema } from "@modelcontextprotocol/core";
+import { CallToolResultSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
-import type { ReadonlyDeep } from "type-fest";
 
 const rpcMessageSchema = z.union([
   z.object({ id: z.union([z.number(), z.string()]), method: z.string(), params: z.unknown() }),
@@ -22,26 +21,9 @@ const approvalRequestSchema = z.object({
   requestedSchema: z.object({ type: z.literal("object") }).loose(),
   _meta: z.object({ codex_approval_kind: z.literal("mcp_tool_call") }).loose(),
 });
-const clientElicitationSchema = ElicitRequestFormParamsSchema;
-const approvalResultSchema = z.object({
-  action: z.enum(["accept", "decline", "cancel"]),
-  content: z.record(z.string(), z.unknown()).optional(),
-  _meta: z.object({ persist: z.enum(["session", "always"]).optional() }).optional(),
-});
-type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
-type ApprovalResult = z.infer<typeof approvalResultSchema>;
-type ApprovalRelay = (request: ReadonlyDeep<ApprovalRequest>) => Promise<ApprovalResult>;
 interface CodexComputerOptions {
-  readonly approval: ApprovalRelay;
   readonly signal?: AbortSignal;
 }
 
-export {
-  approvalRequestSchema,
-  approvalResultSchema,
-  clientElicitationSchema,
-  rpcMessageSchema,
-  startedSchema,
-  toolResultSchema,
-};
-export type { ApprovalRelay, ApprovalRequest, ApprovalResult, CodexComputerOptions, RpcMessage };
+export { approvalRequestSchema, rpcMessageSchema, startedSchema, toolResultSchema };
+export type { CodexComputerOptions, RpcMessage };

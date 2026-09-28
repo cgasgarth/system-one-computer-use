@@ -13,12 +13,10 @@ const config = loadConfig();
 const models = createModels(config);
 const sessions = new SessionStore();
 const shutdown = new AbortController();
-// The callback is evaluated only after the worker has an active task.
 // eslint-disable-next-line eslint/init-declarations
 let activeExecution: WorkerExecution | undefined;
 const computers = new ComputerSessions((mode) =>
   createComputer(mode, {
-    approval: async (request) => activeExecution?.requestApproval(request) ?? { action: "cancel" },
     signal: shutdown.signal,
   }),
 );
@@ -42,7 +40,6 @@ async function closeNativeTask(): Promise<void> {
 }
 function stop(): void {
   activeExecution?.trace.saveFailure("stopped", "Stopped by user during an in-flight task.");
-  activeExecution?.cancelApprovals();
   shutdown.abort(new Error("Stopped by user"));
   input.close();
   void closeComputers();
@@ -111,7 +108,6 @@ async function execute(request: TaskInput): Promise<void> {
     identities,
     sessions,
     text: models.text,
-    signal: shutdown.signal,
   });
   activeExecution = execution;
   try {
@@ -141,7 +137,6 @@ async function execute(request: TaskInput): Promise<void> {
     };
     console.log(JSON.stringify(failure));
   } finally {
-    execution.cancelApprovals();
     await execution.trace.clearCheckpoint();
     activeExecution = undefined;
     await closeNativeTask();
@@ -150,11 +145,7 @@ async function execute(request: TaskInput): Promise<void> {
 try {
   await consumeWorkerInput(input, {
     run: execute,
-    respond(response) {
-      activeExecution?.respondApproval(response);
-    },
     cancel() {
-      activeExecution?.cancelApprovals();
       shutdown.abort(new Error("Task input closed"));
     },
     busy() {

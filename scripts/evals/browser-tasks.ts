@@ -1,5 +1,3 @@
-/* oxlint-disable import/max-dependencies -- Evaluation composes model, control, trace, and fixture modules. */
-import { terminalApproval } from "../../src/app/terminal-approval.ts";
 import { prepareModels } from "./prepare.ts";
 import { createComputer, createModels, loadConfig } from "../../src/app/config.ts";
 import { runTask } from "../../src/agent/loop.ts";
@@ -16,10 +14,7 @@ const RERENDER_WAIT_MS = 100;
 const config = loadConfig();
 const models = createModels(config);
 const workspace = startWorkspace();
-const browser = restrictedBrowser(
-  createComputer("browser", { approval: terminalApproval }),
-  workspace.origin,
-);
+const browser = restrictedBrowser(createComputer("browser", {}), workspace.origin);
 const runId = Bun.env["EVAL_RUN_ID"] ?? crypto.randomUUID();
 const outputDirectory = Bun.env["EVAL_OUTPUT_DIR"] ?? `runs/qa/overnight/evals/${runId}`;
 const endpoint = new URL(config.SYSTEM_ONE_URL);

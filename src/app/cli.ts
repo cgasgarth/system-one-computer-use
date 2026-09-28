@@ -7,7 +7,6 @@ import { sessionContext } from "./sessions/context.ts";
 import { describeAction } from "../agent/contracts.ts";
 import { ActionSelectionError } from "../models/action-selection-error.ts";
 import type { TaskStep } from "../agent/types.ts";
-import { terminalApproval } from "./terminal-approval.ts";
 
 const ARGUMENT_OFFSET = 2;
 const config = loadConfig();
@@ -21,7 +20,6 @@ process.once("SIGINT", () => {
 });
 const computers = new ComputerSessions((mode) =>
   createComputer(mode, {
-    approval: async (request) => terminalApproval(request, stopped.signal),
     signal: stopped.signal,
   }),
 );

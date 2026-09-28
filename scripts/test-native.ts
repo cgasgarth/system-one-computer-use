@@ -43,18 +43,3 @@ await run([
   permissionBinary,
 ]);
 await run([permissionBinary]);
-const approvalBinary = `${directory}/task-approval`;
-await run([
-  "xcrun",
-  "swiftc",
-  "-swift-version",
-  "6",
-  "-O",
-  "native/SystemOne/TaskRunner.swift",
-  "native/SystemOne/SessionMenu.swift",
-  "native/SystemOne/TaskMenu.swift",
-  "tests/native/task-approval.swift",
-  "-o",
-  approvalBinary,
-]);
-await run([approvalBinary]);
