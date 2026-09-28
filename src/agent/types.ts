@@ -5,7 +5,6 @@ import type { DecisionWireEvent } from "../models/decision-request.ts";
 import type { TextModel, TextWireEvent } from "../models/text.ts";
 import type { Action, MenuInspection, Surface } from "./contracts.ts";
 import type { UnchangedDestination } from "./progress.ts";
-import type { ActionCheck } from "../models/action-check.ts";
 import type { OperationDecision } from "../models/decision-context.ts";
 
 interface ActionResult {
@@ -52,7 +51,6 @@ interface TaskStep {
   readonly candidates?: readonly Action[];
   readonly operation?: OperationDecision;
   readonly rejectedOperations?: readonly OperationDecision[];
-  readonly checks?: readonly ActionCheck[];
 }
 interface TaskResult {
   readonly status: "complete" | "blocked";

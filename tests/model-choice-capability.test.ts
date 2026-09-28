@@ -161,7 +161,6 @@ test("retains duplicate labels and observed row identity on a later target page"
   const targetHref = `https://example.test/article/${LAST_LINK}`;
   const { elements, actions } = duplicateLinks();
   const seen: string[][] = [];
-  let classified = 0;
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -171,10 +170,6 @@ test("retains duplicate labels and observed row identity on a later target page"
       if (instructions.startsWith("Which operation")) {
         const click = keys.find((key) => criteria[key]?.includes("Click a button") === true);
         return answer(click ?? "A0", keys);
-      }
-      if (instructions.startsWith("Would this exact control")) {
-        classified += 1;
-        return answer("A1", keys);
       }
       expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(TARGET_ROW_BYTES);
       seen.push(Object.values(criteria));
@@ -210,7 +205,6 @@ test("retains duplicate labels and observed row identity on a later target page"
       element_token: `link:${LAST_LINK}`,
     });
     expect(seen.length).toBeGreaterThan(BASE_REQUEST_LIMIT);
-    expect(classified).toBe(1);
     expect(seen.flat().filter((description) => description.includes(targetHref))).toHaveLength(1);
     expect(
       seen.at(-1)?.some((description) => description.includes(`listitem "Section ${LAST_LINK}"`)),

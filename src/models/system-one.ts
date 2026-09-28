@@ -8,27 +8,22 @@ import {
   operationTargetInput,
 } from "./decision-context.ts";
 import type { OperationDecision } from "./decision-context.ts";
-import type { ClickInspection } from "../computer/types.ts";
 import { requestDecision } from "./decision-request.ts";
 import type { DecisionRequestContext, DecisionRequestPhase } from "./decision-request.ts";
 import { ActionSelectionError } from "./action-selection-error.ts";
-import { verifyCommit } from "./commit-verification.ts";
-import type { ActionCheck } from "./action-check.ts";
-import { binaryAnswerSchema } from "./system-one-schema.ts";
 import type {
   ActionProbabilities,
-  BinaryAnswer,
   DecisionAnswer,
   DecisionRequest,
   DecisionResponse,
 } from "./system-one-schema.ts";
 
 const PROBABILITY_TOLERANCE = 0.02;
-const COMPLETION_CLASSES = 2;
+const MIN_MODEL_CHOICES = 2;
 const MAX_OPERATION_PASSES = 2;
 const MAX_TARGETS_PER_PAGE = 255;
 const MAX_TARGET_ROW_BYTES = 7600;
-const TARGET_RETRY_RESERVE_BYTES = 256;
+const TARGET_FEEDBACK_RESERVE_BYTES = 256;
 const NEXT_PAGE_DESCRIPTION =
   "None of these targets; inspect the next target page without taking an action.";
 const RETURN_TO_OPERATIONS_DESCRIPTION =
@@ -41,7 +36,6 @@ interface Decision {
   readonly action: Action;
   readonly latencyMs: number;
   readonly probabilities: ActionProbabilities;
-  readonly checks?: readonly ActionCheck[];
   readonly operation?: OperationDecision;
   readonly rejectedOperations?: readonly OperationDecision[];
   readonly candidates?: readonly Action[];
@@ -53,13 +47,6 @@ interface DecisionInput extends DecisionRequestContext {
   readonly actions: ActionChoices;
   readonly context?: string;
   readonly feedback?: string;
-  readonly recentActions?: readonly {
-    readonly action: Action;
-    readonly result: "returned" | "error" | "unchanged";
-  }[];
-  readonly inspectClick?: (
-    action: Extract<Action, { kind: "click_element" }>,
-  ) => Promise<ClickInspection>;
   readonly mode?: "browser" | "desktop" | undefined;
 }
 interface DecisionModel {
@@ -74,7 +61,6 @@ interface TargetChoiceOptions {
   readonly hasMorePages?: boolean;
   readonly hasPriorPages?: boolean;
   readonly separateReturn?: boolean;
-  readonly forceChoice?: boolean;
 }
 type TargetOutcome = "selected" | "next_page" | "reject_operation";
 function targetExtraDescriptions(options: TargetChoiceOptions): readonly string[] {
@@ -136,7 +122,7 @@ class SystemOneDecisionModel implements DecisionModel {
     const maxChoices = options.maxChoices ?? MAX_TARGETS_PER_PAGE;
     if (
       !Number.isInteger(maxChoices) ||
-      maxChoices < COMPLETION_CLASSES ||
+      maxChoices < MIN_MODEL_CHOICES ||
       maxChoices > MAX_TARGETS_PER_PAGE
     ) {
       throw new Error("The decision model choice limit must be an integer from 2 to 255.");
@@ -147,7 +133,7 @@ class SystemOneDecisionModel implements DecisionModel {
     this.maxChoices = maxChoices;
   }
 
-  // One current observation grounds completion, target identity, and persistence.
+  // Choose an operation and target from the current observation.
   public async choose(initial: DecisionInput): Promise<Decision> {
     initial.signal?.throwIfAborted();
     const deadline = AbortSignal.timeout(MAX_DECISION_MS);
@@ -196,7 +182,6 @@ class SystemOneDecisionModel implements DecisionModel {
     let remaining: readonly Action[] = input.actions;
     let currentInput = input;
     const rejectedOperations: OperationDecision[] = [];
-    const rejectedChecks: ActionCheck[] = [];
     let groupCount = 0;
     while (remaining.length > 0 && groupCount < MAX_OPERATION_PASSES) {
       groupCount += 1;
@@ -218,13 +203,11 @@ class SystemOneDecisionModel implements DecisionModel {
       if (attempt.decision !== undefined) {
         return {
           ...attempt.decision,
-          checks: [...rejectedChecks, ...attempt.checks],
           ...(attempt.candidates === undefined ? {} : { candidates: attempt.candidates }),
           rejectedOperations,
           ...(operation === undefined ? {} : { operation }),
         };
       }
-      rejectedChecks.push(...attempt.checks);
       if (operation !== undefined) {
         rejectedOperations.push(operation);
       }
@@ -233,13 +216,13 @@ class SystemOneDecisionModel implements DecisionModel {
         ...input,
         feedback: [
           input.feedback ?? "",
-          "The previous operation yielded no approved action on this observation. Choose another available operation.",
+          "The model selected no target in the previous operation on this observation. Choose another available operation.",
         ]
           .filter(Boolean)
           .join("\n"),
       };
     }
-    throw new ActionSelectionError(rejectedChecks, rejectedOperations, groupCount);
+    throw new ActionSelectionError(rejectedOperations, groupCount);
   }
 
   private targetPages(
@@ -284,7 +267,7 @@ class SystemOneDecisionModel implements DecisionModel {
       const candidate = [...page, action];
       if (
         this.targetRowBytes(state, input.task, [description, ...extraDescriptions]) >
-        MAX_TARGET_ROW_BYTES - TARGET_RETRY_RESERVE_BYTES
+        MAX_TARGET_ROW_BYTES - TARGET_FEEDBACK_RESERVE_BYTES
       ) {
         throw new Error(
           "capacity_choices: One observed target exceeds the request budget; no target was truncated.",
@@ -297,7 +280,7 @@ class SystemOneDecisionModel implements DecisionModel {
           description,
           ...extraDescriptions,
         ]) >
-          MAX_TARGET_ROW_BYTES - TARGET_RETRY_RESERVE_BYTES
+          MAX_TARGET_ROW_BYTES - TARGET_FEEDBACK_RESERVE_BYTES
       ) {
         pages.push(page);
         page = [];
@@ -322,11 +305,9 @@ class SystemOneDecisionModel implements DecisionModel {
     },
   ): Promise<{
     readonly decision?: Decision;
-    readonly checks: readonly ActionCheck[];
     readonly candidates?: readonly Action[];
   }> {
     const { pages, separateReturn } = this.targetPages(input, actions, options.otherOperations);
-    const checks: ActionCheck[] = [];
     for (const [index, page] of pages.entries()) {
       const hasMorePages = index < pages.length - 1;
       // eslint-disable-next-line no-await-in-loop
@@ -337,31 +318,22 @@ class SystemOneDecisionModel implements DecisionModel {
         separateReturn,
       });
       if (target.outcome === "reject_operation") {
-        return { checks };
+        return {};
       }
       if (target.outcome === "selected") {
-        // eslint-disable-next-line no-await-in-loop
-        const attempt = await this.selectAction(input, {
-          actions: page,
-          answer: target.answer,
-          started: options.started,
-          optionCount: target.optionCount,
-          hasMorePages,
-          separateReturn,
-        });
-        checks.push(...attempt.checks);
-        if (attempt.decision !== undefined) {
-          return { decision: attempt.decision, checks, candidates: page };
-        }
-        if (attempt.rejectOperation === true) {
-          return { checks };
-        }
+        return {
+          decision: decision(target.answer, page, {
+            latencyMs: performance.now() - options.started,
+            optionCount: target.optionCount,
+          }),
+          candidates: page,
+        };
       }
       if (hasMorePages) {
         options.onPageAdvance();
       }
     }
-    return { checks };
+    return {};
   }
 
   private async targetChoice(
@@ -373,12 +345,7 @@ class SystemOneDecisionModel implements DecisionModel {
     readonly optionCount: number;
     readonly outcome: TargetOutcome;
   }> {
-    if (
-      actions.length === 1 &&
-      options.hasMorePages !== true &&
-      options.hasPriorPages !== true &&
-      options.forceChoice !== true
-    ) {
+    if (actions.length === 1 && options.hasMorePages !== true && options.hasPriorPages !== true) {
       // The operation choice already selected this sole target; do not ask it to veto itself.
       return {
         answer: { choice: "A0", probabilities: { A0: 1 } },
@@ -480,86 +447,6 @@ class SystemOneDecisionModel implements DecisionModel {
     };
   }
 
-  private async selectAction(
-    input: DecisionInput,
-    selection: {
-      readonly actions: readonly Action[];
-      readonly answer: DecisionAnswer;
-      readonly started: number;
-      readonly optionCount: number;
-      readonly hasMorePages?: boolean;
-      readonly separateReturn?: boolean;
-    },
-  ): Promise<{
-    readonly decision?: Decision;
-    readonly checks: readonly ActionCheck[];
-    readonly rejectOperation?: boolean;
-  }> {
-    const { actions, answer, started, optionCount } = selection;
-    const initial = decision(answer, actions, {
-      latencyMs: performance.now() - started,
-      optionCount,
-    });
-    const first = await this.verifySelected(input, initial, started);
-    if (first.decision !== undefined || actions.length === 1) {
-      return first;
-    }
-    const alternatives = actions.filter((action) => action !== initial.action);
-    const retryInput = {
-      ...input,
-      feedback: [
-        input.feedback ?? "",
-        "The previously selected target did not pass its action or persistent-effect check. Choose another observed target, or choose None for another operation.",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    };
-    const alternate = await this.targetChoice(retryInput, alternatives, {
-      otherOperations: true,
-      ...(selection.hasMorePages === undefined ? {} : { hasMorePages: selection.hasMorePages }),
-      ...(selection.separateReturn === undefined
-        ? {}
-        : { separateReturn: selection.separateReturn }),
-      forceChoice: true,
-    });
-    if (alternate.outcome !== "selected") {
-      return { ...first, rejectOperation: alternate.outcome === "reject_operation" };
-    }
-    const next = decision(alternate.answer, alternatives, {
-      latencyMs: performance.now() - started,
-      optionCount: alternate.optionCount,
-    });
-    const second = await this.verifySelected(retryInput, next, started);
-    return { ...second, checks: [...first.checks, ...second.checks] };
-  }
-
-  private async verifySelected(
-    input: DecisionInput,
-    selected: Decision,
-    started: number,
-  ): Promise<{ readonly decision?: Decision; readonly checks: readonly ActionCheck[] }> {
-    const { action } = selected;
-    if (action.kind === "finish") {
-      return { decision: { ...selected, latencyMs: performance.now() - started }, checks: [] };
-    }
-    if (action.kind === "blocked") {
-      return { decision: { ...selected, latencyMs: performance.now() - started }, checks: [] };
-    }
-    // An ordinary action match does not authorize a persistent effect.
-    const commit = await verifyCommit({
-      action,
-      input,
-      model: this.modelId,
-      judge: async (query, phase) => this.judge(input, query, phase),
-    });
-    return commit.allowed
-      ? {
-          decision: { ...selected, latencyMs: performance.now() - started },
-          checks: commit.checks,
-        }
-      : { checks: commit.checks };
-  }
-
   private async request(
     input: DecisionInput,
     phase: DecisionRequestPhase,
@@ -578,19 +465,6 @@ class SystemOneDecisionModel implements DecisionModel {
       endpoint: this.endpoint,
       apiKey: this.apiKey,
     });
-  }
-
-  private async judge(
-    input: DecisionInput,
-    request: DecisionRequest,
-    phase: DecisionRequestPhase,
-  ): Promise<BinaryAnswer> {
-    const response = await this.request(input, phase, request);
-    const answer = binaryAnswerSchema.parse(response.answers.next_action);
-    if (!validProbabilities(answer.probabilities, COMPLETION_CLASSES)) {
-      throw new Error("System One returned an invalid commit verification");
-    }
-    return answer;
   }
 }
 

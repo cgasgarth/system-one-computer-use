@@ -3,7 +3,6 @@ import { taskDesktop } from "../targets.ts";
 /* oxlint-disable typescript/prefer-readonly-parameter-types -- Injected SDK transport owns mutable session state. */
 import type {
   ClickAction,
-  ClickInspection,
   InspectMenuAction,
   KeyAction,
   ManagedComputer,
@@ -262,12 +261,6 @@ class CodexNativeComputer implements ManagedComputer {
       throw new Error("The selected native control cannot be clicked with this operation.");
     }
     await this.wire.click(current.element_index);
-  }
-
-  // oxlint-disable-next-line typescript/promise-function-async -- Computer interface requires a Promise for this local classification.
-  public inspectClick(): Promise<ClickInspection> {
-    this.options.signal?.throwIfAborted();
-    return Promise.resolve({ kind: "unclassified" });
   }
 
   public async typeText(action: TypeAction): Promise<void> {

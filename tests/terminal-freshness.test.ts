@@ -40,9 +40,6 @@ function testComputer(readContent: () => string): ManagedComputer {
     async launchApp() {
       /* This test uses the selected browser. */
     },
-    async inspectClick() {
-      return { kind: "unclassified" };
-    },
     async close() {
       /* The driver is local to this test. */
     },

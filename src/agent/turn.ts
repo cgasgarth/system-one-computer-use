@@ -12,7 +12,6 @@ import type { Decision, DecisionInput } from "../models/system-one.ts";
 
 const HISTORY_CHARS = 2000;
 const RECENT_STEPS = 6;
-const RECENT_COMMIT_ACTIONS = 4;
 const ERROR_CHARS = 300;
 const REFRESH_WAIT_MS = 250;
 const MUTATING_ACTIONS = new Set<Action["kind"]>([
@@ -48,12 +47,6 @@ function turnFeedback(lastError: string): string {
   return lastError.length === 0
     ? ""
     : `Last tool error: ${lastError.slice(0, ERROR_CHARS)}. Other tools remain available.`;
-}
-function recentResult(step: Readonly<TaskStep>): "returned" | "error" | "unchanged" {
-  if (step.error !== undefined) {
-    return "error";
-  }
-  return step.unchanged === undefined ? "returned" : "unchanged";
 }
 function selectedControl(action: Action, observation: Observation): TaskStep["control"] {
   if (action.kind !== "click_element") {
@@ -247,38 +240,18 @@ function chooseInput(
     .slice(-RECENT_STEPS)
     .map((step) => `${describeAction(step.action)} -> ${step.error ?? step.output ?? "No result"}`)
     .join("\n");
-  const recentActions = history
-    .filter((step) =>
-      [
-        "click_element",
-        "invoke_menu",
-        "compose_text",
-        "type_text",
-        "press_key",
-        "navigate",
-      ].includes(step.action.kind),
-    )
-    .slice(-RECENT_COMMIT_ACTIONS)
-    .map((step) => ({
-      action: step.action,
-      result: recentResult(step),
-    }));
   const last = history.at(-1);
   const changedAfterError =
     last?.error !== undefined && last.observation !== summarizeObservation(observation)
       ? "The screen changed after the last tool reported an error. Its effect is uncertain, not necessarily absent. Check the current result before repeating the action."
       : "";
   const context = `${turnFeedback(lastError)}\n${changedAfterError}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
-  const chosenComputer = surfaces.mode === undefined ? undefined : options.computer(surfaces.mode);
-  const inspectClick = chosenComputer?.inspectClick.bind(chosenComputer);
   return {
     task: options.task,
     observation,
     actions,
     context: options.context?.slice(0, HISTORY_CHARS) ?? "",
     feedback: context,
-    recentActions,
-    ...(inspectClick === undefined ? {} : { inspectClick }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.onDecisionRequest === undefined ? {} : { onRequest: options.onDecisionRequest }),
     ...(options.onDecisionWire === undefined ? {} : { onWire: options.onDecisionWire }),
@@ -392,7 +365,6 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
     ...(decision.rejectedOperations === undefined
       ? {}
       : { rejectedOperations: decision.rejectedOperations }),
-    ...(decision.checks === undefined ? {} : { checks: decision.checks }),
     observation: summarizeObservation(observation),
     ...(finishSurface?.decision === undefined ? {} : { terminalDecision: finishSurface.decision }),
     ...(finishSurface?.observation === undefined

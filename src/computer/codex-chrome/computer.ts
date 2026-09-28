@@ -1,13 +1,7 @@
 import { z } from "zod";
 import { windowSchema } from "../../agent/contracts.ts";
 import type { Action, Desktop, Surface, Window } from "../../agent/contracts.ts";
-import type {
-  ClickAction,
-  ClickInspection,
-  KeyAction,
-  ManagedComputer,
-  TypeAction,
-} from "../types.ts";
+import type { ClickAction, KeyAction, ManagedComputer, TypeAction } from "../types.ts";
 import { ChromeWire } from "./wire.ts";
 import { axIndex, parseAxWindow } from "./snapshot.ts";
 import { bookmarkTab, restoreTab, tabSchema } from "./tabs.ts";
@@ -250,24 +244,6 @@ class CodexChromeComputer implements ManagedComputer {
     );
     this.latest = undefined;
     this.choices.clear();
-  }
-
-  public async inspectClick(action: ClickAction): Promise<ClickInspection> {
-    if (this.choices.has(action.element_token)) {
-      return { kind: "non_submit" };
-    }
-    const element = this.latest?.elements.find(
-      (item) => item.element_token === action.element_token,
-    );
-    if (element === undefined) {
-      return { kind: "unclassified" };
-    }
-    const form = await this.wire.read(
-      `var s1Locator=${locator(element)}; if(await s1Locator.count()!==1) return null; return await s1Locator.evaluate((item) => {const tag=item.tagName.toLowerCase();const type=(item.getAttribute('type') ?? (tag==='button' ? 'submit' : '')).toLowerCase();const form=item.closest('form');const submit=(tag==='button'||tag==='input')&&type==='submit'&&form!==null;return submit&&(item.getAttribute('formmethod')??form.getAttribute('method')??'get').toLowerCase()==='post';});`,
-      z.boolean().nullable(),
-      "Inspect Chrome submit control",
-    );
-    return form === null ? { kind: "unclassified" } : { kind: form ? "form_submit" : "non_submit" };
   }
 
   public async inspectField(

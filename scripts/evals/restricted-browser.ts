@@ -29,7 +29,6 @@ function restrictedBrowser(computer: ManagedComputer, origin: string): ManagedCo
       }
       await computer.clickElement(action);
     },
-    inspectClick: computer.inspectClick.bind(computer),
     ...(inspectField === undefined ? {} : { inspectField }),
     typeText: async (action) => computer.typeText(action),
     pressKey: async (action) => computer.pressKey(action),

@@ -8,8 +8,6 @@ const BUTTON_COUNT = 40;
 const APP_COUNT = 113;
 const EXPECTED_REQUESTS = 1;
 const EXPECTED_APP_REQUESTS = 2;
-const MANY_FIELDS = 30;
-const MAX_DECISION_REQUESTS = 20;
 const INFERENCE_DELAY_MS = 200;
 const STOP_AFTER_MS = 20;
 
@@ -113,7 +111,6 @@ test("chooses the text operation among many buttons without serial checks", asyn
       actions,
     });
     expect(result.action.kind).toBe("compose_text");
-    expect(result.checks).toEqual([]);
     expect(requests).toBe(EXPECTED_REQUESTS);
   } finally {
     await server.stop(true);
@@ -168,65 +165,6 @@ test.each([false, true])(
     }
   },
 );
-
-test("stops a long field-readiness cascade with an explicit stalled reason", async () => {
-  let requests = 0;
-  const server = Bun.serve({
-    port: 0,
-    async fetch(request) {
-      requests += 1;
-      const body = decisionRequestSchema.parse(await request.json());
-      const readiness = body.questions.next_action.instructions.startsWith(
-        "Is a user-requested change",
-      );
-      return answer(readiness ? "A1" : "A0", body.questions.next_action.criteria);
-    },
-  });
-  try {
-    const window = {
-      ...windowFixture(),
-      elements: [
-        {
-          element_index: 0,
-          element_token: "save",
-          role: "button",
-          label: "Save",
-          actions: ["AXPress"],
-        },
-        ...Array.from({ length: MANY_FIELDS }, (_unused, index) => ({
-          element_index: index + 1,
-          element_token: `field-${index}`,
-          role: "textbox",
-          label: `Field ${index}`,
-          value: "ready",
-          editable: true,
-        })),
-      ],
-    };
-    await expectFailure(
-      new SystemOneDecisionModel(server.url.href, "model").choose({
-        task: "Save these fields",
-        observation: { desktop: desktopFixture(), window },
-        actions: [
-          {
-            kind: "click_element",
-            pid: window.pid,
-            window_id: window.window_id,
-            element_token: "save",
-            reason: "Save",
-          },
-        ],
-        async inspectClick() {
-          return { kind: "form_submit" };
-        },
-      }),
-      "Decision stalled on this observation",
-    );
-    expect(requests).toBe(MAX_DECISION_REQUESTS);
-  } finally {
-    await server.stop(true);
-  }
-});
 
 test("caller Stop aborts a pending model request without starting another", async () => {
   const controller = new AbortController();

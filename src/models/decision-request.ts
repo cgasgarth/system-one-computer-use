@@ -3,12 +3,7 @@ import { decisionResponseSchema } from "./system-one-schema.ts";
 import type { DecisionAnswer, DecisionRequest, DecisionResponse } from "./system-one-schema.ts";
 
 const TIMEOUT_MS = 10_000;
-type DecisionRequestPhase =
-  | "operation"
-  | "target"
-  | "commit-classification"
-  | "commit-authorization"
-  | "field-readiness";
+type DecisionRequestPhase = "operation" | "target";
 interface DecisionRequestEvent {
   readonly phase: DecisionRequestPhase;
   readonly status: "start" | "ok" | "error";

@@ -16,7 +16,7 @@ function answer(choice: string, criteria: Readonly<Record<string, string>>): Res
   });
 }
 
-test("an observed navigation link can advance a task without a second relevance veto", async () => {
+test("selects the observed navigation link for the requested document", async () => {
   const questions: string[] = [];
   const server = Bun.serve({
     port: 0,
@@ -24,7 +24,7 @@ test("an observed navigation link can advance a task without a second relevance 
       const body = decisionRequestSchema.parse(await request.json());
       const { instructions, criteria } = body.questions.next_action;
       questions.push(instructions);
-      return answer(instructions.startsWith("Would this exact") ? "A1" : "A0", criteria);
+      return answer("A0", criteria);
     },
   });
   try {
@@ -57,8 +57,7 @@ test("an observed navigation link can advance a task without a second relevance 
       actions: [link, { kind: "blocked", reason: "Stop" }],
     });
     expect(result.action).toEqual(link);
-    expect(questions.some((question) => question.startsWith("Is this exact control"))).toBe(false);
-    expect(result.checks?.map((check) => check.phase)).toEqual(["commit-classification"]);
+    expect(questions).toHaveLength(1);
   } finally {
     await server.stop(true);
   }
@@ -79,102 +78,47 @@ test.each([
     capability: "AXConfirm",
     reason: "Submit search",
   },
-])(
-  "observed native $operation uses the primary choice and keeps the effect gate",
-  async (caseInput) => {
-    const questions: string[] = [];
-    const server = Bun.serve({
-      port: 0,
-      async fetch(request) {
-        const body = decisionRequestSchema.parse(await request.json());
-        const { instructions, criteria } = body.questions.next_action;
-        questions.push(instructions);
-        return answer(instructions.startsWith("Would this exact") ? "A1" : "A0", criteria);
-      },
-    });
-    try {
-      const action = {
-        kind: "click_element",
-        pid: 7,
-        window_id: 9,
-        element_token: "native",
-        operation: caseInput.operation,
-        reason: caseInput.reason,
-      } as const;
-      const window = {
-        ...windowFixture(),
-        elements: [
-          {
-            element_index: 1,
-            element_token: "native",
-            role: caseInput.role,
-            ...(caseInput.subrole === undefined ? {} : { subrole: caseInput.subrole }),
-            label: "Observed target",
-            actions: [caseInput.capability],
-          },
-        ],
-      };
-      const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
-        task: "Use the selected native control",
-        observation: { desktop: desktopFixture(), window },
-        mode: "desktop",
-        actions: [action, { kind: "blocked", reason: "Stop" }],
-      });
-      expect(result.action).toEqual(action);
-      expect(questions.some((question) => question.startsWith("Is this exact control"))).toBe(
-        false,
-      );
-      expect(result.checks?.map((check) => check.phase)).toEqual(["commit-classification"]);
-    } finally {
-      await server.stop(true);
-    }
-  },
-);
-
-test("a model-selected form submit still fails the separate commit gate", async () => {
+])("selects the observed native $operation action", async (caseInput) => {
+  const questions: string[] = [];
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
       const body = decisionRequestSchema.parse(await request.json());
       const { instructions, criteria } = body.questions.next_action;
-      const denied = instructions.startsWith("Should the assistant activate");
-      return answer(denied ? "A1" : "A0", criteria);
+      questions.push(instructions);
+      return answer("A0", criteria);
     },
   });
   try {
-    const save = {
+    const action = {
       kind: "click_element",
       pid: 7,
       window_id: 9,
-      element_token: "save",
-      reason: "Save draft",
+      element_token: "native",
+      operation: caseInput.operation,
+      reason: caseInput.reason,
     } as const;
-    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
-      task: "Leave the draft open without saving",
-      observation: {
-        desktop: desktopFixture(),
-        window: {
-          ...windowFixture(),
-          elements: [
-            {
-              element_index: 1,
-              element_token: "save",
-              role: "button",
-              label: "Save draft",
-              actions: ["AXPress"],
-            },
-          ],
+    const window = {
+      ...windowFixture(),
+      elements: [
+        {
+          element_index: 1,
+          element_token: "native",
+          role: caseInput.role,
+          ...(caseInput.subrole === undefined ? {} : { subrole: caseInput.subrole }),
+          label: "Observed target",
+          actions: [caseInput.capability],
         },
-      },
-      mode: "browser",
-      actions: [save, { kind: "blocked", reason: "Stop" }],
-      async inspectClick() {
-        return { kind: "form_submit" };
-      },
+      ],
+    };
+    const result = await new SystemOneDecisionModel(server.url.href, "test").choose({
+      task: "Use the selected native control",
+      observation: { desktop: desktopFixture(), window },
+      mode: "desktop",
+      actions: [action, { kind: "blocked", reason: "Stop" }],
     });
-    expect(result.action.kind).toBe("blocked");
-    expect(result.checks?.map((check) => check.phase)).toContain("form-semantics");
-    expect(result.checks?.map((check) => check.phase)).toContain("commit-authorization");
+    expect(result.action).toEqual(action);
+    expect(questions).toHaveLength(1);
   } finally {
     await server.stop(true);
   }
@@ -221,7 +165,7 @@ test("an observed search field uses the primary grounded text choice", async () 
       actions: [search, { kind: "blocked", reason: "Stop" }],
     });
     expect(result.action).toEqual(search);
-    expect(questions.some((question) => question.startsWith("Does entering text"))).toBe(false);
+    expect(questions).toHaveLength(1);
   } finally {
     await server.stop(true);
   }

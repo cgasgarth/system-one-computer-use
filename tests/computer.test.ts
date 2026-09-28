@@ -156,24 +156,15 @@ test("rejects stale and unobserved control tokens before Chrome input", async ()
   expect(wire.acts).toEqual(["await s1Tab.ax.click(4)"]);
 });
 
-test("inspects the exact button and text field", async () => {
+test("inspects the exact text field", async () => {
   const wire = new FakeWire([
     { browserId: "chrome-1", tabId: "12" },
     page,
-    true,
     // eslint-disable-next-line unicorn/no-null -- Browser DOM metadata uses JSON null.
     { tagName: "input", inputType: "text", formRole: null, formMethod: "post" },
   ]);
   const browser = computer(wire);
   await browser.window();
-  const inspection = await browser.inspectClick({
-    kind: "click_element",
-    pid: 0,
-    window_id: 0,
-    element_token: "ax:4",
-    reason: "Save",
-  });
-  expect(inspection.kind).toBe("form_submit");
   const field = await browser.inspectField({
     kind: "compose_text",
     pid: 0,

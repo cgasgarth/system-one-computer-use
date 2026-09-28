@@ -94,11 +94,7 @@ class WorkerExecution {
     if (event.status !== "start") {
       return;
     }
-    const checking =
-      event.phase.startsWith("completion") ||
-      event.phase.startsWith("commit") ||
-      event.phase === "field-readiness";
-    this.report(checking ? "Checking the current result…" : "Choosing the next action…");
+    this.report("Choosing the next action…");
   }
 }
 

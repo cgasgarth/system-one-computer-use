@@ -49,7 +49,6 @@ function readOnlyWikipedia(computer: ManagedComputer): ManagedComputer {
       }
       await computer.clickElement(action);
     },
-    inspectClick: computer.inspectClick.bind(computer),
     async typeText(action) {
       const target = observed?.elements.find(
         (element) => element.element_token === action.element_token,

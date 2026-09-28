@@ -36,10 +36,6 @@ test("rejects a browser click when a same-label control is replaced after decisi
     async clickElement() {
       clicks += 1;
     },
-    // eslint-disable-next-line typescript/promise-function-async
-    inspectClick() {
-      return Promise.resolve({ kind: "unclassified" });
-    },
     async launchApp() {
       /* Not used. */
     },

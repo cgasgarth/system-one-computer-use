@@ -23,7 +23,7 @@ AppKit model controls
 | `src/app`              | Worker and CLI composition, configuration, session persistence, model process lifetime, and traces.                                                                            |
 | `src/app/computers.ts` | Lazy browser and desktop driver ownership. The worker reuses its browser connection, closes its desktop connection after a task, and closes all owned connections at shutdown. |
 | `src/agent`            | Action options, observation, target binding, task progress, Stop, and execution. `contracts.ts` owns the shared surface and action schemas.                                    |
-| `src/models`           | Decision and text adapters, effect authorization, and typed request/response transport.                                                                                        |
+| `src/models`           | Decision and text adapters and typed request/response transport.                                                                                                               |
 | `src/computer`         | Codex native/Chrome adapters, current target reads, and stdio transport.                                                                                                       |
 | `integrations`         | Local Python model bridges and pinned provider code.                                                                                                                           |
 

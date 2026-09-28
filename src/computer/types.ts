@@ -9,11 +9,6 @@ type TypeAction = Extract<Action, { kind: "type_text" }>;
 type KeyAction = Extract<Action, { kind: "press_key" }>;
 type MenuAction = Extract<Action, { kind: "invoke_menu" }>;
 type InspectMenuAction = Extract<Action, { kind: "inspect_menu" }>;
-type ClickInspection =
-  | { readonly kind: "form_submit" }
-  | { readonly kind: "non_submit" }
-  | { readonly kind: "unclassified" };
-
 interface Computer {
   readonly desktop: () => Promise<Desktop>;
   readonly window: (pid: number, windowId: number) => Promise<Window>;
@@ -21,7 +16,6 @@ interface Computer {
   readonly launchApp: (name: string, signal?: Readonly<AbortSignal>) => Promise<void>;
   readonly bindApp?: (name: string) => Promise<void>;
   readonly clickElement: (action: ClickAction) => Promise<void>;
-  readonly inspectClick: (action: ClickAction) => Promise<ClickInspection>;
   readonly inspectField?: (action: Extract<Action, { kind: "compose_text" }>) => Promise<{
     readonly tagName: string;
     readonly inputType: string | null;
@@ -47,7 +41,6 @@ interface ManagedComputer extends Computer {
 export { computerModeSchema };
 export type {
   ClickAction,
-  ClickInspection,
   Computer,
   ComputerMode,
   KeyAction,
