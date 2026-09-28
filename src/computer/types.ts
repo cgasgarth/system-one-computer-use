@@ -1,4 +1,4 @@
-import type { Action, Desktop, Surface, Window } from "../agent/contracts.ts";
+import type { Action, Desktop, MenuInspection, Surface, Window } from "../agent/contracts.ts";
 import { z } from "zod";
 
 const computerModeSchema = z.enum(["browser", "desktop"]);
@@ -8,6 +8,7 @@ type ClickAction = Extract<Action, { kind: "click_element" }>;
 type TypeAction = Extract<Action, { kind: "type_text" }>;
 type KeyAction = Extract<Action, { kind: "press_key" }>;
 type MenuAction = Extract<Action, { kind: "invoke_menu" }>;
+type InspectMenuAction = Extract<Action, { kind: "inspect_menu" }>;
 type ClickInspection =
   | { readonly kind: "form_submit" }
   | { readonly kind: "non_submit" }
@@ -29,6 +30,10 @@ interface Computer {
   readonly typeText: (action: TypeAction) => Promise<void>;
   readonly pressKey: (action: KeyAction) => Promise<void>;
   readonly invokeMenu?: (action: MenuAction) => Promise<void>;
+  readonly inspectMenu?: (
+    action: InspectMenuAction,
+    currentWindow?: Window,
+  ) => Promise<MenuInspection>;
   readonly navigate?: (url: string) => Promise<void>;
 }
 
@@ -45,6 +50,7 @@ export type {
   Computer,
   ComputerMode,
   KeyAction,
+  InspectMenuAction,
   MenuAction,
   ManagedComputer,
   TypeAction,

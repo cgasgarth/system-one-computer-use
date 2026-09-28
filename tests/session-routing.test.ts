@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { runTask } from "../src/agent/loop.ts";
+import { SurfaceSession } from "../src/agent/surface.ts";
 import type { Action, Window } from "../src/agent/contracts.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
 import type { DecisionInput } from "../src/models/system-one.ts";
@@ -73,7 +74,7 @@ function chooseAction(
     desired = "finish";
   } else if (input.mode === undefined) {
     desired = "select_surface";
-  } else if (input.observation.window === undefined) {
+  } else if (input.observation.window?.app_name !== destination) {
     desired = "request_app";
   }
   const action = input.actions.find(
@@ -93,6 +94,7 @@ test.each(cases)(
     const { computer: base } = computerFixture();
     const launches: string[] = [];
     const actions: string[] = [];
+    const reads: string[] = [];
     const computer: ManagedComputer = {
       ...base,
       async desktop() {
@@ -113,9 +115,7 @@ test.each(cases)(
         };
       },
       async window(pid) {
-        if (destination === "Calendar" && pid === notes.pid) {
-          throw new Error("Read stale Notes window before binding Calendar");
-        }
+        reads.push(pid === notes.pid ? "Notes" : "Calendar");
         return pid === notes.pid ? notes : calendar;
       },
       async launchApp(name) {
@@ -151,8 +151,49 @@ test.each(cases)(
       },
     });
     expect(result.status).toBe("complete");
-    expect(launches).toEqual([destination]);
+    expect(launches).toEqual(destination === "Notes" ? [] : [destination]);
     expect(actions).toEqual([destination]);
+    expect(reads).toContain("Notes");
     expect(result.surface?.kind).toBe("desktop");
   },
 );
+
+test("a valid saved desktop window is observed directly; an invalid restore still needs an app", async () => {
+  const { computer: base } = computerFixture();
+  const computer: ManagedComputer = {
+    ...base,
+    async desktop() {
+      return {
+        apps: [{ name: "Notes", pid: notes.pid }],
+        windows: [
+          { app_name: "Notes", pid: notes.pid, window_id: notes.window_id, title: "Notes" },
+        ],
+      };
+    },
+    async window() {
+      return notes;
+    },
+  };
+  const restored = new SurfaceSession();
+  await restored.select("desktop", computer, {
+    kind: "desktop",
+    pid: notes.pid,
+    windowId: notes.window_id,
+    app: "Notes",
+    title: "Notes",
+  });
+  expect(restored.needsApplication).toBe(false);
+  const restoredObservation = await restored.observe(() => computer);
+  expect(restoredObservation.window?.window_title).toBe("Notes");
+  const missing = new SurfaceSession();
+  await missing.select("desktop", computer, {
+    kind: "desktop",
+    pid: CALENDAR_PID,
+    windowId: CALENDAR_WINDOW,
+    app: "Calendar",
+    title: "Calendar",
+  });
+  expect(missing.needsApplication).toBe(true);
+  const missingObservation = await missing.observe(() => computer);
+  expect(missingObservation.window).toBeUndefined();
+});

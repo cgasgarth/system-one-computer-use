@@ -1,5 +1,5 @@
 import type { Computer, ManagedComputer } from "../computer/types.ts";
-import type { Action, Desktop, Observation, Surface } from "./contracts.ts";
+import type { Action, Desktop, MenuInspection, Observation, Surface } from "./contracts.ts";
 import { WindowUnavailableError } from "../computer/window-unavailable.ts";
 import { textFieldKey } from "./state-key.ts";
 
@@ -7,6 +7,7 @@ interface Target {
   readonly pid: number;
   readonly windowId: number;
 }
+const MENU_ERROR_CHARS = 200;
 async function restoreSurface(
   computer: Readonly<Pick<ManagedComputer, "desktop" | "restore">>,
   surface: Surface,
@@ -40,16 +41,97 @@ class SurfaceSession {
   public target: Target | undefined = undefined;
   private application: Desktop["apps"][number] | undefined;
   private desktopTarget: Target | undefined;
+  private inspectedMenu: Pick<MenuInspection, "pid" | "window_id" | "topLevel"> | undefined;
   private readonly restoreAttempts = new Set<string>();
   public setTarget(target: Target | undefined): void {
+    if (this.target?.pid !== target?.pid || this.target?.windowId !== target?.windowId) {
+      this.inspectedMenu = undefined;
+    }
     this.target = target;
     if (this.mode === "desktop") {
       this.desktopTarget = target;
     }
   }
   public selectApplication(application: Desktop["apps"][number] | undefined): void {
+    this.inspectedMenu = undefined;
     this.application = application;
     this.needsApplication = false;
+  }
+  public setMenuInspection(report: MenuInspection): void {
+    if (
+      this.mode !== "desktop" ||
+      this.target?.pid !== report.pid ||
+      this.target.windowId !== report.window_id
+    ) {
+      throw new Error("The inspected menu no longer belongs to the selected window.");
+    }
+    this.inspectedMenu = {
+      pid: report.pid,
+      window_id: report.window_id,
+      topLevel: report.topLevel,
+    };
+  }
+  public clearMenuInspection(): void {
+    this.inspectedMenu = undefined;
+  }
+  private async withMenuInspection(
+    computer: Readonly<ManagedComputer>,
+    observation: Observation,
+  ): Promise<Observation> {
+    const selected = this.inspectedMenu;
+    const { window } = observation;
+    if (selected === undefined) {
+      return observation;
+    }
+    if (
+      window === undefined ||
+      window.pid !== selected.pid ||
+      window.window_id !== selected.window_id
+    ) {
+      this.clearMenuInspection();
+      return observation;
+    }
+    if (computer.inspectMenu === undefined) {
+      this.clearMenuInspection();
+      return {
+        ...observation,
+        menuInspectionError: "The selected menu can no longer be inspected.",
+      };
+    }
+    try {
+      const report = await computer.inspectMenu(
+        {
+          kind: "inspect_menu",
+          pid: selected.pid,
+          window_id: selected.window_id,
+          topLevel: selected.topLevel,
+          reason: `Inspect observed ${JSON.stringify(selected.topLevel)} menu commands`,
+        },
+        window,
+      );
+      if (
+        report.pid !== selected.pid ||
+        report.window_id !== selected.window_id ||
+        report.topLevel !== selected.topLevel
+      ) {
+        this.clearMenuInspection();
+        return {
+          ...observation,
+          menuInspectionError: "The refreshed menu belongs to another window or menu.",
+        };
+      }
+      const menus = [
+        ...(window.menus ?? []).filter((menu) => menu.path[0] !== selected.topLevel),
+        ...report.menus,
+      ];
+      return { ...observation, window: { ...window, menus }, menuInspection: report };
+    } catch (error) {
+      this.clearMenuInspection();
+      return {
+        ...observation,
+        menuInspectionError: `Could not refresh the selected menu: ${error instanceof Error ? error.message.slice(0, MENU_ERROR_CHARS) : "inspection failed"}`,
+      };
+    }
   }
   private async readTarget(
     computer: Readonly<ManagedComputer>,
@@ -57,7 +139,10 @@ class SurfaceSession {
     target: Target,
   ): Promise<Observation> {
     try {
-      return { ...observation, window: await computer.window(target.pid, target.windowId) };
+      return await this.withMenuInspection(computer, {
+        ...observation,
+        window: await computer.window(target.pid, target.windowId),
+      });
     } catch (error) {
       if (!(error instanceof WindowUnavailableError)) {
         throw error;
@@ -135,13 +220,14 @@ class SurfaceSession {
     computer: Readonly<ManagedComputer>,
     saved: Surface | undefined,
   ): Promise<void> {
+    this.clearMenuInspection();
     this.mode = mode;
-    this.needsApplication = mode === "desktop";
     this.target = mode === "desktop" ? this.desktopTarget : undefined;
     if (saved?.kind === mode && !this.restoreAttempts.has(mode)) {
       this.restoreAttempts.add(mode);
       this.setTarget(await restoreSurface(computer, saved));
     }
+    this.needsApplication = mode === "desktop" && this.target === undefined;
   }
 }
 async function verifyFocusedKeyTarget(
@@ -200,6 +286,9 @@ async function executeInput(
       }
       await computer.invokeMenu(action);
       break;
+    }
+    case "inspect_menu": {
+      throw new Error("Menu inspection requires the read-only action handler.");
     }
     case "navigate": {
       if (computer.navigate === undefined) {

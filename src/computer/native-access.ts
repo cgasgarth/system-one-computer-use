@@ -47,8 +47,11 @@ const fieldsSchema = z.object({
 });
 const menuReportSchema = z.strictObject({
   pid: z.number().int().positive(),
+  menuNames: z.array(z.string().min(1)),
   menus: windowSchema.shape.menus.unwrap(),
+  complete: z.boolean(),
 });
+type MenuReport = ReadonlyDeep<z.infer<typeof menuReportSchema>>;
 const documentSchema = z.strictObject({ url: z.url().optional() });
 interface WindowWait {
   readonly binary: string;
@@ -167,12 +170,19 @@ async function readWritableFields(
   return fieldsSchema.parse(JSON.parse(output));
 }
 
-async function readNativeMenus(binary: string, pid: number): Promise<NonNullable<Window["menus"]>> {
-  const child = Bun.spawn([binary, "menus", String(pid)], {
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: TIMEOUT_MS,
-  });
+async function readNativeMenus(
+  binary: string,
+  pid: number,
+  topLevel?: string,
+): Promise<MenuReport> {
+  const child = Bun.spawn(
+    [binary, "menus", String(pid), ...(topLevel === undefined ? [] : [topLevel])],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: TIMEOUT_MS,
+    },
+  );
   const [code, output, error] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -185,7 +195,7 @@ async function readNativeMenus(binary: string, pid: number): Promise<NonNullable
   if (report.pid !== pid) {
     throw new CuaError("Native menu inspection returned another application.");
   }
-  return report.menus;
+  return report;
 }
 
 async function readNativeDocument(binary: string, window: Window): Promise<string | undefined> {
@@ -218,3 +228,4 @@ export {
   readWritableFields,
   waitForNativeWindow,
 };
+export type { MenuReport };

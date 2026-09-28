@@ -82,6 +82,8 @@ function fingerprint(observation: Observation, includeTransient: boolean): strin
             window: window.window_id,
             title: window.window_title,
             url: window.url,
+            inspectedMenu: observation.menuInspection,
+            menuInspectionError: observation.menuInspectionError,
             menus: window.menus,
             elements: window.elements.map((element) => ({
               role: element.role,
@@ -156,6 +158,9 @@ function actionKey(action: Action, observation: Observation): string | undefined
   }
   if (action.kind === "invoke_menu") {
     return JSON.stringify([action.kind, action.pid, action.window_id, action.path]);
+  }
+  if (action.kind === "inspect_menu") {
+    return JSON.stringify([action.kind, action.pid, action.window_id, action.topLevel]);
   }
   if (action.kind === "press_key") {
     const focus = textFieldKey(observation, action.element_token);

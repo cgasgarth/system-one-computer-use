@@ -434,7 +434,7 @@ class SystemOneDecisionModel implements DecisionModel {
     const hasTargetedOperation =
       (input.observation.window !== undefined &&
         actions.some((action) =>
-          ["click_element", "compose_text", "invoke_menu"].includes(action.kind),
+          ["click_element", "compose_text", "invoke_menu", "inspect_menu"].includes(action.kind),
         )) ||
       actions.filter((action) => action.kind === "request_app").length > 1;
     if (groups.length <= 1 || !hasTargetedOperation) {

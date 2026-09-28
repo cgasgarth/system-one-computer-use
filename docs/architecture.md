@@ -36,6 +36,10 @@ AppKit model controls
 3. The agent records tool results and observed state. Finish is the decision model's choice; the agent re-observes the screen before accepting it. The selected action is not an independent proof that the user goal was achieved.
 4. The worker saves the task result and session target, then releases the native driver. The browser driver stays available for another task. Worker shutdown closes all owned drivers and waits for a desktop close already in progress.
 
+Native menu inspection is a read-only action distinct from command invocation. The driver reads only the selected observed top-level menu and returns typed command paths, enabled states, and capture completeness. `SurfaceSession` scopes the inspected view to its process, window, and menu; fresh observations refresh that view, and surface changes or mutations clear it. The model receives the report directly in its observation rather than through the shortened action history. Disabled entries remain visible as evidence but are not executable choices.
+
+Accessibility menu data belongs to the application process. The window ID binds the task's selection; it does not prove that command enablement belongs to that window. Inspection does not change focus. Invocation revalidates the command before passing its process, window, and path to CUA.
+
 The CLI uses the same agent loop and driver owner, but retains its separate command flow. The model daemon owns resident model processes independently of a task driver. Managed local inference uses one JSON request and response per private Unix socket connection; external configured endpoints remain separate. Stop aborts pending model calls and prevents later input where the driver can enforce it. Native app launch also aborts its Accessibility watcher before launch when Stop arrives.
 
 ## Constraints

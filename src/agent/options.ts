@@ -238,6 +238,13 @@ function surfaceOptions(context: OptionContext): Action[] {
     }
     if (context.mode === "desktop") {
       actions.push(
+        ...(window.menuNames ?? []).map((topLevel): Action => ({
+          kind: "inspect_menu",
+          pid: window.pid,
+          window_id: window.window_id,
+          topLevel,
+          reason: `Inspect observed ${JSON.stringify(topLevel)} menu commands`.slice(0, MAX_REASON),
+        })),
         ...(window.menus ?? [])
           .filter((menu) => menu.enabled)
           .map((menu): Action => ({

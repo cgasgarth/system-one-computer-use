@@ -3,13 +3,14 @@ import type { ActionProbabilities } from "../models/system-one-schema.ts";
 import type { Decision, DecisionModel, DecisionRequestEvent } from "../models/system-one.ts";
 import type { DecisionWireEvent } from "../models/decision-request.ts";
 import type { TextModel, TextWireEvent } from "../models/text.ts";
-import type { Action, Surface } from "./contracts.ts";
+import type { Action, MenuInspection, Surface } from "./contracts.ts";
 import type { UnchangedDestination } from "./progress.ts";
 import type { ActionCheck } from "../models/action-check.ts";
 import type { OperationDecision } from "../models/decision-context.ts";
 
 interface ActionResult {
   readonly output: string;
+  readonly menuInspection?: MenuInspection;
   readonly satisfiedInput?: string;
   readonly performedAction?: boolean;
   readonly unchanged?: UnchangedDestination;
@@ -40,6 +41,7 @@ interface TaskStep {
   readonly elapsedMs: number;
   readonly observation: string;
   readonly terminalObservation?: string;
+  readonly menuInspection?: MenuInspection;
   readonly terminalDecision?: Decision;
   readonly observationError?: string;
   readonly output?: string;

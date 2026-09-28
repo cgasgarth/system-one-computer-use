@@ -14,6 +14,7 @@ function summarizeObservation(observation: Observation): string {
     app: window.app_name,
     title: window.window_title,
     url: window.url,
+    menuInspectionError: observation.menuInspectionError,
     controls: relevantControls(window).map((element) => ({
       role: element.role,
       label: element.label,

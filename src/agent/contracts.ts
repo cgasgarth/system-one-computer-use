@@ -2,6 +2,19 @@ import { z } from "zod";
 import type { ReadonlyDeep } from "type-fest";
 
 const MAX_MENU_DEPTH = 16;
+const menuEntrySchema = z.object({
+  path: z.array(z.string().min(1)).min(1).max(MAX_MENU_DEPTH),
+  label: z.string().min(1),
+  enabled: z.boolean(),
+  shortcut: z.string().optional(),
+});
+const menuInspectionSchema = z.strictObject({
+  pid: z.number().int().positive(),
+  window_id: z.number().int().nonnegative(),
+  topLevel: z.string().min(1),
+  menus: z.array(menuEntrySchema),
+  complete: z.boolean(),
+});
 const surfaceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("browser"), url: z.string(), title: z.string() }),
   z.strictObject({
@@ -31,16 +44,9 @@ const desktopSchema = z.object({
 const windowSchema = z.object({
   url: z.url().optional(),
   app_name: z.string(),
-  menus: z
-    .array(
-      z.object({
-        path: z.array(z.string().min(1)).min(1).max(MAX_MENU_DEPTH),
-        label: z.string().min(1),
-        enabled: z.boolean(),
-        shortcut: z.string().optional(),
-      }),
-    )
-    .optional(),
+  menus: z.array(menuEntrySchema).optional(),
+  menuNames: z.array(z.string().min(1)).optional(),
+  menuComplete: z.boolean().optional(),
   elements: z.array(
     z.object({
       element_index: z.number().int(),
@@ -68,10 +74,13 @@ const windowSchema = z.object({
 
 type Desktop = ReadonlyDeep<z.infer<typeof desktopSchema>>;
 type Window = ReadonlyDeep<z.infer<typeof windowSchema>>;
+type MenuInspection = ReadonlyDeep<z.infer<typeof menuInspectionSchema>>;
 interface Observation {
   readonly desktop: Desktop;
   readonly application?: Desktop["apps"][number];
   readonly window?: Window;
+  readonly menuInspection?: MenuInspection;
+  readonly menuInspectionError?: string;
 }
 
 const MAX_REASON_LENGTH = 280;
@@ -89,6 +98,12 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("blocked"), reason }),
   z.strictObject({ kind: z.literal("compose_text"), ...target, element_token: z.string(), reason }),
   z.strictObject({ kind: z.literal("observe_window"), ...target, reason }),
+  z.strictObject({
+    kind: z.literal("inspect_menu"),
+    ...target,
+    topLevel: z.string().min(1),
+    reason,
+  }),
   z.strictObject({
     kind: z.literal("invoke_menu"),
     ...target,
@@ -202,6 +217,9 @@ function validateActions(actions: readonly Action[], observation: Observation): 
         ) ?? [];
       return matches.length === 1 && matches[0]?.enabled === true;
     }
+    if (action.kind === "inspect_menu") {
+      return observation.window.menuNames?.filter((name) => name === action.topLevel).length === 1;
+    }
     return validElement(action, observation.window);
   });
 }
@@ -232,6 +250,9 @@ function describeAction(action: Action): string {
     case "invoke_menu": {
       return action.reason;
     }
+    case "inspect_menu": {
+      return action.reason;
+    }
     case "click_element": {
       return action.operation === "confirm" ? action.reason : `Click. ${action.reason}`;
     }
@@ -258,8 +279,9 @@ export {
   describeAction,
   desktopSchema,
   isEditableElement,
+  menuInspectionSchema,
   surfaceSchema,
   validateActions,
   windowSchema,
 };
-export type { Action, ActionChoices, Desktop, Observation, Surface, Window };
+export type { Action, ActionChoices, Desktop, MenuInspection, Observation, Surface, Window };

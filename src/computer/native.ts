@@ -1,10 +1,11 @@
-import type { Desktop, Window } from "../agent/contracts.ts";
+import type { Desktop, MenuInspection, Window } from "../agent/contracts.ts";
 import { CuaConnection } from "./connection.ts";
 import { taskDesktop } from "./targets.ts";
 import type {
   ClickAction,
   ClickInspection,
   Computer,
+  InspectMenuAction,
   KeyAction,
   MenuAction,
   TypeAction,
@@ -103,6 +104,22 @@ async function availableDocument(binary: string, window: Window): Promise<string
     return undefined;
   }
 }
+async function availableMenus(
+  binary: string,
+  pid: number,
+): Promise<{
+  readonly menus: NonNullable<Window["menus"]>;
+  readonly menuNames: readonly string[];
+  readonly menuComplete: boolean;
+}> {
+  try {
+    const { menus, menuNames, complete } = await readNativeMenus(binary, pid);
+    return { menus, menuNames, menuComplete: complete };
+  } catch {
+    // A failed read cannot offer a menu action; other window controls remain usable.
+    return { menus: [], menuNames: [], menuComplete: false };
+  }
+}
 
 class CuaMcpComputer implements Computer {
   private readonly connection: CuaConnection;
@@ -146,17 +163,12 @@ class CuaMcpComputer implements Computer {
         );
       }),
     };
-    let menus: NonNullable<Window["menus"]> = [];
-    try {
-      menus = await readNativeMenus(this.nativeAccess, visible.pid);
-    } catch {
-      // A failed read cannot offer a menu action; other window controls remain usable.
-    }
+    const menuData = await availableMenus(this.nativeAccess, visible.pid);
     const documentUrl =
       visible.url === undefined ? await availableDocument(this.nativeAccess, visible) : undefined;
     const observed: Window = {
       ...visible,
-      menus,
+      ...menuData,
       ...(documentUrl === undefined ? {} : { url: documentUrl }),
     };
     if (
@@ -202,7 +214,15 @@ class CuaMcpComputer implements Computer {
   }
   public async invokeMenu(action: MenuAction): Promise<void> {
     const current = await this.window(action.pid, action.window_id);
-    const matches = (current.menus ?? []).filter(
+    if (current.pid !== action.pid || current.window_id !== action.window_id) {
+      throw new CuaError("The selected menu window changed. Observe it again.");
+    }
+    const [topLevel] = action.path;
+    if (topLevel === undefined) {
+      throw new CuaError("The selected menu command has no top-level path.");
+    }
+    const report = await readNativeMenus(this.nativeAccess, action.pid, topLevel);
+    const matches = report.menus.filter(
       (entry) => entry.enabled && sameMenuPath(entry.path, action.path),
     );
     if (matches.length !== 1) {
@@ -211,6 +231,29 @@ class CuaMcpComputer implements Computer {
       );
     }
     await this.connection.invokeMenu(action);
+  }
+  public async inspectMenu(
+    action: InspectMenuAction,
+    currentWindow?: Window,
+  ): Promise<MenuInspection> {
+    const current = currentWindow ?? (await this.connection.window(action.pid, action.window_id));
+    if (current.pid !== action.pid || current.window_id !== action.window_id) {
+      throw new CuaError("The selected menu window changed. Observe it again.");
+    }
+    const report = await readNativeMenus(this.nativeAccess, action.pid, action.topLevel);
+    if (
+      !report.menuNames.includes(action.topLevel) ||
+      report.menus.some((menu) => menu.path[0] !== action.topLevel)
+    ) {
+      throw new CuaError("The selected menu changed or is unavailable. Observe it again.");
+    }
+    return {
+      pid: action.pid,
+      window_id: action.window_id,
+      topLevel: action.topLevel,
+      menus: report.menus,
+      complete: report.complete,
+    };
   }
   // Native AX does not expose web form submission metadata.
   // eslint-disable-next-line eslint/class-methods-use-this, typescript/promise-function-async

@@ -15,6 +15,16 @@ const RECENT_STEPS = 6;
 const RECENT_COMMIT_ACTIONS = 4;
 const ERROR_CHARS = 300;
 const REFRESH_WAIT_MS = 250;
+const MUTATING_ACTIONS = new Set<Action["kind"]>([
+  "click_element",
+  "invoke_menu",
+  "compose_text",
+  "type_text",
+  "press_key",
+  "navigate",
+  "request_url",
+  "request_app",
+]);
 interface TurnContext {
   readonly options: TaskOptions;
   readonly surfaces: Readonly<SurfaceSession>;
@@ -134,6 +144,25 @@ async function selectSurface({ options, surfaces, action }: TurnContext): Promis
   await surfaces.select(action.surface, options.computer(action.surface), saved);
   return { output: `Selected ${action.surface} tools` };
 }
+async function inspectNativeMenu(context: TurnContext): Promise<ActionResult> {
+  const { action, options, surfaces } = context;
+  if (action.kind !== "inspect_menu" || surfaces.mode !== "desktop") {
+    throw new Error("Select desktop tools before inspecting a native menu.");
+  }
+  const computer = options.computer("desktop");
+  if (computer.inspectMenu === undefined) {
+    throw new Error("This driver cannot inspect native menus.");
+  }
+  surfaces.clearMenuInspection();
+  options.signal?.throwIfAborted();
+  const report = await computer.inspectMenu(action);
+  options.signal?.throwIfAborted();
+  surfaces.setMenuInspection(report);
+  return {
+    output: `Inspected observed application ${JSON.stringify(report.topLevel)} menu commands (read-only; ${report.menus.length} captured; AX scan ${report.complete ? "complete" : "incomplete"}).`,
+    menuInspection: report,
+  };
+}
 async function act(context: TurnContext): Promise<ActionResult> {
   const { options, surfaces, observation, action } = context;
   if (action.kind === "select_surface") {
@@ -146,6 +175,9 @@ async function act(context: TurnContext): Promise<ActionResult> {
     surfaces.selectApplication(observation.desktop.apps.find((app) => app.pid === action.pid));
     surfaces.setTarget({ pid: action.pid, windowId: action.window_id });
     return { output: describeAction(action) };
+  }
+  if (action.kind === "inspect_menu") {
+    return inspectNativeMenu(context);
   }
   if (action.kind === "refresh") {
     await Bun.sleep(REFRESH_WAIT_MS);
@@ -341,6 +373,9 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
           action: decision.action,
         })
       : { error: finishSurface.error };
+  if ("error" in result || MUTATING_ACTIONS.has(decision.action.kind)) {
+    surfaces.clearMenuInspection();
+  }
   const control = selectedControl(decision.action, observation);
   const step: TaskStep = {
     action: decision.action,

@@ -2,6 +2,7 @@ import { describeAction, isEditableElement } from "../agent/contracts.ts";
 import type { Action, Observation, Window } from "../agent/contracts.ts";
 import { relevantControls, textTargetName } from "../agent/controls.ts";
 import { observedTargetName, targetDescriptionContext } from "../agent/target-context.ts";
+import { serializeMenuInspection } from "./menu-inspection.ts";
 import type { ActionCriteria, DecisionAnswer } from "./system-one-schema.ts";
 import type { DecisionInput } from "./system-one.ts";
 
@@ -50,6 +51,7 @@ const DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
   request_app: "Open an installed application.",
   observe_window: "Select a different open window.",
   invoke_menu: "Use an observed command in this application's menu.",
+  inspect_menu: "Inspect observed application menu commands without invoking one.",
 };
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
   const grouped = new Map<string, { kind: ActionGroupKind; menu?: string; actions: Action[] }>();
@@ -194,15 +196,25 @@ function decisionState(input: DecisionInput): string {
   } else {
     state.push(
       `Selected tool set: ${input.mode}. ${switches.length === 0 ? "No other tool set is offered now." : `Available switch targets: ${switches.join(", ")}.`}`,
-      describeObservation(input.observation, input.context?.length ?? 0),
     );
+    if (input.observation.menuInspection !== undefined) {
+      state.push(serializeMenuInspection(input.observation.menuInspection));
+    }
+    if (input.observation.menuInspectionError !== undefined) {
+      state.push(`Menu inspection unavailable: ${input.observation.menuInspectionError}`);
+    }
+    state.push(describeObservation(input.observation, input.context?.length ?? 0));
   }
   return state.join("\n");
 }
 
 function operationState(input: DecisionInput, actions: readonly Action[]): string {
   const groups = new Map<string, { path: readonly string[]; commands: string[] }>();
+  const inspectedNames: string[] = [];
   for (const action of actions) {
+    if (action.kind === "inspect_menu") {
+      inspectedNames.push(action.topLevel);
+    }
     if (action.kind === "invoke_menu") {
       const parent = action.path.slice(0, -1);
       const key = JSON.stringify(parent);
@@ -211,10 +223,22 @@ function operationState(input: DecisionInput, actions: readonly Action[]): strin
       groups.set(key, group);
     }
   }
-  if (groups.size === 0) {
+  if (groups.size === 0 && inspectedNames.length === 0) {
     return decisionState(input);
   }
-  return `${decisionState(input)}\nAvailable observed menu paths: ${JSON.stringify([...groups.values()])}`;
+  const incomplete = input.observation.window?.menuComplete === false;
+  return [
+    decisionState(input),
+    ...(incomplete
+      ? ["Observed application menu inventory is incomplete; other commands may exist."]
+      : []),
+    ...(inspectedNames.length === 0
+      ? []
+      : [`Observed top-level menus offered for inspection: ${JSON.stringify(inspectedNames)}`]),
+    ...(groups.size === 0
+      ? []
+      : [`Available observed menu paths: ${JSON.stringify([...groups.values()])}`]),
+  ].join("\n");
 }
 
 function operationTargetInput(
