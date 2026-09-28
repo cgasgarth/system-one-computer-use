@@ -132,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func showMenu() {
         content.sessions.refresh()
         guard let button = statusItem?.button else { return }
+        if popover.contentViewController === content { models.warm(immediate: true) }
         NSApp.activate(ignoringOtherApps: true)
         if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
         popover.contentViewController?.view.window?.makeKey()
@@ -320,7 +321,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController?.view.window?.makeKey()
         if popover.contentViewController === settings { settings.permissions.refresh() }
         if popover.contentViewController === content {
-            models.warm(immediate: true)
             content.focus()
         }
     }
