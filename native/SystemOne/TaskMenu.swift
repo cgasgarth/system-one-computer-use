@@ -40,6 +40,7 @@ final class TaskMenu: NSViewController {
     let editor = TranscriptView()
     let sessions = SessionMenu()
     var onActivity: (() -> Void)?
+    var onResize: ((NSSize) -> Void)?
     let mode = NSPopUpButton()
     let status = NSTextField(wrappingLabelWithString: "Ready")
     let run = NSButton(title: "Start", target: nil, action: nil)
@@ -49,6 +50,9 @@ final class TaskMenu: NSViewController {
     let latency = NSTextField(labelWithString: "—")
     let rate = NSTextField(labelWithString: "—")
     private var locked = false
+    private var upperFrames: [(NSView, NSRect)] = []
+    private let statusWidth: CGFloat = 320
+    private let minimumStatusHeight: CGFloat = 46
 
     override func loadView() {
         view = MenuSurface(frame: NSRect(origin: .zero, size: Self.size))
@@ -98,8 +102,11 @@ final class TaskMenu: NSViewController {
         cancel.isHidden = true
         status.frame = NSRect(x: 20, y: 57, width: 320, height: 46)
         status.font = .systemFont(ofSize: 11)
-        status.maximumNumberOfLines = 3
-        status.lineBreakMode = .byTruncatingTail
+        status.maximumNumberOfLines = 0
+        status.lineBreakMode = .byWordWrapping
+        status.preferredMaxLayoutWidth = statusWidth
+        status.cell?.wraps = true
+        status.cell?.isScrollable = false
         view.addSubview(status)
         let line = NSBox(frame: NSRect(x: 18, y: 49, width: 324, height: 1))
         line.boxType = .separator
@@ -112,6 +119,7 @@ final class TaskMenu: NSViewController {
             guard let self else { return }; self.updateRunButton()
             if !self.locked && !self.editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self.onActivity?() }
         }
+        upperFrames = view.subviews.filter { $0 !== status && $0.frame.minY >= 104 }.map { ($0, $0.frame) }
         setStatus("Ready", color: .secondaryLabelColor)
         updateRunButton()
     }
@@ -162,9 +170,20 @@ final class TaskMenu: NSViewController {
     }
 
     func setStatus(_ message: String, color: NSColor) {
-        status.stringValue = message.replacingOccurrences(of: "\n", with: " ")
+        status.stringValue = message
         status.textColor = color
         status.toolTip = message
+        let bounds = NSRect(x: 0, y: 0, width: statusWidth, height: CGFloat.greatestFiniteMagnitude)
+        let height = max(minimumStatusHeight, ceil(status.cell?.cellSize(forBounds: bounds).height ?? minimumStatusHeight))
+        let extra = height - minimumStatusHeight
+        status.frame = NSRect(x: 20, y: 57, width: statusWidth, height: height)
+        for (item, original) in upperFrames {
+            item.frame = original.offsetBy(dx: 0, dy: extra)
+        }
+        let size = NSSize(width: Self.size.width, height: Self.size.height + extra)
+        view.setFrameSize(size)
+        preferredContentSize = size
+        onResize?(size)
     }
 
     func setLocked(_ value: Bool) {

@@ -79,3 +79,17 @@ await run([
   `${runnerApp}/MacOS/RunnerTests`,
 ]);
 await run([`${runnerApp}/MacOS/RunnerTests`]);
+const menuBinary = `${directory}/task-menu-layout`;
+await run([
+  "xcrun",
+  "swiftc",
+  "-swift-version",
+  "6",
+  "-O",
+  "native/SystemOne/TaskMenu.swift",
+  "native/SystemOne/SessionMenu.swift",
+  "tests/native/task-menu-layout.swift",
+  "-o",
+  menuBinary,
+]);
+await run([menuBinary]);

@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         content.cancel.action = #selector(cancelTask)
         content.settings.target = self
         content.settings.action = #selector(showSettings)
+        content.onResize = { [weak self] size in
+            guard let self, self.popover.contentViewController === self.content else { return }
+            self.popover.contentSize = size
+        }
         settings.loadViewIfNeeded()
         settings.onSizeChange = { [weak self] size in
             guard let self, self.popover.contentViewController === self.settings else { return }
@@ -233,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func runTask() {
         guard phase == .ready else { return }
         let task = content.editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !task.isEmpty else { content.status.stringValue = "Enter a task first."; return }
+        guard !task.isEmpty else { content.setStatus("Enter a task first.", color: .secondaryLabelColor); return }
         hasTaskResult = false
         phase = .running
         content.run.isEnabled = false
