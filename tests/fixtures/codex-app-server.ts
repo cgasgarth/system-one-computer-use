@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 
 const APPROVAL_ID = 100;
+const ARGUMENT_OFFSET = 2;
 const LOG = Bun.env["FAKE_LOG"];
 const messageSchema = z
   .object({
@@ -28,7 +29,10 @@ async function main(): Promise<void> {
       const envKeys = Object.keys(Bun.env).filter((key) =>
         /CODEX|CUA|SKY|BROWSER|MCP|NODE_REPL/iu.test(key),
       );
-      await appendFile(LOG, `${JSON.stringify({ ...message, envKeys })}\n`);
+      await appendFile(
+        LOG,
+        `${JSON.stringify({ ...message, envKeys, args: Bun.argv.slice(ARGUMENT_OFFSET) })}\n`,
+      );
     }
     if (message.method === "initialize") {
       send({ id: message.id, result: { protocolVersion: "2025-11-25" } });

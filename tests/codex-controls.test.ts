@@ -6,16 +6,21 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import type { ReadonlyDeep } from "type-fest";
 import { CodexControlsBridge } from "../src/computer/codex-controls/bridge.ts";
 import { CodexControlsSession } from "../src/computer/codex-controls/app-server.ts";
 
 const fixture = fileURLToPath(new URL("fixtures/codex-app-server.ts", import.meta.url));
+const configFixture = fileURLToPath(
+  new URL("fixtures/codex-controls-config.toml", import.meta.url),
+);
 const scratch = path.join(tmpdir(), `codex-controls-test-${randomUUID()}`);
 const log = path.join(scratch, "rpc.jsonl");
 const options = {
   executable: fixture,
   environment: { ...Bun.env, FAKE_LOG: log, CODEX_SECRET: "must-not-pass" },
   timeoutMs: 250,
+  configPath: configFixture,
 };
 const relay = async (): Promise<{ action: "cancel" }> => ({ action: "cancel" });
 const APPROVAL_DELAY_MS = 400;
@@ -45,6 +50,7 @@ const loggedSchema = z
       .loose()
       .optional(),
     envKeys: z.array(z.string()),
+    args: z.array(z.string()),
   })
   .loose();
 
@@ -65,6 +71,11 @@ async function readMessages(): Promise<z.infer<typeof loggedSchema>[]> {
     .trim()
     .split("\n")
     .map((line) => loggedSchema.parse(JSON.parse(line) as unknown));
+}
+function assertScopedLaunch(messages: ReadonlyDeep<z.infer<typeof loggedSchema>[]>): void {
+  expect(messages.every((item) => item.envKeys.length === 0)).toBe(true);
+  expect(messages[0]?.args).toContain("mcp_servers.playwright.enabled=false");
+  expect(messages[0]?.args).not.toContain("mcp_servers.node_repl.enabled=false");
 }
 async function waitForCode(code: string): Promise<void> {
   const controller = new AbortController();
@@ -106,7 +117,7 @@ test("starts an owned session and keeps one operation ID until reset", async () 
   }
   const messages = await readMessages();
   expect(messages.some((item) => item.method === "turn/start")).toBe(false);
-  expect(messages.every((item) => item.envKeys.length === 0)).toBe(true);
+  assertScopedLaunch(messages);
   const calls = messages.filter(
     (item) =>
       item.params?.tool === "js" && item.params.arguments?.code?.startsWith("step") === true,

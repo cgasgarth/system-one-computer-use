@@ -1,0 +1,21 @@
+[mcp_servers.node_repl]
+command = "node"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["private-test-package"]
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://example.invalid/mcp"
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."chrome@openai-bundled"]
+enabled = true
+
+[plugins."unified-computer-use@openai-bundled"]
+enabled = true
+
+[plugins."messages@openai-bundled"]
+enabled = true

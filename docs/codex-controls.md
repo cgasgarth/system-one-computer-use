@@ -89,8 +89,8 @@ The packaged MCP bridge was then checked with an independent MCP SDK client:
 Calculator showed `9 + 6 = 15`, Chrome followed the same public link, and reset
 closed its unmarked test tab and removed its JavaScript bindings. A client with
 no approval support was refused access to Calculator. The two surface-specific
-tool lists and Claude Code connection checks passed. The source suite has 269
-passing tests.
+tool lists and Claude Code connection checks passed. See
+[validation](validation.md) for installed-app results and their limits.
 
 These are tool-connection results. A live agent test also requires access to its
 selected model through the calling client's provider. A healthy MCP connection

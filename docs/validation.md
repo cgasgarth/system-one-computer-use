@@ -43,3 +43,15 @@ results. Keep raw traces and screenshots private under ignored `runs/`.
 Unit tests cover driver state, scope, approval and cancellation contracts. They
 do not establish broad task reliability or speed improvements. New end-to-end
 benchmarks are needed before making claims about the Codex-based task path.
+
+Installed-app checks reached Wikipedia through the Codex Chrome connection and
+completed a single requested Calculator button press through native controls.
+The approval prompt resumed correctly after a reply; task-scoped access did not
+ask again for each read or input. The arithmetic request `23 times 7` still led
+Kev 4B to choose Blocked. This is not counted as a completed arithmetic task.
+
+The control child uses temporary configuration overrides to start only the
+Codex native and Chrome control tools. A live inventory and process-tree check
+confirmed no standalone Playwright process. Calculator observation and Chrome
+setup passed with this restricted configuration. Global Codex settings were
+not changed.

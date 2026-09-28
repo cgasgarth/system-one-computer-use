@@ -12,6 +12,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Interface } from "node:readline";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { controlConfigOverrides } from "./config-scope.ts";
 import {
   approvalRequestSchema,
   approvalResultSchema,
@@ -47,6 +48,7 @@ interface AppServerOptions {
   executable?: string;
   environment?: Readonly<NodeJS.ProcessEnv>;
   timeoutMs?: number;
+  configPath?: string;
 }
 
 function parseResponse(line: string): unknown {
@@ -89,6 +91,7 @@ class CodexControlsSession {
   }
 
   private async startProcess(): Promise<void> {
+    const configOverrides = await controlConfigOverrides(this.options.configPath);
     this.directory = await mkdtemp(path.join(tmpdir(), "system-one-codex-controls-"));
     if (this.closed) {
       await rm(this.directory, { recursive: true, force: true });
@@ -99,7 +102,7 @@ class CodexControlsSession {
     );
     const child = spawn(
       this.options.executable ?? CODEX_CLI,
-      ["app-server", "--listen", "stdio://"],
+      ["app-server", "--listen", "stdio://", ...configOverrides],
       {
         cwd: this.directory,
         env: environment,
