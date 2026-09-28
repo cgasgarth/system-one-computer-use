@@ -124,6 +124,13 @@ CLI traces go to ignored `runs/`. The app uses a persistent JSON-lines worker
 with the same task loop and adapters. Provider protocols other than System One
 can implement [`DecisionModel`](src/models/system-one.ts).
 
+## Codex controls for other clients
+
+An optional [stdio MCP bridge](docs/codex-controls.md) exposes the installed
+ChatGPT desktop app’s computer and Chrome controls to external clients, including
+Claude Code. The calling client supplies the decisions; the bridge does not run
+a Codex model turn. It forwards app and site approval requests to the client.
+
 ## Behavior and limits
 
 External configuration, socket and HTTP responses, model output, and driver data are
