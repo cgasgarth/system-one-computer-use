@@ -16,7 +16,11 @@ const configFixture = fileURLToPath(
 );
 const scratch = path.join(tmpdir(), `codex-controls-test-${randomUUID()}`);
 const log = path.join(scratch, "rpc.jsonl");
+const endedTurns: { threadId: string; turnId: string }[] = [];
 const options = {
+  async notifyNativeTurn(threadId: string, turnId: string): Promise<void> {
+    endedTurns.push({ threadId, turnId });
+  },
   executable: fixture,
   environment: { ...Bun.env, FAKE_LOG: log, CODEX_SECRET: "must-not-pass" },
   timeoutMs: 250,
@@ -49,6 +53,7 @@ const loggedSchema = z
   .loose();
 
 beforeEach(async () => {
+  endedTurns.length = 0;
   await mkdir(scratch, { recursive: true });
   await Bun.write(log, "");
 });
@@ -186,6 +191,11 @@ test("Stop aborts an active controls call and closes its owned process", async (
   controller.abort();
   await assertRejected(task, "cancelled");
   await assertRejected(session.invoke({ server: "cua_repl", code: "later", title: "Later" }), "");
+  await session.close();
   const messages = await readMessages();
+  expect(endedTurns).toHaveLength(1);
+  expect(endedTurns[0]?.threadId).toBe("owned-thread");
+  expect(messages.some((item) => item.params?.tool === "turn_ended")).toBe(true);
+  expect(messages.some((item) => item.params?.tool === "js_reset")).toBe(true);
   expect(messages.some((item) => item.params?.arguments?.code === "later")).toBe(false);
 });

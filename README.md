@@ -63,7 +63,10 @@ start a Codex model turn; the selected System One model still chooses actions.
 
 System One automatically accepts Codex app and site tool approvals for its own
 active control session. The app, CLI, and MCP bridge share this behavior. Stop
-cancels the active task. macOS permissions still apply.
+cancels the active task. Completion, Stop, and app quit release both control
+sessions and end the native control cursor. App quit waits for worker cleanup.
+Saved conversation context and delivered browser tabs remain available for follow-ups.
+macOS permissions still apply.
 
 Browser sessions save the exact task-owned browser and tab identity. Follow-ups
 reuse that target when it is available. A stale or ambiguous target is not replaced

@@ -35,14 +35,18 @@ const identities = {
 async function closeComputers(): Promise<void> {
   await computers.close();
 }
-async function closeNativeTask(): Promise<void> {
-  await computers.closeDesktop();
+async function stopComputers(): Promise<void> {
+  try {
+    await closeComputers();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Control cleanup failed");
+  }
 }
 function stop(): void {
   activeExecution?.trace.saveFailure("stopped", "Stopped by user during an in-flight task.");
   shutdown.abort(new Error("Stopped by user"));
   input.close();
-  void closeComputers();
+  void stopComputers();
 }
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
@@ -92,6 +96,7 @@ async function executeTask(
     JSON.stringify({ ...result, sessionId: session.id, activity: execution.trace.diagnostics() }),
     { createPath: true },
   );
+  await computers.release();
   console.log(
     JSON.stringify({
       status: result.status,
@@ -126,6 +131,7 @@ async function execute(request: TaskInput): Promise<void> {
       message,
       error instanceof ActionSelectionError ? error.toJSON() : undefined,
     );
+    await computers.release();
     const failure = {
       status: "error",
       message,
@@ -139,7 +145,7 @@ async function execute(request: TaskInput): Promise<void> {
   } finally {
     await execution.trace.clearCheckpoint();
     activeExecution = undefined;
-    await closeNativeTask();
+    await computers.release();
   }
 }
 try {

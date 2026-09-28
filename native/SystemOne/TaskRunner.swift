@@ -25,10 +25,15 @@ final class TaskRunner {
     private var ended = false
     private var generation = UUID()
     private var input: FileHandle?
+    private var retiring = Set<Process>()
+    private var shutdownCompletion: (() -> Void)?
     var onEvent: ((TaskEvent) -> Void)?
     var onError: ((String) -> Void)?
 
     func start(_ request: TaskInput) throws {
+        guard retiring.isEmpty else {
+            throw NSError(domain: "SystemOne", code: 1, userInfo: [NSLocalizedDescriptionKey: "The previous task is still releasing computer control. Try again in a moment."])
+        }
         if process != nil {
             ended = false
             try send(request)
@@ -65,7 +70,14 @@ final class TaskRunner {
         }
         child.terminationHandler = { [weak self] child in
             DispatchQueue.main.async {
-                guard let self, self.generation == current else { return }
+                guard let self else { return }
+                self.retiring.remove(child)
+                if self.retiring.isEmpty {
+                    let completion = self.shutdownCompletion
+                    self.shutdownCompletion = nil
+                    completion?()
+                }
+                guard self.generation == current else { return }
                 self.process = nil
                 if !self.ended {
                     self.onError?("Task process stopped (\(child.terminationStatus)). Check the model services and .env configuration.")
@@ -102,9 +114,21 @@ final class TaskRunner {
     func cancel() {
         generation = UUID()
         ended = true
-        process?.terminate()
+        if let child = process, child.isRunning {
+            retiring.insert(child)
+            child.terminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+            }
+        }
         process = nil
         try? input?.close()
         input = nil
+    }
+
+    func shutdown(completion: @escaping () -> Void) {
+        cancel()
+        if retiring.isEmpty { completion() }
+        else { shutdownCompletion = completion }
     }
 }

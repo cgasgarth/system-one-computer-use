@@ -15,9 +15,11 @@ const sessions = new SessionStore("runs/sessions");
 const task = taskTextSchema.parse(Bun.argv.slice(ARGUMENT_OFFSET).join(" "));
 const { handle, session } = await sessions.begin(task);
 const stopped = new AbortController();
-process.once("SIGINT", () => {
+function stop(): void {
   stopped.abort(new Error("Stopped by user"));
-});
+}
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
 const computers = new ComputerSessions((mode) =>
   createComputer(mode, {
     signal: stopped.signal,

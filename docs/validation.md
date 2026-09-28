@@ -22,8 +22,8 @@ JavaScript state and closes unmarked owned test tabs.
 
 ## Sessions
 
-Conversation history retains the last three sessions. Live browser tasks keep
-their current control connection. Exact browser/tab identity is saved; the driver
+Conversation history retains the last three sessions. Each task releases its
+control connections. Exact browser/tab identity is saved for restoration; the driver
 does not select an unrelated user tab by matching its URL.
 
 Cross-process restoration passed a live disposable-draft check. The bookmark stores

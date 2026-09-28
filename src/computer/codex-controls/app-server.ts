@@ -3,7 +3,6 @@
 /* oxlint-disable unicorn/no-null -- The upstream approval protocol uses JSON null on cancellation. */
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,6 +10,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Interface } from "node:readline";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { endNativeTurn } from "./turn-end.ts";
 import { controlConfigOverrides } from "./config-scope.ts";
 import {
   approvalRequestSchema,
@@ -45,6 +45,7 @@ interface AppServerOptions {
   environment?: Readonly<NodeJS.ProcessEnv>;
   timeoutMs?: number;
   configPath?: string;
+  notifyNativeTurn?: (threadId: string, turnId: string) => Promise<void>;
 }
 
 function parseResponse(line: string): unknown {
@@ -61,12 +62,13 @@ class CodexControlsSession {
   private lines: Interface | undefined;
   private directory: string | undefined;
   private threadId: string | undefined;
-  private operationId = randomUUID();
+  private operationId = crypto.randomUUID();
   private sequence = 0;
   private readonly pending = new Map<number, Pending>();
   private readonly usedServers = new Set<"cua_repl" | "node_repl">();
   private active = false;
   private closed = false;
+  private closing: Promise<void> | undefined;
   private booting: Promise<void> | undefined;
 
   public constructor(options: Readonly<AppServerOptions> = {}) {
@@ -140,7 +142,7 @@ class CodexControlsSession {
       throw new Error("Controls call was cancelled");
     }
     const onAbort = (): void => {
-      void this.close();
+      void this.closeAfterFailure();
     };
     request.signal?.addEventListener("abort", onAbort, { once: true });
     try {
@@ -152,6 +154,9 @@ class CodexControlsSession {
 
   private async invokeStarted(request: InvokeRequest): Promise<CallToolResult> {
     await this.start();
+    if (this.closed) {
+      throw new Error("Controls session is closed");
+    }
     if (this.active) {
       throw new Error("Another controls call is active");
     }
@@ -199,63 +204,101 @@ class CodexControlsSession {
       return;
     }
     await this.endGroup();
-    this.operationId = randomUUID();
+    this.operationId = crypto.randomUUID();
     this.usedServers.clear();
   }
 
-  public async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
+  // eslint-disable-next-line typescript/promise-function-async
+  public close(): Promise<void> {
     this.closed = true;
+    this.closing ??= this.closeSession();
+    return this.closing;
+  }
+
+  private async closeAfterFailure(): Promise<void> {
+    try {
+      await this.close();
+    } catch (error) {
+      process.stderr.write(
+        `${error instanceof Error ? error.message : "Control cleanup failed"}\n`,
+      );
+    }
+  }
+
+  private async closeSession(): Promise<void> {
+    let cleanupError: Error | undefined = undefined;
+    this.failAll(new Error("Controls call was cancelled"));
     const { child } = this;
     if (child !== undefined) {
-      if (!this.active && this.threadId !== undefined) {
-        await this.endGroup().catch(() => false);
+      if (this.threadId !== undefined) {
+        try {
+          await this.endGroup();
+        } catch (error) {
+          cleanupError = new Error("Could not release native computer control", { cause: error });
+        }
         await this.request("thread/unsubscribe", { threadId: this.threadId }).catch(() => false);
       }
-      const exited = child.exitCode === null ? once(child, "exit") : Promise.resolve();
-      child.stdin.end();
-      child.kill("SIGTERM");
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-      }, EXIT_TIMEOUT_MS);
-      timer.unref();
-      child.once("exit", () => {
-        clearTimeout(timer);
-      });
-      await exited.catch(() => false);
+      await CodexControlsSession.stopProcess(child);
     }
     this.failAll(new Error("Controls session closed"));
     this.lines?.close();
     if (this.directory !== undefined) {
       await rm(this.directory, { recursive: true, force: true });
     }
+    if (cleanupError !== undefined) {
+      throw cleanupError;
+    }
+  }
+
+  private static async stopProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+    const exited = child.exitCode === null ? once(child, "exit") : Promise.resolve();
+    child.stdin.end();
+    child.kill("SIGTERM");
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, EXIT_TIMEOUT_MS);
+    timer.unref();
+    child.once("exit", () => {
+      clearTimeout(timer);
+    });
+    await exited.catch(() => false);
   }
 
   private async endGroup(): Promise<void> {
     if (this.threadId === undefined) {
       return;
     }
-    await Promise.all(
-      [...this.usedServers].map(async (server) => {
-        const base = { threadId: this.threadId, server };
-        await this.request("mcpServer/tool/call", {
-          ...base,
-          tool: "turn_ended",
-          arguments: {
-            hook_event_name: "turn_ended",
-            session_id: this.threadId,
-            turn_id: this.operationId,
-          },
-        }).catch(() => false);
-        await this.request("mcpServer/tool/call", {
-          ...base,
-          tool: "js_reset",
-          arguments: {},
-        }).catch(() => false);
-      }),
-    );
+    const { threadId } = this;
+    const nativeEnd =
+      this.usedServers.size > 0
+        ? (this.options.notifyNativeTurn ?? endNativeTurn)(threadId, this.operationId)
+        : Promise.resolve();
+    const cleanup = await Promise.allSettled([
+      nativeEnd,
+      Promise.all(
+        [...this.usedServers].map(async (server) => {
+          const base = { threadId: this.threadId, server };
+          await this.request("mcpServer/tool/call", {
+            ...base,
+            tool: "turn_ended",
+            arguments: {
+              hook_event_name: "turn_ended",
+              session_id: this.threadId,
+              turn_id: this.operationId,
+            },
+          }).catch(() => false);
+          await this.request("mcpServer/tool/call", {
+            ...base,
+            tool: "js_reset",
+            arguments: {},
+          }).catch(() => false);
+        }),
+      ),
+    ]);
+    const failed = cleanup.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      throw failed.reason;
+    }
   }
 
   private async request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
@@ -270,7 +313,7 @@ class CodexControlsSession {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(new Error("Controls call was cancelled"));
-        void this.close();
+        void this.closeAfterFailure();
       };
       signal?.addEventListener("abort", abort, { once: true });
       this.pending.set(id, {
@@ -295,11 +338,16 @@ class CodexControlsSession {
     method: string,
     reject: (error: Error) => void,
   ): ReturnType<typeof setTimeout> {
-    return setTimeout(() => {
-      this.pending.delete(id);
-      reject(new Error(`${method} timed out`));
-      void this.close();
-    }, this.options.timeoutMs ?? RPC_TIMEOUT_MS);
+    return setTimeout(
+      () => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out`));
+        void this.closeAfterFailure();
+      },
+      this.closed
+        ? Math.min(this.options.timeoutMs ?? RPC_TIMEOUT_MS, EXIT_TIMEOUT_MS)
+        : (this.options.timeoutMs ?? RPC_TIMEOUT_MS),
+    );
   }
 
   private send(message: unknown): void {
@@ -312,13 +360,13 @@ class CodexControlsSession {
   private receive(line: string): void {
     if (line.length > MAX_LINE_LENGTH) {
       this.failAll(new Error("Codex controls response is too large"));
-      void this.close();
+      void this.closeAfterFailure();
       return;
     }
     const body = parseResponse(line);
     if (body === undefined) {
       this.failAll(new Error("Codex controls response is invalid JSON"));
-      void this.close();
+      void this.closeAfterFailure();
       return;
     }
     const parsed = rpcMessageSchema.safeParse(body);

@@ -322,5 +322,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func quit() { cancelTask(); NSApp.terminate(nil) }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        cancelVoice()
+        runner.shutdown {
+            DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
     func applicationWillTerminate(_ notification: Notification) { cancelTask(); models.stop(); shortcut.stop() }
 }

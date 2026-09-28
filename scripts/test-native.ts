@@ -43,3 +43,39 @@ await run([
   permissionBinary,
 ]);
 await run([permissionBinary]);
+const runnerApp = `${directory}/RunnerTests.app/Contents`;
+const runnerData = `${directory}/runner-data`;
+await mkdir(`${runnerApp}/MacOS`, { recursive: true });
+await mkdir(`${runnerApp}/Resources/runtime`, { recursive: true });
+await mkdir(runnerData, { recursive: true });
+await run([
+  process.execPath,
+  "build",
+  "--target=bun",
+  "tests/fixtures/task-runner-worker.ts",
+  "--outfile",
+  `${runnerApp}/Resources/runtime/worker.js`,
+]);
+await Bun.write(
+  `${runnerApp}/Info.plist`,
+  JSON.stringify({
+    CFBundleIdentifier: "com.system-one.runner-tests",
+    CFBundleExecutable: "RunnerTests",
+    AppDataPath: `${process.cwd()}/${runnerData}`,
+    BunPath: process.execPath,
+  }),
+);
+await run(["plutil", "-convert", "xml1", `${runnerApp}/Info.plist`]);
+await run([
+  "xcrun",
+  "swiftc",
+  "-swift-version",
+  "6",
+  "-O",
+  "native/SystemOne/TaskRunner.swift",
+  "native/SystemOne/SessionMenu.swift",
+  "tests/native/task-runner.swift",
+  "-o",
+  `${runnerApp}/MacOS/RunnerTests`,
+]);
+await run([`${runnerApp}/MacOS/RunnerTests`]);
