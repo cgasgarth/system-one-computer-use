@@ -331,7 +331,15 @@ test("lets the model change tools when saved browser restoration fails", async (
     task: "Continue on the computer",
     applications: [],
     preferredSurface: "browser",
-    previousSurface: { kind: "browser", url: "https://example.test", title: "Example" },
+    previousSurface: {
+      kind: "browser",
+      browserId: "chrome",
+      tabId: "task",
+      providerTabId: "provider-task",
+      extensionInstanceId: "extension-test",
+      url: "https://example.test",
+      title: "Example",
+    },
     computer: (mode): ManagedComputer => (mode === "browser" ? browser : computer),
     text: textFixture(),
     decision: {

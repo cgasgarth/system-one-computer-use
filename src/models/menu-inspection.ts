@@ -22,7 +22,7 @@ function serializeMenuInspection(inspection: MenuInspection): string {
     });
     grouped.set(key, group);
   }
-  const result = `Read-only application menu ${JSON.stringify(inspection.topLevel)} observed while window ${inspection.window_id} was selected (AX scan complete: ${inspection.complete}; enabled flags reflect current app menu state; commands may be omitted when false): ${JSON.stringify([...grouped.values()])}`;
+  const result = `Observed application menu ${JSON.stringify(inspection.topLevel)} opened for view while window ${inspection.window_id} was selected (Codex menu coverage complete: ${inspection.complete}; enabled flags reflect current app menu state; commands may be omitted when false): ${JSON.stringify([...grouped.values()])}`;
   if (Buffer.byteLength(result) > MAX_INSPECTION_BYTES) {
     throw new Error(
       "capacity_menu: The inspected menu cannot fit the model state without dropping commands.",

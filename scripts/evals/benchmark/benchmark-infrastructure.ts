@@ -15,7 +15,11 @@ function externalTargetKind(message: string): "observed-escape" | "blocked-targe
   return undefined;
 }
 function driverError(message: string): boolean {
-  return message.startsWith("Playwright browser_") || message.startsWith(CLICK_FRESHNESS);
+  return (
+    message.startsWith("Codex controls") ||
+    message.startsWith("Codex Chrome") ||
+    message.startsWith(CLICK_FRESHNESS)
+  );
 }
 function infrastructureGrade(
   gradedOutcome: Outcome,

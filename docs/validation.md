@@ -1,58 +1,45 @@
 # Validation
 
-## Repeatable source checks
+Validation separates the controller connection, the System One model's choice,
+and the visible result. Passing a transport check does not prove that a model
+completed the user's task.
 
-Run from the repository root:
+## Control adapters
 
-```sh
-bun run check
-bun run format:check
-bun run test
-bun run test:native
-```
+The native adapter was checked against real Calculator accessibility output,
+including the separate menu-open view, nested menu entries, and a disabled
+command. It binds actions to the selected app and observed active window.
+Opening a menu changes the UI. No read-only full-menu-inventory claim is made.
 
-These checks cover strict type-aware lint, source size, formatting, agent and model behavior, AppKit and Accessibility helpers. They do not prove a live task result. Check actual page or app state and stored effects after each live task.
+The Chrome adapter was checked on a disposable local form through Codex's Chrome
+connection. It entered the expected text, selected a native dropdown value,
+identified a POST submit, and verified one save. No standalone Playwright MCP
+connection was used.
 
-## Current source evidence
+The external MCP bridge also completed Calculator arithmetic and a public browser
+link navigation. Missing approval capability fails closed. Reset clears its
+JavaScript state and closes unmarked owned test tabs.
 
-The signed source includes read-only menu inspection and restored-window routing at `0859f6c`, menu and target grounding, prompt preparation, and the page-action pager. Its strict check, format check, **263 Bun tests**, native tests, and NativeAccess build passed before installation. The action policy separates observed select-option actions from button actions. The pager presents long pages in bounded action groups. Benchmark runs save typed decision and text request data privately in ignored traces.
+## Sessions
 
-Prompt preparation uses the same system-message bytes as ordinary text requests. Independent wire checks found identical ordinary request bodies and answers for URL, search, and general text before and after the change. A held synthetic prefill did not block task preparation: preparation returned in 0.5 ms and cancelled the pending connection. A prefill error did not block the next task. External model selections made no speculative endpoint calls. All 15 paired local text outputs matched; measured cached-token counts and latency limits are in [model management](models.md#bounded-cache-measurement). These checks establish cache behavior, not better task completion.
+Conversation history retains the last three sessions. Live browser tasks keep
+their current control connection. Exact browser/tab identity is saved; the driver
+does not select an unrelated user tab by matching its URL.
 
-In the [bounded seven-preset browser benchmark](benchmark.md) before the pager change, all **28/28** isolated localhost trials finished with one fixed Qwen 3.5 2B text writer, a stable fixture origin, equal browser-only action scope, canonical reset hashes, and no driver errors or unintended writes. Kev 4B and Kev 9B each passed 4/4 strict task grades. The other five presets passed 0/4; one Julia case returned an explicit capacity error. Failed tasks' short time to stop is not a completion speed result. This cohort is not a measured success rate for the installed pager build.
+Cross-process restoration passed a live disposable-draft check. The bookmark stores
+the browser extension instance and the opaque provider tab ID returned by Codex.
+A fresh controller matches those IDs plus the saved title and URL against the
+current user-tab listing before claiming that exact returned tab. The test
+retained an unsubmitted draft, edited it after reconnect, and recorded no submit.
+A changed, missing, or ambiguous identity fails closed.
 
-Kev 4B also passed **7/8** tasks across two new sets of names and layouts. In the one failure, the fixed text writer gave no value for a changed draft field twice. The field stayed empty and the editor stayed open. The agent chose Blocked and made no write. No prompt or action policy changed after this held-out result. These browser cases do not establish broad native-app task reliability or general model quality.
+## Release checks
 
-## Native menu and target selection
+Run `bun run check`, `bun run test`, and `bun run test:native`. Native checks need
+Xcode Command Line Tools. Validate the signed installed app separately: setup
+labels, permission replies, cancellation, model selection, and visible task
+results. Keep raw traces and screenshots private under ignored `runs/`.
 
-Native menu commands are grouped by their observed top-level menu. The operation request includes the offered command paths; the target request carries the operation that the model selected. This keeps a command such as File > New from competing with every command in the system menu. The model can still return to other operations, choose another surface, finish, or stop. There are no application-name routes or confidence thresholds.
-
-At `4bc7857`, on one captured Calendar state, Kev 4B selected File > New Event or Reminder. The comparison executed model requests only. Separate controls retained correct Finish, Blocked, and rejection of an unsuitable menu. On 18 fixed development states, that policy passed 17/18 and the baseline passed 16/18. It had no false Finish in this set. Both policies failed a pending-save state by selecting Save again. These are development checks, not an end-to-end success rate or a claim that repeat writes are solved.
-
-An independent TextEdit observation selected File > New when asked for a second blank document. The menu was not executed. Native menu grouping uses the observed paths, including on a window with only menu actions; it does not recognize application names or task keywords.
-
-## Read-only menu inspection
-
-At `0859f6c`, direct File-menu inspection returned 10 Calendar commands (9 enabled, 1 disabled) and 22 TextEdit commands (21 enabled, 1 disabled). Both scoped scans reported complete. The model then selected `inspect_menu(File)` followed by Finish in a guarded Calendar task. The guard delegated the production method unchanged and rejected invocation, clicks, typing, keys, and navigation before any driver call. The three fresh reports each contained the same 10 commands; Calendar's observed event count stayed 3. The installed signed NativeAccess helper passed the same scoped read afterward.
-
-The task check also exposed and corrected a routing error: a valid saved desktop window was restored, but the harness still required another app choice. Restored windows now enter observation directly; tests retain app selection when restoration fails. Menu inspection tests cover incomplete reports, disabled commands, lossless state rendering, changed menu/window scope, read errors, and preservation of scoped commands omitted by a broader scan. These checks establish read-only inspection for the tested accessible menus, not arbitrary app support or full Calendar-task completion.
-
-## Installed app result
-
-Build `0859f6c` was signed and installed with the same certificate-bound requirement, and deep signature validation passed. System One reached Ready with Kev 4B, Qwen 3.5 2B, Auto control, and Automatic sessions.
-
-A guarded replay at `4bc7857` of the reported Calendar request used the installed local model service and selected desktop tools, opened Calendar, then invoked File > New Event or Reminder. Independent accessibility inspection confirmed a new event editor. This is a verified advance past the original premature stop, not a completed event with the requested date and title. Calendar created a provisional event immediately; the model's nonpersistent-effect classification and the test guard did not predict that write. The test stopped, and the exact test event was removed through Calendar's observed Undo Create command. A fresh independent read confirmed its removal. The immediate driver snapshot had still shown the prior controls, so observation timing or window scope needs further evidence before a fix. Do not describe this run as having made no write.
-
-A separate cold-start request to open an empty event-entry box stopped before selecting a window. Its first model request was byte-identical to the baseline request. That path remains an unresolved model decision failure.
-
-Opening the installed task menu prepared the text cache. The first synthetic general-field request then reused **165 of 429 prompt tokens**. A subsequent unrelated readiness control reused 0 of 66 tokens. The probe sent no seed request and did not press Start, create a task session, or control another app. Typing and voice use the same warm call in source, but physical voice input was not retested in this check.
-
-Earlier computer-task checks completed the read-only Calculator task in three actions: select desktop, open Calculator, Finish. A separate macOS accessibility read confirmed a real Calculator window. The Wikipedia task exposed a **semantic failure**: the app opened Wikipedia's Main Page, entered `Chicago` in the search field, and chose Finish before opening the article. A fresh browser read confirmed the wrong final page. That live workflow has not been retested with the menu and target change; the development-state results do not establish that it is fixed.
-
-After QA, the three session files and index, model preferences, and environment file matched the preflight backup byte for byte. The voice shortcut's decoded settings also matched. The original task draft was returned to the Ready panel. System One Accessibility, CUA Accessibility, and CUA Screen Recording remained Granted. No browser tabs were created. The app was left running and Ready. Full Calendar completion and broad computer-task reliability remain unverified.
-
-## Evidence limits
-
-The browser grader checks actual final page state and all fixture write counters. It rejects an early Finish, wrong target, missed write, duplicate write, or unrelated write. The suite covers document navigation, unsaved drafts, editing and saving, and duplicate-label selection. It does not cover every app, complex canvas, drag, or vision-driven workflow.
-
-Use [acceptance checks](acceptance.md) to choose the required evidence for a change. Raw traces can contain task content. Keep them under ignored `runs/` or the app data directory; publish only bounded counts and conclusions.
+Unit tests cover driver state, scope, approval and cancellation contracts. They
+do not establish broad task reliability or speed improvements. New end-to-end
+benchmarks are needed before making claims about the Codex-based task path.

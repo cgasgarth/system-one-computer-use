@@ -48,6 +48,13 @@ final class TaskMenu: NSViewController {
     let settings = NSButton(title: "", target: nil, action: nil)
     let latency = NSTextField(labelWithString: "—")
     let rate = NSTextField(labelWithString: "—")
+    private var editorScroll: NSScrollView?
+    private let approvalPanel = NSView()
+    private let approvalDetails = NSTextView()
+    private let approvalAllow = NSButton(title: "Allow once", target: nil, action: nil)
+    private let approvalTask = NSButton(title: "Allow for task", target: nil, action: nil)
+    private let approvalDecline = NSButton(title: "Decline", target: nil, action: nil)
+    var onApprovalChoice: ((ApprovalResponse.Decision) -> Void)?
     private var locked = false
 
     override func loadView() {
@@ -87,6 +94,7 @@ final class TaskMenu: NSViewController {
         sessions.picker.frame = NSRect(x: 184, y: 144, width: 162, height: 28)
         view.addSubview(sessions.picker)
         addEditor()
+        addApprovalPanel()
         voice.frame = NSRect(x: 18, y: 104, width: 82, height: 30)
         run.frame = NSRect(x: 260, y: 104, width: 82, height: 30)
         run.bezelColor = .controlAccentColor
@@ -118,6 +126,7 @@ final class TaskMenu: NSViewController {
 
     private func addEditor() {
         let scroll = NSScrollView(frame: NSRect(x: 18, y: 197, width: 324, height: 116))
+        editorScroll = scroll
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
@@ -147,6 +156,65 @@ final class TaskMenu: NSViewController {
         scroll.documentView = editor
         view.addSubview(scroll)
     }
+
+    private func addApprovalPanel() {
+        approvalPanel.frame = NSRect(x: 18, y: 197, width: 324, height: 116)
+        approvalPanel.wantsLayer = true
+        approvalPanel.layer?.cornerRadius = 10
+        approvalPanel.layer?.borderWidth = 0.5
+        approvalPanel.layer?.borderColor = NSColor.separatorColor.cgColor
+        approvalPanel.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        let detailScroll = NSScrollView(frame: NSRect(x: 8, y: 36, width: 308, height: 72))
+        detailScroll.hasVerticalScroller = true
+        detailScroll.autohidesScrollers = true
+        detailScroll.borderType = .noBorder
+        approvalDetails.frame = detailScroll.bounds
+        approvalDetails.isEditable = false
+        approvalDetails.isSelectable = true
+        approvalDetails.font = .systemFont(ofSize: 11)
+        approvalDetails.drawsBackground = false
+        approvalDetails.textContainerInset = NSSize(width: 3, height: 3)
+        approvalDetails.setAccessibilityLabel("Control approval details")
+        detailScroll.documentView = approvalDetails
+        approvalPanel.addSubview(detailScroll)
+        approvalDecline.frame = NSRect(x: 6, y: 5, width: 80, height: 26)
+        approvalAllow.frame = NSRect(x: 91, y: 5, width: 101, height: 26)
+        approvalTask.frame = NSRect(x: 197, y: 5, width: 120, height: 26)
+        for button in [approvalDecline, approvalAllow, approvalTask] {
+            button.bezelStyle = .rounded
+            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.target = self
+            approvalPanel.addSubview(button)
+        }
+        approvalDecline.action = #selector(declineApproval)
+        approvalAllow.action = #selector(allowApproval)
+        approvalTask.action = #selector(allowForTask)
+        approvalPanel.isHidden = true
+        view.addSubview(approvalPanel)
+    }
+
+    func showApproval(_ prompt: ApprovalPrompt) {
+        var details = ["Codex needs permission", prompt.message]
+        if let site = prompt.site { details.append("Site: \(site)") }
+        approvalDetails.string = details.joined(separator: "\n")
+        approvalDetails.scrollToBeginningOfDocument(nil)
+        editorScroll?.isHidden = true
+        approvalPanel.isHidden = false
+        approvalAllow.isEnabled = true
+        approvalDecline.isEnabled = true
+        approvalTask.isHidden = !prompt.canAllowTask
+        approvalTask.isEnabled = prompt.canAllowTask
+    }
+
+    func clearApproval() {
+        approvalPanel.isHidden = true
+        editorScroll?.isHidden = false
+        approvalDetails.string = ""
+    }
+
+    @objc private func allowApproval() { onApprovalChoice?(.allowOnce) }
+    @objc private func allowForTask() { onApprovalChoice?(.allowTask) }
+    @objc private func declineApproval() { onApprovalChoice?(.decline) }
 
     private func metric(_ value: NSTextField, title: String, x: CGFloat) {
         let label = NSTextField(labelWithString: title)

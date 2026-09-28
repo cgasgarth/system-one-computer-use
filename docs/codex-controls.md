@@ -70,8 +70,8 @@ a screenshot. It then closed its test tab. Neither task used a Codex model turn.
 The native test client accepted only the explicitly requested Calculator app
 prompt. The reusable bridge instead forwards approval requests to its client.
 These short tasks prove the control connection; they do not establish general
-agent reliability or a speed advantage. The System One app's selected model and
-existing CUA/Playwright adapters are unchanged.
+agent reliability or a speed advantage. System One uses these Codex controls for its native and browser drivers. Its
+selected local or external decision model remains separate from the control runtime.
 
 ## Tool use
 

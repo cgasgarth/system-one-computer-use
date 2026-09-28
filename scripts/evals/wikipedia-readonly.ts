@@ -1,3 +1,4 @@
+import { terminalApproval } from "../../src/app/terminal-approval.ts";
 import { prepareModels } from "./prepare.ts";
 import { createComputer, createModels, loadConfig } from "../../src/app/config.ts";
 import { runTask } from "../../src/agent/loop.ts";
@@ -98,7 +99,7 @@ function readOnlyWikipedia(computer: ManagedComputer): ManagedComputer {
 }
 const config = loadConfig();
 const models = createModels(config);
-const browser = readOnlyWikipedia(createComputer(config, "browser"));
+const browser = readOnlyWikipedia(createComputer("browser", { approval: terminalApproval }));
 const trace: TaskStep[] = [];
 try {
   await prepareModels(config);

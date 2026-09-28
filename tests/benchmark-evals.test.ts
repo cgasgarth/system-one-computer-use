@@ -192,7 +192,7 @@ describe("fixture isolation", () => {
   });
   test("a resolved click that times out is infrastructure-invalid even when writes are missing", () => {
     const step = {
-      error: "Playwright browser_click failed: TimeoutError: locator resolved but was not visible",
+      error: "Codex Chrome click failed: TimeoutError: locator resolved but was not visible",
     };
     const graded = infrastructureGrade("wrong-write-count", [step]);
     expect(graded.outcome).toBe("infrastructure-invalid");

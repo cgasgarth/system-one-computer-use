@@ -276,7 +276,15 @@ test("keeps the selected surface usable after its saved target cannot be restore
       throw new Error("Saved tab closed");
     },
   };
-  const saved = { kind: "browser", url: "https://example.test/old", title: "Old" } as const;
+  const saved = {
+    kind: "browser",
+    browserId: "chrome",
+    tabId: "task",
+    providerTabId: "provider-task",
+    extensionInstanceId: "extension-test",
+    url: "https://example.test/old",
+    title: "Old",
+  } as const;
   try {
     await session.select("browser", browser, saved);
   } catch {

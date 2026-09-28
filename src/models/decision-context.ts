@@ -51,7 +51,7 @@ const DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
   request_app: "Open an installed application.",
   observe_window: "Select a different open window.",
   invoke_menu: "Use an observed command in this application's menu.",
-  inspect_menu: "Inspect observed application menu commands without invoking one.",
+  inspect_menu: "Open an observed application menu to view its commands without invoking one.",
 };
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
   const grouped = new Map<string, { kind: ActionGroupKind; menu?: string; actions: Action[] }>();

@@ -180,13 +180,6 @@ async function prepareRuntime(): Promise<void> {
     path.join(root, "src/app/models/daemon.ts"),
     path.join(root, "src/app/permission-status.ts"),
   ]);
-  await Promise.all(
-    ["@playwright/mcp", "playwright", "playwright-core"].map(async (name) =>
-      cp(path.join(root, "node_modules", name), path.join(runtime, "node_modules", name), {
-        recursive: true,
-      }),
-    ),
-  );
   const uv = Bun.which("uv");
   if (uv === null) {
     throw new Error("uv is required to package the managed MLX runtime");
@@ -247,30 +240,9 @@ async function buildSignedApp(selectedIdentity: string): Promise<void> {
     "-o",
     binary,
   ]);
-  await command([
-    "xcrun",
-    "swiftc",
-    "-target",
-    swiftTarget,
-    "-swift-version",
-    "6",
-    "-O",
-    ...["main", "WindowEvents", "WritableFields", "MenuItems"].map((name) =>
-      path.join(root, "native", "NativeAccess", `${name}.swift`),
-    ),
-    "-o",
-    path.join(contents, "MacOS", "NativeAccess"),
-  ]);
   const plist = path.join(contents, "Info.plist");
   await Bun.write(plist, JSON.stringify(info));
   await command(["plutil", "-convert", "xml1", plist]);
-  await command([
-    "codesign",
-    "--force",
-    "--sign",
-    selectedIdentity,
-    path.join(contents, "MacOS", "NativeAccess"),
-  ]);
   await command(["codesign", "--force", "--sign", selectedIdentity, app]);
   await command(["codesign", "--verify", "--deep", "--strict", app]);
 }

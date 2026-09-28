@@ -19,6 +19,7 @@ interface Computer {
   readonly window: (pid: number, windowId: number) => Promise<Window>;
   readonly focusWindow?: (pid: number, windowId: number) => Promise<void>;
   readonly launchApp: (name: string, signal?: Readonly<AbortSignal>) => Promise<void>;
+  readonly bindApp?: (name: string) => Promise<void>;
   readonly clickElement: (action: ClickAction) => Promise<void>;
   readonly inspectClick: (action: ClickAction) => Promise<ClickInspection>;
   readonly inspectField?: (action: Extract<Action, { kind: "compose_text" }>) => Promise<{

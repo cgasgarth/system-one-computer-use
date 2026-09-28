@@ -1,27 +1,33 @@
 import { createInterface } from "node:readline";
 import { runTask } from "../agent/loop.ts";
 import { ActionSelectionError } from "../models/action-selection-error.ts";
-import { describeAction } from "../agent/contracts.ts";
 import { createComputer, createModels, installedApplications, loadConfig } from "./config.ts";
 import { ComputerSessions } from "./computers.ts";
-import { taskInputSchema } from "./task-schema.ts";
+import type { TaskInput } from "./task-schema.ts";
+import { consumeWorkerInput } from "./worker-input.ts";
 import { SessionStore } from "./sessions/store.ts";
-import type { TurnHandle } from "./sessions/store.ts";
 import { sessionContext } from "./sessions/context.ts";
-import { TaskTrace } from "./task-trace.ts";
-import type { TraceModels } from "./task-trace.ts";
+import { WorkerExecution } from "./worker-execution.ts";
 
 const config = loadConfig();
 const models = createModels(config);
 const sessions = new SessionStore();
-const computers = new ComputerSessions((mode) => createComputer(config, mode));
-const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const shutdown = new AbortController();
+// The callback is evaluated only after the worker has an active task.
+// eslint-disable-next-line eslint/init-declarations
+let activeExecution: WorkerExecution | undefined;
+const computers = new ComputerSessions((mode) =>
+  createComputer(mode, {
+    approval: async (request) => activeExecution?.requestApproval(request) ?? { action: "cancel" },
+    signal: shutdown.signal,
+  }),
+);
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 function endpointOrigin(value: string): string {
   const parsed = new URL(value);
   return parsed.protocol === "unix:" ? "unix://local" : parsed.origin;
 }
-const identities: TraceModels = {
+const identities = {
   decision: {
     modelId: config.SYSTEM_ONE_MODEL,
     endpointOrigin: endpointOrigin(config.SYSTEM_ONE_URL),
@@ -34,106 +40,21 @@ async function closeComputers(): Promise<void> {
 async function closeNativeTask(): Promise<void> {
   await computers.closeDesktop();
 }
-// The worker has no active task until it receives the first request.
-// eslint-disable-next-line eslint/init-declarations
-let activeExecution: Execution | undefined;
 function stop(): void {
   activeExecution?.trace.saveFailure("stopped", "Stopped by user during an in-flight task.");
+  activeExecution?.cancelApprovals();
   shutdown.abort(new Error("Stopped by user"));
   input.close();
   void closeComputers();
 }
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
-class Execution {
-  public readonly trace = new TaskTrace(identities);
-  private currentHandle: TurnHandle | undefined;
-  public get steps(): TaskTrace["steps"] {
-    return this.trace.steps;
-  }
-  public get handle(): TurnHandle | undefined {
-    return this.currentHandle;
-  }
-  public get task(): string {
-    return this.trace.taskText;
-  }
-  public begin(task: string, handle: TurnHandle): void {
-    this.currentHandle = handle;
-    this.trace.begin(task, handle.sessionId);
-  }
-  public async record(step: Parameters<TaskTrace["record"]>[0]): Promise<void> {
-    this.trace.record(step);
-    if (this.currentHandle === undefined) {
-      throw new Error("The task session is unavailable while saving its step.");
-    }
-    await sessions.update(this.currentHandle, {
-      action: describeAction(step.action),
-      observation: step.observation,
-      ...(step.output === undefined ? {} : { message: step.output }),
-    });
-    this.report(step.error ?? step.observationError ?? step.output ?? describeAction(step.action));
-  }
-  public report(message: string): void {
-    console.log(
-      JSON.stringify({
-        status: "running",
-        message,
-        decisions: this.steps.length,
-        modelRequests: this.trace.requestCount,
-        ...this.trace.metrics(),
-      }),
-    );
-  }
-  public textModel(): typeof models.text {
-    return {
-      generate: async (request) => {
-        const started = performance.now();
-        this.trace.textRequest({ phase: request.purpose, status: "start" });
-        this.report("Preparing requested text…");
-        try {
-          const value = await models.text.generate(request);
-          this.trace.textRequest({
-            phase: request.purpose,
-            status: "ok",
-            elapsedMs: performance.now() - started,
-          });
-          return value;
-        } catch (error) {
-          this.trace.textRequest({
-            phase: request.purpose,
-            status: "error",
-            elapsedMs: performance.now() - started,
-          });
-          throw error;
-        }
-      },
-    };
-  }
-  public stage(event: Parameters<TaskTrace["setStage"]>[0]): void {
-    this.trace.setStage(event);
-    const messages = {
-      observation: "Inspecting screen…",
-      decision: "Choosing the next action…",
-      action: "Running selected action…",
-    };
-    this.report(messages[event.stage]);
-  }
-  public decisionRequest(event: Parameters<TaskTrace["modelRequest"]>[0]): void {
-    this.trace.modelRequest(event);
-    if (event.status !== "start") {
-      return;
-    }
-    const checking =
-      event.phase.startsWith("completion") ||
-      event.phase.startsWith("commit") ||
-      event.phase === "field-readiness";
-    this.report(checking ? "Checking the current result…" : "Choosing the next action…");
-  }
-}
-// Execution is the mutable task-local trace owner.
-// eslint-disable-next-line typescript/prefer-readonly-parameter-types
-async function executeTask(line: string, execution: Readonly<Execution>): Promise<void> {
-  const request = taskInputSchema.parse(JSON.parse(line));
+async function executeTask(
+  request: TaskInput,
+  // Execution owns a mutable trace for this task.
+  // eslint-disable-next-line typescript/prefer-readonly-parameter-types
+  execution: Readonly<WorkerExecution>,
+): Promise<void> {
   const { handle, session } = await sessions.begin(
     request.task,
     request.session,
@@ -185,11 +106,16 @@ async function executeTask(line: string, execution: Readonly<Execution>): Promis
   );
   await execution.trace.clearCheckpoint();
 }
-async function execute(line: string): Promise<void> {
-  const execution = new Execution();
+async function execute(request: TaskInput): Promise<void> {
+  const execution = new WorkerExecution({
+    identities,
+    sessions,
+    text: models.text,
+    signal: shutdown.signal,
+  });
   activeExecution = execution;
   try {
-    await executeTask(line, execution);
+    await executeTask(request, execution);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Task failed";
     if (execution.handle !== undefined) {
@@ -215,18 +141,30 @@ async function execute(line: string): Promise<void> {
     };
     console.log(JSON.stringify(failure));
   } finally {
+    execution.cancelApprovals();
     await execution.trace.clearCheckpoint();
     activeExecution = undefined;
     await closeNativeTask();
   }
 }
 try {
-  for await (const line of input) {
-    if (shutdown.signal.aborted) {
-      break;
-    }
-    await execute(line);
-  }
+  await consumeWorkerInput(input, {
+    run: execute,
+    respond(response) {
+      activeExecution?.respondApproval(response);
+    },
+    cancel() {
+      activeExecution?.cancelApprovals();
+      shutdown.abort(new Error("Task input closed"));
+    },
+    busy() {
+      console.error("A task is already running; the second request was not started.");
+    },
+    error(error) {
+      console.error(error instanceof Error ? error.message : "Task failed");
+    },
+    stopped: () => shutdown.signal.aborted,
+  });
 } finally {
   await closeComputers();
 }

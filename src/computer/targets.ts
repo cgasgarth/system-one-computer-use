@@ -1,11 +1,16 @@
 import type { Desktop } from "../agent/contracts.ts";
 
-const INTERNAL_BUNDLES = new Set(["com.trycua.driver", "com.cgasgarth.system-one-computer-use"]);
+const INTERNAL_BUNDLES = new Set([
+  "com.openai.sky.CUAService",
+  "com.openai.sky.CUAService.AuthorizationPluginInstaller",
+  "com.openai.sky.CUAService.guardian",
+  "com.cgasgarth.system-one-computer-use",
+]);
 const INTERNAL_NAMES = new Set([
-  "Cua Driver",
-  "CuaDriver",
+  "Codex Computer Use",
+  "Codex Computer Use Installer",
+  "CUALockScreenGuardian",
   "System One Computer Use",
-  "ChatGPT Computer Use",
 ]);
 
 function taskDesktop(desktop: Desktop): Desktop {

@@ -90,6 +90,10 @@ class CodexControlsSession {
 
   private async startProcess(): Promise<void> {
     this.directory = await mkdtemp(path.join(tmpdir(), "system-one-codex-controls-"));
+    if (this.closed) {
+      await rm(this.directory, { recursive: true, force: true });
+      throw new Error("Controls session was cancelled during setup");
+    }
     const environment = Object.fromEntries(
       Object.entries(this.options.environment ?? Bun.env).filter(([key]) => !BLOCKED_ENV.test(key)),
     );
@@ -135,6 +139,21 @@ class CodexControlsSession {
   }
 
   public async invoke(request: InvokeRequest): Promise<CallToolResult> {
+    if (request.signal?.aborted === true) {
+      throw new Error("Controls call was cancelled");
+    }
+    const onAbort = (): void => {
+      void this.close();
+    };
+    request.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await this.invokeStarted(request);
+    } finally {
+      request.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private async invokeStarted(request: InvokeRequest): Promise<CallToolResult> {
     await this.start();
     if (this.active) {
       throw new Error("Another controls call is active");
@@ -143,6 +162,7 @@ class CodexControlsSession {
       throw new Error("Controls thread is unavailable");
     }
     if (request.signal?.aborted === true) {
+      await this.close();
       throw new Error("Controls call was cancelled");
     }
     this.active = true;

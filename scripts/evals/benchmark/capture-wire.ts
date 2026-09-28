@@ -1,5 +1,6 @@
 import { runTask } from "../../../src/agent/loop.ts";
-import { PlaywrightComputer } from "../../../src/computer/playwright/computer.ts";
+import { CodexChromeComputer } from "../../../src/computer/codex-chrome/computer.ts";
+import { terminalApproval } from "../../../src/app/terminal-approval.ts";
 import { SystemOneDecisionModel } from "../../../src/models/system-one.ts";
 import { ChatCompletionTextModel } from "../../../src/models/text.ts";
 import { restrictedBrowser } from "../restricted-browser.ts";
@@ -11,7 +12,7 @@ if (output === undefined) {
   throw new Error("Pass an ignored output directory for the synthetic wire capture.");
 }
 const workspace = startWorkspace();
-const computer = new PlaywrightComputer({ mode: "isolated" });
+const computer = new CodexChromeComputer({ approval: terminalApproval });
 const browser = restrictedBrowser(computer, workspace.origin);
 async function captureRequest(policy: "browser-only" | "auto"): Promise<string> {
   const abort = new AbortController();

@@ -1,109 +1,55 @@
 import AppKit
-import ApplicationServices
 import Darwin
 
-enum PermissionState: Equatable, Sendable {
-    case granted
-    case missing
-    case unknown
+struct CodexSetupSnapshot: Sendable {
+    let runtimeInstalled: Bool?
+    let computerUseEnabled: Bool?
+    let chromeEnabled: Bool?
 
-    var title: String {
-        switch self {
-        case .granted: "Granted"
-        case .missing: "Needs access"
-        case .unknown: "Unable to check"
+    static let unknown = CodexSetupSnapshot(
+        runtimeInstalled: nil, computerUseEnabled: nil, chromeEnabled: nil
+    )
+
+    static func label(_ enabled: Bool?) -> String {
+        switch enabled {
+        case true: "Enabled in Codex"
+        case false: "Needs setup"
+        case nil: "Unable to check"
         }
     }
 }
 
-struct PermissionSnapshot: Sendable {
-    let appAccessibility: Bool?
-    let helperAccessibility: Bool?
-    let driverAccessibility: Bool?
-    let driverScreenRecording: Bool?
-
-    var systemOneAccessibility: PermissionState {
-        if appAccessibility == false || helperAccessibility == false { return .missing }
-        if appAccessibility == true && helperAccessibility == true { return .granted }
-        return .unknown
-    }
-
-    static func state(_ value: Bool?) -> PermissionState {
-        switch value {
-        case true: .granted
-        case false: .missing
-        case nil: .unknown
-        }
-    }
-}
-
-enum PermissionPane: String, CaseIterable {
-    case accessibility = "Privacy_Accessibility"
-    case screenRecording = "Privacy_ScreenCapture"
-    case microphone = "Privacy_Microphone"
-
-    var url: URL {
-        URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(rawValue)")!
-    }
-}
-
-private struct HelperPermission: Decodable {
-    let accessibility: Bool
-}
-
-private struct DriverPermission: Decodable {
-    struct Source: Decodable {
-        let attribution: String
-        let bundle_id: String
-    }
-    let accessibility: Bool
-    let screen_recording: Bool
-    let source: Source
+private struct CodexSetupReport: Decodable {
+    let runtimeInstalled: Bool
+    let computerUseEnabled: Bool?
+    let chromeEnabled: Bool?
 }
 
 enum PermissionProbe {
-    static func read() -> PermissionSnapshot {
-        let app = AXIsProcessTrusted()
-        let helper = command(Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/NativeAccess"), ["permissions"])
-            .flatMap { try? JSONDecoder().decode(HelperPermission.self, from: $0) }
-        let bun = Bundle.main.object(forInfoDictionaryKey: "BunPath") as? String
-        let script = Bundle.main.resourceURL?.appendingPathComponent("runtime/permission-status.js")
-        let dataPath = Bundle.main.object(forInfoDictionaryKey: "AppDataPath") as? String
-        let driverData: Data?
-        if let bun, let script, let dataPath {
-            driverData = command(URL(fileURLWithPath: bun), [script.path], directory: URL(fileURLWithPath: dataPath))
-        } else { driverData = nil }
-        let driver = driverStatus(driverData)
-        return PermissionSnapshot(
-            appAccessibility: app,
-            helperAccessibility: helper?.accessibility,
-            driverAccessibility: driver.accessibility,
-            driverScreenRecording: driver.screenRecording
+    static func read() -> CodexSetupSnapshot {
+        guard let bun = Bundle.main.object(forInfoDictionaryKey: "BunPath") as? String,
+              let script = Bundle.main.resourceURL?.appendingPathComponent("runtime/permission-status.js"),
+              let dataPath = Bundle.main.object(forInfoDictionaryKey: "AppDataPath") as? String,
+              let data = command(URL(fileURLWithPath: bun), [script.path], directory: URL(fileURLWithPath: dataPath)),
+              let result = try? JSONDecoder().decode(CodexSetupReport.self, from: data) else {
+            return .unknown
+        }
+        return CodexSetupSnapshot(
+            runtimeInstalled: result.runtimeInstalled,
+            computerUseEnabled: result.computerUseEnabled,
+            chromeEnabled: result.chromeEnabled
         )
     }
 
-    static func driverStatus(_ data: Data?) -> (accessibility: Bool?, screenRecording: Bool?) {
-        guard let data, let result = try? JSONDecoder().decode(DriverPermission.self, from: data),
-              result.source.attribution == "driver-daemon", result.source.bundle_id == "com.trycua.driver" else {
-            return (nil, nil)
-        }
-        return (result.accessibility, result.screen_recording)
-    }
-
-    private static func command(_ executable: URL, _ arguments: [String], directory: URL? = nil) -> Data? {
+    private static func command(_ executable: URL, _ arguments: [String], directory: URL) -> Data? {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { return nil }
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.currentDirectoryURL = directory
-        if directory != nil {
-            var environment = ProcessInfo.processInfo.environment
-            environment["PATH"] = Bundle.main.object(forInfoDictionaryKey: "ToolSearchPath") as? String
-            process.environment = environment
-        }
+        process.standardError = FileHandle.nullDevice
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
         do {
@@ -121,11 +67,25 @@ enum PermissionProbe {
 @MainActor
 final class PermissionSection: NSStackView {
     private let recheck = NSButton(title: "Recheck", target: nil, action: nil)
-    private let appRow = PermissionRow(owner: "System One", capability: "Accessibility", pane: .accessibility)
-    private let appHint = NSTextField(wrappingLabelWithString: "If already enabled, remove System One and add it again.")
-    private let driverAXRow = PermissionRow(owner: "CUA Driver", capability: "Accessibility", pane: .accessibility)
-    private let driverScreenRow = PermissionRow(owner: "CUA Driver", capability: "Screen Recording", pane: .screenRecording)
-    private let handyRow = PermissionRow(owner: "Handy", capability: "Microphone", pane: .microphone)
+    private let runtimeRow = SetupRow(
+        owner: "ChatGPT / Codex", capability: "Desktop control runtime", buttonTitle: "Download",
+        destination: URL(string: "https://chatgpt.com/download/")!
+    )
+    private let computerRow = SetupRow(
+        owner: "Computer Use", capability: "Codex plugin", buttonTitle: "Open Codex",
+        destination: URL(fileURLWithPath: "/Applications/ChatGPT.app")
+    )
+    private let chromeRow = SetupRow(
+        owner: "Chrome", capability: "Codex plugin", buttonTitle: "Open Codex",
+        destination: URL(fileURLWithPath: "/Applications/ChatGPT.app")
+    )
+    private let handyRow = SetupRow(
+        owner: "Handy", capability: "Microphone", buttonTitle: "Open Settings",
+        destination: URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone")!
+    )
+    private let hint = NSTextField(wrappingLabelWithString:
+        "In Codex Settings > Plugins, enable Computer Use and Chrome. The app checks the connection when used."
+    )
     private var generation = 0
     var onLayoutChange: (() -> Void)?
 
@@ -134,7 +94,7 @@ final class PermissionSection: NSStackView {
         orientation = .vertical
         alignment = .leading
         spacing = 6
-        let heading = NSTextField(labelWithString: "App access")
+        let heading = NSTextField(labelWithString: "Control setup")
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
         recheck.isBordered = false
         recheck.font = .systemFont(ofSize: 12)
@@ -145,18 +105,17 @@ final class PermissionSection: NSStackView {
         header.orientation = .horizontal
         header.alignment = .centerY
         addArrangedSubview(header)
-        append(appRow)
-        appHint.font = .systemFont(ofSize: 11)
-        appHint.textColor = .secondaryLabelColor
-        addArrangedSubview(appHint)
-        for row in [driverAXRow, driverScreenRow, handyRow] { append(row) }
+        for row in [runtimeRow, computerRow, chromeRow, handyRow] { append(row) }
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        addArrangedSubview(hint)
         for view in arrangedSubviews { view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
-        update(PermissionSnapshot(appAccessibility: nil, helperAccessibility: nil, driverAccessibility: nil, driverScreenRecording: nil))
+        update(.unknown)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
-    private func append(_ row: PermissionRow) {
+    private func append(_ row: SetupRow) {
         let separator = NSBox()
         separator.boxType = .separator
         addArrangedSubview(separator)
@@ -165,11 +124,12 @@ final class PermissionSection: NSStackView {
 
     @objc private func recheckPressed() { refresh() }
 
-    func refresh(using probe: @escaping @Sendable () -> PermissionSnapshot = PermissionProbe.read) {
+    func refresh(using probe: @escaping @Sendable () -> CodexSetupSnapshot = PermissionProbe.read) {
         generation += 1
         let current = generation
-        appHint.isHidden = true
-        for row in [appRow, driverAXRow, driverScreenRow] { row.update(.unknown, title: "Checking…") }
+        for row in [runtimeRow, computerRow, chromeRow] {
+            row.update(title: "Checking…", warning: false, showButton: false)
+        }
         onLayoutChange?()
         Task.detached(priority: .utility) { [weak self] in
             let snapshot = probe()
@@ -180,24 +140,37 @@ final class PermissionSection: NSStackView {
         }
     }
 
-    func update(_ snapshot: PermissionSnapshot) {
-        appRow.update(snapshot.systemOneAccessibility)
-        appHint.isHidden = snapshot.systemOneAccessibility != .missing
-        driverAXRow.update(PermissionSnapshot.state(snapshot.driverAccessibility))
-        driverScreenRow.update(PermissionSnapshot.state(snapshot.driverScreenRecording))
-        handyRow.update(.unknown, title: "Check in macOS")
+    func update(_ snapshot: CodexSetupSnapshot) {
+        let installed = snapshot.runtimeInstalled
+        runtimeRow.update(
+            title: installed == true ? "Installed" : installed == false ? "Not installed" : "Unable to check",
+            warning: installed == false,
+            showButton: installed == false
+        )
+        computerRow.update(
+            title: CodexSetupSnapshot.label(snapshot.computerUseEnabled),
+            warning: snapshot.computerUseEnabled == false,
+            showButton: installed == true && snapshot.computerUseEnabled != true
+        )
+        chromeRow.update(
+            title: CodexSetupSnapshot.label(snapshot.chromeEnabled),
+            warning: snapshot.chromeEnabled == false,
+            showButton: installed == true && snapshot.chromeEnabled != true
+        )
+        handyRow.update(title: "Check in macOS", warning: false, showButton: true)
         onLayoutChange?()
     }
 }
 
 @MainActor
-private final class PermissionRow: NSStackView {
+private final class SetupRow: NSStackView {
     let status = NSTextField(labelWithString: "Unable to check")
-    private let button = NSButton(title: "Open Settings", target: nil, action: nil)
-    private let pane: PermissionPane
+    private let button: NSButton
+    private let destination: URL
 
-    init(owner: String, capability: String, pane: PermissionPane) {
-        self.pane = pane
+    init(owner: String, capability: String, buttonTitle: String, destination: URL) {
+        self.destination = destination
+        button = NSButton(title: buttonTitle, target: nil, action: nil)
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .top
@@ -217,8 +190,8 @@ private final class PermissionRow: NSStackView {
         button.font = .systemFont(ofSize: 11)
         button.contentTintColor = .linkColor
         button.target = self
-        button.action = #selector(openPane)
-        button.setAccessibilityLabel("Open \(owner) \(capability) settings")
+        button.action = #selector(openDestination)
+        button.setAccessibilityLabel("\(buttonTitle) for \(owner) \(capability)")
         let right = NSStackView(views: [status, button])
         right.orientation = .vertical
         right.alignment = .trailing
@@ -230,11 +203,11 @@ private final class PermissionRow: NSStackView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
 
-    func update(_ state: PermissionState, title: String? = nil) {
-        status.stringValue = title ?? state.title
-        status.textColor = state == .missing ? .systemOrange : .secondaryLabelColor
-        button.isHidden = state == .granted
+    func update(title: String, warning: Bool, showButton: Bool) {
+        status.stringValue = title
+        status.textColor = warning ? .systemOrange : .secondaryLabelColor
+        button.isHidden = !showButton
     }
 
-    @objc private func openPane() { NSWorkspace.shared.open(pane.url) }
+    @objc private func openDestination() { NSWorkspace.shared.open(destination) }
 }

@@ -1,6 +1,5 @@
 import { runTask } from "../agent/loop.ts";
-import { createComputer, createModels, loadConfig } from "./config.ts";
-import { installedApplications } from "../computer/applications.ts";
+import { createComputer, createModels, installedApplications, loadConfig } from "./config.ts";
 import { ComputerSessions } from "./computers.ts";
 import { taskTextSchema } from "./task-schema.ts";
 import { SessionStore } from "./sessions/store.ts";
@@ -8,6 +7,7 @@ import { sessionContext } from "./sessions/context.ts";
 import { describeAction } from "../agent/contracts.ts";
 import { ActionSelectionError } from "../models/action-selection-error.ts";
 import type { TaskStep } from "../agent/types.ts";
+import { terminalApproval } from "./terminal-approval.ts";
 
 const ARGUMENT_OFFSET = 2;
 const config = loadConfig();
@@ -15,7 +15,16 @@ const models = createModels(config);
 const sessions = new SessionStore("runs/sessions");
 const task = taskTextSchema.parse(Bun.argv.slice(ARGUMENT_OFFSET).join(" "));
 const { handle, session } = await sessions.begin(task);
-const computers = new ComputerSessions((mode) => createComputer(config, mode));
+const stopped = new AbortController();
+process.once("SIGINT", () => {
+  stopped.abort(new Error("Stopped by user"));
+});
+const computers = new ComputerSessions((mode) =>
+  createComputer(mode, {
+    approval: async (request) => terminalApproval(request, stopped.signal),
+    signal: stopped.signal,
+  }),
+);
 const steps: TaskStep[] = [];
 try {
   const result = await runTask({
@@ -24,7 +33,10 @@ try {
     task,
     context: sessionContext(session),
     applications: await installedApplications(),
-    ...(config.CUA_MODE === "auto" ? {} : { preferredSurface: config.CUA_MODE }),
+    signal: stopped.signal,
+    ...(config.SYSTEM_ONE_CONTROL_SURFACE === "auto"
+      ? {}
+      : { preferredSurface: config.SYSTEM_ONE_CONTROL_SURFACE }),
     ...(session.surface === undefined ? {} : { previousSurface: session.surface }),
     async onStep(step) {
       steps.push(step);

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { SurfaceSession } from "../src/agent/surface.ts";
-import { CuaError } from "../src/computer/errors.ts";
 import { WindowUnavailableError } from "../src/computer/window-unavailable.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
 import { computerFixture, desktopFixture, expectFailure, windowFixture } from "./fixtures.ts";
@@ -55,7 +54,7 @@ test("permission errors propagate without selecting another window", async () =>
   const computer: ManagedComputer = {
     ...computerFixture().computer,
     async window() {
-      throw new CuaError("Permission denied");
+      throw new Error("Permission denied");
     },
   };
   const session = new SurfaceSession();

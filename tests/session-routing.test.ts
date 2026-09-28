@@ -3,6 +3,7 @@ import { runTask } from "../src/agent/loop.ts";
 import { SurfaceSession } from "../src/agent/surface.ts";
 import type { Action, Window } from "../src/agent/contracts.ts";
 import type { ManagedComputer } from "../src/computer/types.ts";
+import { WindowUnavailableError } from "../src/computer/window-unavailable.ts";
 import type { DecisionInput } from "../src/models/system-one.ts";
 import { computerFixture, windowFixture } from "./fixtures.ts";
 
@@ -160,8 +161,15 @@ test.each(cases)(
 
 test("a valid saved desktop window is observed directly; an invalid restore still needs an app", async () => {
   const { computer: base } = computerFixture();
+  const bound: string[] = [];
   const computer: ManagedComputer = {
     ...base,
+    async bindApp(name) {
+      bound.push(name);
+      if (name !== "Notes") {
+        throw new WindowUnavailableError("The saved app is not running.");
+      }
+    },
     async desktop() {
       return {
         apps: [{ name: "Notes", pid: notes.pid }],
@@ -196,4 +204,5 @@ test("a valid saved desktop window is observed directly; an invalid restore stil
   expect(missing.needsApplication).toBe(true);
   const missingObservation = await missing.observe(() => computer);
   expect(missingObservation.window).toBeUndefined();
+  expect(bound).toEqual(["Notes", "Calendar"]);
 });

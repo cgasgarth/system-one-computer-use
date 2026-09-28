@@ -1,8 +1,8 @@
 import type { ReadonlyDeep } from "type-fest";
 import { z } from "zod";
-import { PlaywrightComputer } from "../computer/playwright/computer.ts";
-import { CuaMcpComputer } from "../computer/native.ts";
-import { DEFAULT_NATIVE_ACCESS } from "../computer/native-access.ts";
+import { CodexChromeComputer } from "../computer/codex-chrome/computer.ts";
+import { CodexNativeComputer } from "../computer/codex-controls/native-computer.ts";
+import type { CodexComputerOptions } from "../computer/codex-controls/protocol.ts";
 import type { ComputerMode, ManagedComputer } from "../computer/types.ts";
 import { SystemOneDecisionModel } from "../models/system-one.ts";
 import type { DecisionModel } from "../models/system-one.ts";
@@ -15,10 +15,7 @@ const MIN_MODEL_CHOICES = 2;
 const MAX_MODEL_CHOICES = 255;
 const optionalKey = z.string().min(1).optional();
 const configSchema = z.object({
-  CUA_DRIVER_BIN: z.string().default("cua-driver"),
-  SYSTEM_ONE_NATIVE_BIN: z.string().default(DEFAULT_NATIVE_ACCESS),
-  CUA_MODE: driverModeSchema.default("auto"),
-  PLAYWRIGHT_MCP_EXTENSION_TOKEN: optionalKey,
+  SYSTEM_ONE_CONTROL_SURFACE: driverModeSchema.default("auto"),
   SYSTEM_ONE_API_KEY: optionalKey,
   SYSTEM_ONE_MODEL: z.string().min(1),
   SYSTEM_ONE_MAX_CHOICES: z.coerce
@@ -57,15 +54,9 @@ function createModels(config: Config): Models {
   };
 }
 
-function createComputer(config: Config, mode: ComputerMode): ManagedComputer {
-  if (mode === "browser") {
-    return new PlaywrightComputer(
-      config.PLAYWRIGHT_MCP_EXTENSION_TOKEN === undefined
-        ? {}
-        : { extensionToken: config.PLAYWRIGHT_MCP_EXTENSION_TOKEN },
-    );
-  }
-  return new CuaMcpComputer(config.CUA_DRIVER_BIN, config.SYSTEM_ONE_NATIVE_BIN);
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- AbortSignal is the shared cancellation contract.
+function createComputer(mode: ComputerMode, options: CodexComputerOptions): ManagedComputer {
+  return mode === "browser" ? new CodexChromeComputer(options) : new CodexNativeComputer(options);
 }
 
 export { createComputer, createModels, loadConfig };

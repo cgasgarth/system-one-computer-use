@@ -14,39 +14,42 @@ struct PermissionTests {
     }
 
     static func main() {
-        let granted = PermissionSnapshot(appAccessibility: true, helperAccessibility: true, driverAccessibility: true, driverScreenRecording: true)
-        precondition(granted.systemOneAccessibility == .granted)
-        let missing = PermissionSnapshot(appAccessibility: true, helperAccessibility: false, driverAccessibility: nil, driverScreenRecording: nil)
-        precondition(missing.systemOneAccessibility == .missing)
-        let unknown = PermissionSnapshot(appAccessibility: true, helperAccessibility: nil, driverAccessibility: nil, driverScreenRecording: nil)
-        precondition(unknown.systemOneAccessibility == .unknown)
-        precondition(PermissionSnapshot.state(nil) == .unknown)
-
-        let payload = Data(#"{"accessibility":true,"screen_recording":false,"source":{"attribution":"driver-daemon","bundle_id":"com.trycua.driver"}}"#.utf8)
-        let driver = PermissionProbe.driverStatus(payload)
-        precondition(driver.accessibility == true && driver.screenRecording == false)
-        let otherProcess = Data(#"{"accessibility":true,"screen_recording":true,"source":{"attribution":"caller","bundle_id":"com.example.terminal"}}"#.utf8)
-        let rejected = PermissionProbe.driverStatus(otherProcess)
-        precondition(rejected.accessibility == nil && rejected.screenRecording == nil)
-        precondition(PermissionProbe.driverStatus(Data()).accessibility == nil)
+        precondition(CodexSetupSnapshot.label(true) == "Enabled in Codex")
+        precondition(CodexSetupSnapshot.label(false) == "Needs setup")
+        precondition(CodexSetupSnapshot.label(nil) == "Unable to check")
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let section = PermissionSection()
-        section.update(missing)
-        let shown = labels(in: section)
-        precondition(shown.contains("Needs access"))
-        precondition(shown.contains("Unable to check"))
-        precondition(shown.contains("Check in macOS"))
-        section.update(granted)
-        let links = buttons(in: section).filter { $0.title == "Open Settings" }
-        precondition(links.filter { !$0.isHidden }.count == 1, "Only Handy should retain an Open button when grants are confirmed")
-        section.refresh(using: { Thread.sleep(forTimeInterval: 0.2); return granted })
-        section.refresh(using: { missing })
+        section.update(CodexSetupSnapshot(
+            runtimeInstalled: false, computerUseEnabled: false, chromeEnabled: false
+        ))
+        let missing = labels(in: section)
+        precondition(missing.contains("Not installed"))
+        precondition(missing.filter { $0 == "Needs setup" }.count == 2)
+        precondition(!missing.contains("Granted"))
+        let download = buttons(in: section).filter { $0.title == "Download" }
+        precondition(download.filter { !$0.isHidden }.count == 1)
+
+        section.update(CodexSetupSnapshot(
+            runtimeInstalled: true, computerUseEnabled: false, chromeEnabled: nil
+        ))
+        let setup = buttons(in: section).filter { $0.title == "Open Codex" }
+        precondition(setup.filter { !$0.isHidden }.count == 2)
+        precondition(labels(in: section).contains("Unable to check"))
+
+        let ready = CodexSetupSnapshot(
+            runtimeInstalled: true, computerUseEnabled: true, chromeEnabled: true
+        )
+        section.update(ready)
+        precondition(buttons(in: section).filter { !$0.isHidden }.map(\.title) == ["Recheck", "Open Settings"])
+        precondition(labels(in: section).filter { $0 == "Enabled in Codex" }.count == 2)
+        section.refresh(using: { Thread.sleep(forTimeInterval: 0.2); return ready })
+        section.refresh(using: {
+            CodexSetupSnapshot(runtimeInstalled: false, computerUseEnabled: false, chromeEnabled: false)
+        })
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let latest = labels(in: section)
-        precondition(latest.contains("Needs access") && !latest.contains("Granted"), "An older permission result replaced the latest check")
-        for pane in PermissionPane.allCases { precondition(pane.url.scheme == "x-apple.systempreferences") }
-        print("Permissions: owner attribution, missing/unknown states, and compact UI passed.")
+        precondition(labels(in: section).contains("Not installed"), "An older setup result replaced the latest check")
+        print("Codex setup labels, missing states, and refresh order passed.")
     }
 }

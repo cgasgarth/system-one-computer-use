@@ -159,8 +159,9 @@ async function inspectNativeMenu(context: TurnContext): Promise<ActionResult> {
   options.signal?.throwIfAborted();
   surfaces.setMenuInspection(report);
   return {
-    output: `Inspected observed application ${JSON.stringify(report.topLevel)} menu commands (read-only; ${report.menus.length} captured; AX scan ${report.complete ? "complete" : "incomplete"}).`,
+    output: `Opened observed application ${JSON.stringify(report.topLevel)} menu for view (${report.menus.length} commands captured; Codex menu coverage ${report.complete ? "complete" : "unknown"}).`,
     menuInspection: report,
+    performedAction: true,
   };
 }
 async function act(context: TurnContext): Promise<ActionResult> {

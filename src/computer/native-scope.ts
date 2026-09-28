@@ -1,23 +1,16 @@
 import type { Window } from "../agent/contracts.ts";
 
-const PRESENTED_ROLES = new Set(["AXPopover", "AXSheet", "AXDialog"]);
+const PRESENTED_ROLES = new Set(["AXPopover", "AXSheet", "AXDialog", "AXAlert"]);
 function activeWindowElements(window: Window): Window["elements"] {
   const presented = new Set(
     window.elements
-      .filter(
-        (element) =>
-          PRESENTED_ROLES.has(element.role) &&
-          element.frame !== undefined &&
-          element.frame.w > 1 &&
-          element.frame.h > 1,
-      )
+      .filter((element) => PRESENTED_ROLES.has(element.role))
       .map((element) => element.element_index),
   );
   if (presented.size === 0) {
     return window.elements;
   }
-  // CUA returns the AX walk in parent-before-child order. Use the full tree
-  // Before the visibility filter can discard structural ancestors.
+  // The observed AX walk is parent-before-child. Keep the presented subtree.
   for (const element of window.elements) {
     if (
       element.parent_index !== undefined &&

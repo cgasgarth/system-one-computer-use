@@ -8,7 +8,8 @@ import type { ArtifactManifest } from "../../../src/app/models/artifacts.ts";
 import { DEFAULT_MAX_CHOICES } from "../../../src/app/models/catalog.ts";
 import type { Preset } from "../../../src/app/models/catalog.ts";
 import { modelName } from "../../../src/app/models/preferences.ts";
-import { PlaywrightComputer } from "../../../src/computer/playwright/computer.ts";
+import { CodexChromeComputer } from "../../../src/computer/codex-chrome/computer.ts";
+import { terminalApproval } from "../../../src/app/terminal-approval.ts";
 import type { ManagedComputer } from "../../../src/computer/types.ts";
 import { sourceHash } from "../provenance.ts";
 import { preparedArtifact, resolveArtifacts, savedArtifacts } from "./benchmark-artifacts.ts";
@@ -235,7 +236,7 @@ async function runBenchmark(): Promise<void> {
   };
   const initialDiskFreeGiB = await freeDiskGiB(data);
   const runtime = new BenchmarkRuntime({ paths, output, initialDiskFreeGiB });
-  const computer = new PlaywrightComputer({ mode: "isolated" });
+  const computer = new CodexChromeComputer({ approval: terminalApproval });
   const expectedHashes = new Map<string, string>();
   const trials: TrialRecord[] = [];
   const startups: StartupRecord[] = [];
@@ -250,7 +251,7 @@ async function runBenchmark(): Promise<void> {
     plan: plan(selection),
     host: await machineProfile(),
     runtimeScope:
-      "source bridge over private Unix sockets and isolated Chrome; installed app preferences unchanged",
+      "source bridge over private Unix sockets and owned Codex Chrome tab; installed app preferences unchanged",
     fixtureOrigin: suite.origin,
     ...(suite.variantMetadata === undefined
       ? {}
@@ -270,7 +271,7 @@ async function runBenchmark(): Promise<void> {
     await computer.desktop();
     const initial = await computer.window();
     if (initial.url !== "about:blank") {
-      throw new Error("The isolated Chrome context did not start on a blank page.");
+      throw new Error("The owned Codex Chrome tab context did not start on a blank page.");
     }
     const snapshotPath = Bun.env["BENCHMARK_ARTIFACT_SNAPSHOT"];
     const saved =

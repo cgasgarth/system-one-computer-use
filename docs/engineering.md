@@ -1,6 +1,6 @@
 # Type and lint policy
 
-External data is parsed at the boundary with Zod. CUA methods return concrete
+External data is parsed at the boundary with Zod. Codex control methods return concrete
 tool-result types. Model requests and responses have explicit schemas. Internal
 functions accept those types and do not repeat shape checks.
 
@@ -41,5 +41,5 @@ and observed task completion.
 
 The native shell uses Swift 6 and AppKit. Its JSON messages have Codable
 contracts; model settings cross a Zod boundary in the Bun process before saving.
-The installer bundles the worker and Playwright runtime. The app reads its own
+The installer bundles the worker. Computer controls use the installed Codex runtime. The app reads its own
 Application Support configuration and does not need access to the source checkout.

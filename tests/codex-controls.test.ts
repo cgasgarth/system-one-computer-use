@@ -1,7 +1,7 @@
 /* oxlint-disable eslint/no-underscore-dangle -- _meta is a JSON-RPC wire field. */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, watch } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,10 +19,19 @@ const options = {
 };
 const relay = async (): Promise<{ action: "cancel" }> => ({ action: "cancel" });
 const APPROVAL_DELAY_MS = 400;
+const READY_TIMEOUT_MS = 1000;
 const TWO_SESSIONS = 2;
 async function delayedRelay(): Promise<{ action: "accept"; content: Record<string, never> }> {
   await Bun.sleep(APPROVAL_DELAY_MS);
   return { action: "accept", content: {} };
+}
+async function assertRejected(task: Promise<unknown>, message: string): Promise<void> {
+  try {
+    await task;
+    throw new Error("Expected a rejected controls call");
+  } catch (error) {
+    expect(error instanceof Error && error.message.includes(message)).toBe(true);
+  }
 }
 const loggedSchema = z
   .object({
@@ -41,6 +50,7 @@ const loggedSchema = z
 
 beforeEach(async () => {
   await mkdir(scratch, { recursive: true });
+  await Bun.write(log, "");
 });
 afterEach(async () => {
   await rm(log, { force: true });
@@ -48,10 +58,30 @@ afterEach(async () => {
 
 async function readMessages(): Promise<z.infer<typeof loggedSchema>[]> {
   const raw = await readFile(log, "utf8");
+  if (raw.trim().length === 0) {
+    return [];
+  }
   return raw
     .trim()
     .split("\n")
     .map((line) => loggedSchema.parse(JSON.parse(line) as unknown));
+}
+async function waitForCode(code: string): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, READY_TIMEOUT_MS);
+  try {
+    for await (const _event of watch(log, { signal: controller.signal })) {
+      const messages = await readMessages();
+      if (messages.some((item) => item.params?.arguments?.code === code)) {
+        return;
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
 }
 
 test("starts an owned session and keeps one operation ID until reset", async () => {
@@ -154,4 +184,26 @@ test("closes an execution that exceeds its timeout", async () => {
   } catch (error) {
     expect(error instanceof Error && error.message.includes("closed")).toBe(true);
   }
+});
+
+test("Stop aborts an active controls call and closes its owned process", async () => {
+  const controller = new AbortController();
+  const session = new CodexControlsSession(options);
+  const ready = waitForCode("hang");
+  const task = session.invoke({
+    server: "cua_repl",
+    code: "hang",
+    title: "Stop",
+    relay,
+    signal: controller.signal,
+  });
+  await ready;
+  controller.abort();
+  await assertRejected(task, "cancelled");
+  await assertRejected(
+    session.invoke({ server: "cua_repl", code: "later", title: "Later", relay }),
+    "",
+  );
+  const messages = await readMessages();
+  expect(messages.some((item) => item.params?.arguments?.code === "later")).toBe(false);
 });

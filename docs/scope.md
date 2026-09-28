@@ -8,8 +8,7 @@ Custom model training and custom model runtime development are out of scope.
 Use published models. Keep the optional CLM Apple Silicon serving adapter
 separate from the Bun task loop, and measure its actual response times.
 
-The harness must accept text tasks, read live native controls through CUA and Chrome
-controls through Playwright MCP, let the decision model choose grounded actions, use a small text model when
+The harness must accept text tasks, read live native and Chrome controls through the installed Codex plugins, let the decision model choose grounded actions, use a small text model when
 text is needed, and verify observed results. Handy transcripts must enter through
 the same task interface. Preserve model choice and provider configuration.
 
@@ -38,9 +37,8 @@ Start and stop Handy voice tasks with Command–Option–C by default. Support u
 shortcut changes, saved default targets, and model connection settings.
 
 Show median decision latency and successful tool actions per second. Failed
-attempts, waits, and internal decisions do not count as tool actions. Keep a persistent Playwright MCP connection in the user's Chrome profile,
-reuse its configured extension token, and close the connection Welcome page.
-Use the latest Playwright MCP release. Respect its per-client tab groups.
+attempts, waits, and internal decisions do not count as tool actions. Keep a persistent Codex Chrome connection and preserve exact task-owned tab identity.
+Require the user's Codex setup and relay its approval requests to the native menu.
 Validate task behavior, menu interaction, settings persistence, cancellation,
 and the voice handoff with concrete evidence and report unverified limits.
 

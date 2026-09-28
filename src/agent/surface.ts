@@ -9,7 +9,7 @@ interface Target {
 }
 const MENU_ERROR_CHARS = 200;
 async function restoreSurface(
-  computer: Readonly<Pick<ManagedComputer, "desktop" | "restore">>,
+  computer: Readonly<Pick<ManagedComputer, "desktop" | "restore" | "bindApp">>,
   surface: Surface,
 ): Promise<{ readonly pid: number; readonly windowId: number } | undefined> {
   if (surface.kind === "browser") {
@@ -18,6 +18,16 @@ async function restoreSurface(
     }
     await computer.restore(surface);
     return undefined;
+  }
+  if (computer.bindApp !== undefined) {
+    try {
+      await computer.bindApp(surface.app);
+    } catch (error) {
+      if (error instanceof WindowUnavailableError) {
+        return undefined;
+      }
+      throw error;
+    }
   }
   const desktop = await computer.desktop();
   const exact = desktop.windows.find(

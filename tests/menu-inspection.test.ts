@@ -84,7 +84,7 @@ function computer(failEdit = false): {
   return { driver, calls };
 }
 
-test("inspection is read-only, traces the full report, and exposes fresh scoped commands", async () => {
+test("inspection opens a menu view, traces the report, and exposes fresh scoped commands", async () => {
   const { driver, calls } = computer();
   let choices = 0;
   const result = await runTask({
@@ -121,7 +121,7 @@ test("inspection is read-only, traces the full report, and exposes fresh scoped 
           ),
         ).toBe(false);
         const state = decisionState(input);
-        expect(state).toContain('Read-only application menu "File"');
+        expect(state).toContain('Observed application menu "File" opened for view');
         expect(operationState(input, input.actions)).toContain(
           "Observed application menu inventory is incomplete",
         );
@@ -138,8 +138,9 @@ test("inspection is read-only, traces the full report, and exposes fresh scoped 
     "blocked",
   ]);
   expect(result.steps[1]?.menuInspection).toEqual(REPORT);
-  expect(result.steps[1]?.output).toContain("read-only");
-  expect(result.steps[1]?.output).toContain("incomplete");
+  expect(result.steps[1]?.output).toContain("Opened observed application");
+  expect(result.steps[1]?.performedAction).toBe(true);
+  expect(result.steps[1]?.output).toContain("unknown");
   expect(calls.inspected).toEqual(["File", "File"]);
   expect(calls.windows).toBe(INSPECT_CHOICE);
   expect(calls.invoked).toEqual([]);

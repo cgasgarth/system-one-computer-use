@@ -12,9 +12,9 @@ not train a custom decision model.
 ## macOS app
 
 To build the app, install [Bun](https://bun.sh/), [uv](https://docs.astral.sh/uv/), Xcode Command Line Tools, and
-[CUA Driver](https://github.com/trycua/cua). Native tasks use CUA's Accessibility
-and Screen Recording grants. Browser tasks use the
-[Playwright Chrome extension](https://github.com/microsoft/playwright/tree/main/packages/extension).
+the [ChatGPT desktop app](https://chatgpt.com/download/) with Codex Computer Use
+and its Chrome connection configured. Native and browser actions use those
+installed Codex controls.
 Configure a [stable signing identity](docs/local-signing.md) once so rebuilds can
 retain the app's macOS permission identity.
 
@@ -37,10 +37,10 @@ voice control, status, and timing. It has no web portal or detached task window.
 - **Settings** stays inside the dropdown, with General, Models, and Permissions
   tabs. General holds the voice shortcut, control surface, and idle memory policy;
   Models holds local models and external endpoints.
-  It checks System One Accessibility and the configured CUA Driver's Accessibility
-  and Screen Recording grants. Open the matching macOS privacy page from a missing
-  status, then select Recheck. Handy owns microphone access; Settings links to its
-  macOS page but does not claim to verify Handy's grant.
+  Permissions checks the installed Codex runtime and whether its computer and
+  Chrome plugins are enabled. Open Codex to finish setup. Installation and enabled
+  status do not prove an active connection; the first control call verifies it.
+  Handy owns microphone access; Settings links to its macOS page.
 - **Stop** cancels the task or voice input. Reopen the dropdown while a task runs to stop it. Tasks have no fixed action-count limit. The decision model can mark a task Complete or Blocked. Tool errors go back to the model with switching options; model-service or storage failures stop execution. Click outside to dismiss the dropdown.
 
 [Handy](https://github.com/cjpais/Handy) must be installed in `/Applications`
@@ -54,23 +54,21 @@ live in `~/Library/Application Support/SystemOneComputerUse/`. The installer
 copies `.env` there on first install. Later Settings changes affect that app
 configuration. The CLI continues to use the checkout's `.env`.
 
-### Chrome connection
+### Codex control setup
 
-Keep Chrome and its Playwright extension available. Set
-`PLAYWRIGHT_MCP_EXTENSION_TOKEN`, or reuse the existing Playwright token in
-`~/.claude.json`. Credentials stay local. The token avoids repeated connection
-approval dialogs.
+Enable Computer Use in the ChatGPT desktop app and complete its macOS permission
+prompts. Enable the Codex Chrome plugin and connect its extension in Chrome.
+System One uses the installed desktop runtime through local stdio. It does not
+start a Codex model turn; the selected System One model still chooses actions.
 
-The current Playwright extension gives each connected client its own tab group.
-The app keeps one connection across tasks. Drag an existing tab into the
-**system-one-computer-use** group to make it available. The connection's Welcome
-tab closes after a usable tab is attached. Other clients' tabs remain outside
-this connection.
+App and site approval requests appear in System One's task menu. Declining or
+stopping cancels the pending request. The command-line harness asks in its terminal.
+A process without an interactive approval path cannot grant access automatically.
 
-Session context is saved on disk. Browser continuation restores a unique saved URL within the connected tab group and verifies it before use. If the saved tab is missing or ambiguous, the driver creates a blank task tab. It does not select an unrelated tab. On macOS, the adapter uses the installed Chrome executable to establish the extension connection; `PLAYWRIGHT_MCP_EXECUTABLE_PATH` can specify another Chrome location. Native window transitions get one bounded rediscovery within the same process; ambiguous windows return to model selection.
-
-Playwright MCP is installed from npm's latest release and locked in `bun.lock`.
-The browser adapter uses that release's `target` references for clicks and typing.
+Browser sessions save the exact task-owned browser and tab identity. Follow-ups
+reuse that target when it is available. A stale or ambiguous target is not replaced
+with an unrelated user tab. Native controls bind to the selected app's observed
+active window. New observations invalidate stale element references.
 
 ### Timing
 
@@ -93,18 +91,16 @@ Opening the task menu, editing the task field, or starting dictation loads model
 
 ## Model services
 
-| Setting                          | Purpose                                                    |
-| -------------------------------- | ---------------------------------------------------------- |
-| `SYSTEM_ONE_URL`                 | App-managed Unix endpoint or external System One URL       |
-| `SYSTEM_ONE_MODEL`               | Decision provider's model ID                               |
-| `SYSTEM_ONE_API_KEY`             | Optional bearer token                                      |
-| `TEXT_MODEL_URL`                 | App-managed Unix endpoint or external Chat Completions URL |
-| `TEXT_MODEL_ID`                  | Text provider's model ID                                   |
-| `TEXT_MODEL_API_KEY`             | Optional bearer token                                      |
-| `CUA_MODE`                       | `auto` (default), `browser`, or `desktop`                  |
-| `CUA_DRIVER_BIN`                 | CUA executable; defaults to `cua-driver`                   |
-| `PLAYWRIGHT_MCP_EXTENSION_TOKEN` | Optional explicit Chrome extension token                   |
-| `SYSTEM_ONE_TRACE`               | Set to `1` for CLI decision output                         |
+| Setting                      | Purpose                                                    |
+| ---------------------------- | ---------------------------------------------------------- |
+| `SYSTEM_ONE_URL`             | App-managed Unix endpoint or external System One URL       |
+| `SYSTEM_ONE_MODEL`           | Decision provider's model ID                               |
+| `SYSTEM_ONE_API_KEY`         | Optional bearer token                                      |
+| `TEXT_MODEL_URL`             | App-managed Unix endpoint or external Chat Completions URL |
+| `TEXT_MODEL_ID`              | Text provider's model ID                                   |
+| `TEXT_MODEL_API_KEY`         | Optional bearer token                                      |
+| `SYSTEM_ONE_CONTROL_SURFACE` | `auto` (default), `browser`, or `desktop`                  |
+| `SYSTEM_ONE_TRACE`           | Set to `1` for CLI decision output                         |
 
 The app writes its managed endpoints to its private `.env` file. A local endpoint
 has the form `unix:///absolute/path/model.sock?role=decision` or `role=text`.
@@ -117,7 +113,7 @@ An active decision forward pass can finish before its process accepts another re
 
 ```bash
 bun run start "Open https://example.com and inspect the page"
-CUA_MODE=desktop bun run start "Open Calculator"
+SYSTEM_ONE_CONTROL_SURFACE=desktop bun run start "Open Calculator"
 ```
 
 CLI traces go to ignored `runs/`. The app uses a persistent JSON-lines worker
@@ -137,17 +133,17 @@ External configuration, socket and HTTP responses, model output, and driver data
 validated with Zod. Swift validates its IPC messages with Codable. Internal
 TypeScript uses schema-derived types and concrete driver methods.
 
-Actions use current references. CUA's own authorization windows and the harness UI are excluded. Tool failures are included in the next decision; they do not remove access to the other tool set.
+Actions use current references. The controller's authorization windows and the harness UI are excluded. Tool failures are included in the next decision; they do not remove access to the other tool set.
 
 The decision model selects tools, installed applications, and termination. Selecting desktop tools does not launch an application. The next choice names an exact installed app; the harness checks that name before launch. Large target lists are grouped for model selection. The text helper supplies field text or a URL only when needed. Field handles are refreshed after text generation. There is no text-model task planner.
 
 The loop remembers recent state/action pairs. Repeated controls in the same state become unavailable, including focus cycles that return to an earlier state. Refresh retries are bounded when the screen does not change or the same observation error persists. Other tools and terminal choices remain available. There is no total action limit.
 
-Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. Native text areas need an explicit writable capability before they become typing targets; some native editors need more driver support. Browser text areas expose that capability through Playwright.
+Opening the current URL or selected app is idempotent. Text responses must end normally before the harness types them. Native text areas need an explicit writable capability before they become typing targets; some native editors need more driver support. Browser text areas expose that capability through the Codex Chrome observation.
 
 Actions are grouped by operation; native commands are grouped by their observed top-level menu. The selected operation stays in the next target decision. The model can reject a group and choose another without executing an unrelated tool. Observed links, file-open controls, and search submission use the primary grounded choice. Persistent effects retain separate authorization and field checks. Native labels, search-field roles, and document URLs come from Accessibility metadata bound to the selected process and window; no app-specific workflow is encoded.
 
-The model can also **inspect an app menu** before choosing a command. It selects an observed menu name, such as File, Edit, or View, and receives a fresh read of that menu's commands, including disabled items. Inspection reads Accessibility data; it does not run a command or open a visual dropdown. The report stays in the current observation and states whether the read was complete. Changing the app, window, or tool set clears the inspected view. Menu inspection requires a selected macOS app window and an accessible menu bar; it does not invent a File menu for apps that do not expose one.
+The model can also **inspect an app menu** before choosing a command. It selects an observed menu name, such as File, Edit, or View, and receives a fresh read of that menu's commands, including disabled items. Inspection opens the observed menu and reads its visible commands; it does not invoke a command. The report stays in the current observation and states whether the read was complete. Changing the app, window, or tool set clears the inspected view. Menu inspection requires a selected app and an exposed menu; it does not invent a File menu.
 
 The decision model chooses the next action, including Finish and Blocked. There is no completion preflight. A selected Finish stops the task after a fresh observation confirms that the screen has not changed. The harness checks requested persistent effects before the action, and reads back typed field values. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
 
@@ -175,7 +171,7 @@ and [architecture](docs/architecture.md) for module ownership and lifetimes.
 src/
   agent/       tool options, turn execution, surface state and task loop
   app/         CLI, worker, settings, sessions, model and driver lifetime
-  computer/    CUA and Playwright adapters
+  computer/    Codex native and Chrome adapters
   models/      decision and text model adapters
 native/
   SystemOne/   AppKit menu-bar UI, settings, shortcuts, IPC
@@ -189,11 +185,10 @@ footage and remain local. No GitHub Actions or YouTube uploads.
 
 ### Driver behavior
 
-The app disables CUA's decorative agent cursor for its own session. Native
-accessibility and input checks still run. Chrome uses Playwright directly with
-`--timeout-settle 0`; it retains Playwright's actionability checks. If no next
-control is available after an action, the loop re-observes for up to 1.5 seconds
-instead of waiting after every successful action.
+Codex owns native input, accessibility reads, and the Chrome extension connection.
+System One translates current observations into model choices and sends the
+selected action through those controls. Its drivers retain snapshot-bound targets
+and apply Stop before input. Control errors return to the decision loop.
 
 Task traces separate `observationMs`, `decisionMs`, and `actionMs`. Request
 latency varies with screen size and cache state; a large Calendar observation

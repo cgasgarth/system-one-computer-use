@@ -1,5 +1,6 @@
 import { CallToolResultSchema, ElicitRequestFormParamsSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
+import type { ReadonlyDeep } from "type-fest";
 
 const rpcMessageSchema = z.union([
   z.object({ id: z.union([z.number(), z.string()]), method: z.string(), params: z.unknown() }),
@@ -29,6 +30,11 @@ const approvalResultSchema = z.object({
 });
 type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 type ApprovalResult = z.infer<typeof approvalResultSchema>;
+type ApprovalRelay = (request: ReadonlyDeep<ApprovalRequest>) => Promise<ApprovalResult>;
+interface CodexComputerOptions {
+  readonly approval: ApprovalRelay;
+  readonly signal?: AbortSignal;
+}
 
 export {
   approvalRequestSchema,
@@ -38,4 +44,4 @@ export {
   startedSchema,
   toolResultSchema,
 };
-export type { ApprovalRequest, ApprovalResult, RpcMessage };
+export type { ApprovalRelay, ApprovalRequest, ApprovalResult, CodexComputerOptions, RpcMessage };

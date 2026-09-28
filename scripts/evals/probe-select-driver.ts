@@ -1,8 +1,9 @@
-import { createComputer, loadConfig } from "../../src/app/config.ts";
+import { terminalApproval } from "../../src/app/terminal-approval.ts";
+import { createComputer } from "../../src/app/config.ts";
 import { startWorkspace } from "./workspace.ts";
 
 const workspace = startWorkspace();
-const browser = createComputer(loadConfig(), "browser");
+const browser = createComputer("browser", { approval: terminalApproval });
 try {
   await browser.desktop();
   const initial = await browser.window(0, 0);

@@ -1,16 +1,17 @@
-import { PlaywrightComputer } from "../../../src/computer/playwright/computer.ts";
+import { CodexChromeComputer } from "../../../src/computer/codex-chrome/computer.ts";
+import { terminalApproval } from "../../../src/app/terminal-approval.ts";
 import { cases } from "./benchmark-cases.ts";
 import { canonicalStart } from "./benchmark-state.ts";
 import { startWorkspace } from "../workspace.ts";
 
 const workspace = startWorkspace();
-const browser = new PlaywrightComputer({ mode: "isolated" });
+const browser = new CodexChromeComputer({ approval: terminalApproval });
 let outcome: object = { passed: false };
 try {
   await browser.desktop();
   const blank = await browser.window();
   if (blank.url !== "about:blank") {
-    throw new Error("The private Chrome context did not start on a blank page.");
+    throw new Error("The owned Chrome tab did not start on a blank page.");
   }
   await browser.navigate(`${workspace.origin}/`);
   const before = await browser.window();
@@ -29,7 +30,7 @@ try {
   );
   const [target] = matches;
   if (matches.length !== 1 || target === undefined) {
-    throw new Error("The isolated browser did not observe one exact Roadmap Review link.");
+    throw new Error("The owned browser tab did not observe one exact Roadmap Review link.");
   }
   await browser.clickElement({
     kind: "click_element",
@@ -109,6 +110,6 @@ try {
     outcome = { ...outcome, cleanupError: true };
     process.exitCode = 1;
   }
-  await Bun.write("runs/benchmark/isolated-driver-control.json", JSON.stringify(outcome));
+  await Bun.write("runs/benchmark/codex-driver-control.json", JSON.stringify(outcome));
   console.log(JSON.stringify(outcome));
 }

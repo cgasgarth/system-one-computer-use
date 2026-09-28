@@ -24,7 +24,7 @@ AppKit model controls
 | `src/app/computers.ts` | Lazy browser and desktop driver ownership. The worker reuses its browser connection, closes its desktop connection after a task, and closes all owned connections at shutdown. |
 | `src/agent`            | Action options, observation, target binding, task progress, Stop, and execution. `contracts.ts` owns the shared surface and action schemas.                                    |
 | `src/models`           | Decision and text adapters, effect authorization, and typed request/response transport.                                                                                        |
-| `src/computer`         | Playwright and CUA driver adapters, current target reads, and native menu transport.                                                                                           |
+| `src/computer`         | Codex native/Chrome adapters, current target reads, and approval-aware stdio transport.                                                                                        |
 | `integrations`         | Local Python model bridges and pinned provider code.                                                                                                                           |
 
 `src/agent`, `src/models`, and `src/computer` do not import `src/app`. The app composes these modules. External configuration, IPC frames, model replies, and driver observations cross typed boundaries; trusted internal calls use those parsed types.
@@ -36,11 +36,13 @@ AppKit model controls
 3. The agent records tool results and observed state. Finish is the decision model's choice; the agent re-observes the screen before accepting it. The selected action is not an independent proof that the user goal was achieved.
 4. The worker saves the task result and session target, then releases the native driver. The browser driver stays available for another task. Worker shutdown closes all owned drivers and waits for a desktop close already in progress.
 
-Native menu inspection is a read-only action distinct from command invocation. The driver reads only the selected observed top-level menu and returns typed command paths, enabled states, and capture completeness. `SurfaceSession` scopes the inspected view to its process, window, and menu; fresh observations refresh that view, and surface changes or mutations clear it. The model receives the report directly in its observation rather than through the shortened action history. Disabled entries remain visible as evidence but are not executable choices.
+Native controls use Codex’s app-scoped accessibility state. Internal target IDs identify the observed app and active window; they are not operating-system process handles. Each action revalidates its observed target. The adapter rejects ambiguous or stale bindings. It does not use a second native-control backend.
 
-Accessibility menu data belongs to the application process. The window ID binds the task's selection; it does not prove that command enablement belongs to that window. Inspection does not change focus. Invocation revalidates the command before passing its process, window, and path to CUA.
+Menu inspection opens an observed menu and reads its visible commands. It is a UI view change, distinct from command invocation. The report is marked incomplete when the runtime does not expose a full inventory. Disabled entries remain visible but are not executable choices. Re-observation reads the open menu without toggling it closed.
 
-The CLI uses the same agent loop and driver owner, but retains its separate command flow. The model daemon owns resident model processes independently of a task driver. Managed local inference uses one JSON request and response per private Unix socket connection; external configured endpoints remain separate. Stop aborts pending model calls and prevents later input where the driver can enforce it. Native app launch also aborts its Accessibility watcher before launch when Stop arrives.
+The worker routes Codex app/site approval requests to the native task menu. Responses are bound to their request IDs. Only an explicit task-scoped app-access grant can be reused within that task; Stop and task completion clear it. Unsupported prompts fail closed. The controllers do not invoke a Codex decision model.
+
+The CLI uses the same agent loop and driver owner, but retains its separate command flow. The model daemon owns resident model processes independently of a task driver. Managed local inference uses one JSON request and response per private Unix socket connection; external configured endpoints remain separate. Stop aborts pending model calls and prevents later input where the driver can enforce it. Stop also cancels pending control approvals and closes the owned control session.
 
 ## Constraints
 

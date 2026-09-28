@@ -166,7 +166,15 @@ test("URL syntax unwraps matching outer delimiters without removing a trailing s
 for (const destination of [PREVIOUS_URL, NEW_URL]) {
   test(`a saved browser URL is offered but S1 may choose ${destination === PREVIOUS_URL ? "history" : "a fresh URL"}`, async () => {
     const fixture = browserFixture();
-    const previousSurface = { kind: "browser" as const, url: PREVIOUS_URL, title: "Roadmap" };
+    const previousSurface = {
+      kind: "browser" as const,
+      browserId: "chrome",
+      tabId: "task",
+      providerTabId: "provider-task",
+      extensionInstanceId: "extension-test",
+      url: PREVIOUS_URL,
+      title: "Roadmap",
+    };
     const task = destination === PREVIOUS_URL ? "Open it again" : `Open ${NEW_URL}`;
     let writerCalls = 0;
     const result = await runTask({

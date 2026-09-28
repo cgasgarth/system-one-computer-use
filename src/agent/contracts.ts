@@ -16,7 +16,15 @@ const menuInspectionSchema = z.strictObject({
   complete: z.boolean(),
 });
 const surfaceSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("browser"), url: z.string(), title: z.string() }),
+  z.strictObject({
+    kind: z.literal("browser"),
+    browserId: z.string().min(1),
+    tabId: z.string().min(1),
+    providerTabId: z.string().min(1),
+    extensionInstanceId: z.string().min(1),
+    url: z.string(),
+    title: z.string(),
+  }),
   z.strictObject({
     kind: z.literal("desktop"),
     pid: z.number().int(),

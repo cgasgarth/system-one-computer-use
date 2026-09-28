@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let handy = HandyCommands()
     private var initialized = false
     private var hasTaskResult = false
+    private var pendingApproval: ApprovalPrompt?
 
     func start() {
         guard !initialized else { return }
@@ -74,7 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         handy.onError = { [weak self] in self?.fail($0) }
         content.editor.onPaste = { [weak self] in self?.transcriptArrived() }
         runner.onEvent = { [weak self] in self?.taskEvent($0) }
+        runner.onApproval = { [weak self] in self?.approvalRequested($0) }
         runner.onError = { [weak self] in self?.fail($0) }
+        content.onApprovalChoice = { [weak self] in self?.respondApproval($0) }
         shortcut.onPress = { [weak self] in self?.voiceKey(pressed: true) }
         shortcut.onRelease = { [weak self] in self?.voiceKey(pressed: false) }
         shortcut.onChange = { [weak self] label in
@@ -235,6 +238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let task = content.editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { content.status.stringValue = "Enter a task first."; return }
         hasTaskResult = false
+        pendingApproval = nil
+        content.clearApproval()
         phase = .running
         content.run.isEnabled = false
         content.voice.isEnabled = true
@@ -260,6 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let milliseconds = event.medianDecisionMs { content.latency.stringValue = String(format: "%.1f", milliseconds) }
         if let rate = event.modelActionsPerSecond { content.rate.stringValue = String(format: "%.2f", rate) }
         statusItem?.button?.toolTip = event.message
+        if event.status == .running && pendingApproval != nil { return }
         if event.status == .running { return }
         hasTaskResult = true
         models.release()
@@ -272,7 +278,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    private func approvalRequested(_ prompt: ApprovalPrompt) {
+        guard phase == .running else { runner.cancel(); return }
+        pendingApproval = prompt
+        popover.contentViewController = content
+        popover.contentSize = content.preferredContentSize
+        content.showApproval(prompt)
+        content.setStatus("Approval needed. Review the action above.", color: .systemOrange)
+        showMenu()
+    }
+
+    private func respondApproval(_ decision: ApprovalResponse.Decision) {
+        guard let prompt = pendingApproval, phase == .running else { return }
+        do {
+            try runner.respond(to: prompt, decision: decision)
+            pendingApproval = nil
+            content.clearApproval()
+            content.setStatus(decision == .decline ? "Declined. Checking next step…" : "Running approved action…", color: .secondaryLabelColor)
+        } catch {
+            fail("Could not send the approval choice. The task was stopped.")
+        }
+    }
+
     private func ready() {
+        pendingApproval = nil
+        content.clearApproval()
         voiceActivation.reset()
         phase = .ready
         content.run.isEnabled = true
@@ -284,6 +314,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func fail(_ message: String) {
+        pendingApproval = nil
+        content.clearApproval()
         hasTaskResult = true
         if phase == .running { runner.cancel(); models.release() }
         if phase == .recording || phase == .transcribing { invokeHandy("--cancel") }
@@ -300,6 +332,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func cancelTask() {
         hasTaskResult = true
+        pendingApproval = nil
+        content.clearApproval()
         cancelVoice()
         runner.cancel()
         models.release()
