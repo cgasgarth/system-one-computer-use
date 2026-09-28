@@ -8,6 +8,7 @@ import {
   operationTargetInput,
 } from "./decision-context.ts";
 import type { OperationDecision } from "./decision-context.ts";
+import { MAX_REQUEST_BYTES, budgetRequest } from "./request-budget.ts";
 import { requestDecision } from "./decision-request.ts";
 import type { DecisionRequestContext, DecisionRequestPhase } from "./decision-request.ts";
 import { ActionSelectionError } from "./action-selection-error.ts";
@@ -22,7 +23,6 @@ const PROBABILITY_TOLERANCE = 0.02;
 const MIN_MODEL_CHOICES = 2;
 const MAX_OPERATION_PASSES = 2;
 const MAX_TARGETS_PER_PAGE = 255;
-const MAX_TARGET_ROW_BYTES = 7600;
 const TARGET_FEEDBACK_RESERVE_BYTES = 256;
 const NEXT_PAGE_DESCRIPTION =
   "None of these targets; inspect the next target page without taking an action.";
@@ -46,6 +46,8 @@ interface DecisionInput extends DecisionRequestContext {
   readonly observation: Observation;
   readonly actions: ActionChoices;
   readonly context?: string;
+  readonly selectedOperation?: string;
+  readonly operationContext?: string;
   readonly feedback?: string;
   readonly mode?: "browser" | "desktop" | undefined;
 }
@@ -89,6 +91,18 @@ function targetOutcome(choice: string, count: number, options: TargetChoiceOptio
     ? "reject_operation"
     : "selected";
 }
+function largestDescription(descriptions: readonly string[]): string {
+  let largest = "";
+  for (const description of descriptions) {
+    if (
+      Buffer.byteLength(JSON.stringify(description)) > Buffer.byteLength(JSON.stringify(largest))
+    ) {
+      largest = description;
+    }
+  }
+  return largest;
+}
+
 function validProbabilities(probabilities: ActionProbabilities, count: number): boolean {
   const keys = Object.keys(probabilities);
   const sum = Object.values(probabilities).reduce((total, value) => total + value, 0);
@@ -255,24 +269,24 @@ class SystemOneDecisionModel implements DecisionModel {
     actions: readonly Action[],
     extraDescriptions: readonly string[],
   ): readonly (readonly Action[])[] {
-    const state = decisionState(input);
     const described = actions.map((action) => ({
       action,
       description: actionDescription(action, input.observation),
     }));
+    const largest = largestDescription(described.map((item) => item.description));
+    const { state } = budgetRequest(
+      (limit) =>
+        this.targetRequest(decisionState(input, limit), input.task, [
+          largest,
+          ...extraDescriptions,
+        ]),
+      MAX_REQUEST_BYTES - TARGET_FEEDBACK_RESERVE_BYTES,
+    );
     const pages: Action[][] = [];
     let page: Action[] = [];
     let pageDescriptions: string[] = [];
     for (const { action, description } of described) {
       const candidate = [...page, action];
-      if (
-        this.targetRowBytes(state, input.task, [description, ...extraDescriptions]) >
-        MAX_TARGET_ROW_BYTES - TARGET_FEEDBACK_RESERVE_BYTES
-      ) {
-        throw new Error(
-          "capacity_choices: One observed target exceeds the request budget; no target was truncated.",
-        );
-      }
       if (
         candidate.length + extraDescriptions.length > this.maxChoices ||
         this.targetRowBytes(state, input.task, [
@@ -280,7 +294,7 @@ class SystemOneDecisionModel implements DecisionModel {
           description,
           ...extraDescriptions,
         ]) >
-          MAX_TARGET_ROW_BYTES - TARGET_FEEDBACK_RESERVE_BYTES
+          MAX_REQUEST_BYTES - TARGET_FEEDBACK_RESERVE_BYTES
       ) {
         pages.push(page);
         page = [];
@@ -355,10 +369,9 @@ class SystemOneDecisionModel implements DecisionModel {
     }
     const descriptions = actions.map((action) => actionDescription(action, input.observation));
     descriptions.push(...targetExtraDescriptions(options));
-    const body = this.targetRequest(decisionState(input), input.task, descriptions);
-    if (Buffer.byteLength(JSON.stringify(body)) > MAX_TARGET_ROW_BYTES) {
-      throw new Error("capacity_choices: Target request exceeds the lossless request budget.");
-    }
+    const body = budgetRequest((limit) =>
+      this.targetRequest(decisionState(input, limit), input.task, descriptions),
+    );
     const payload = await this.request(input, "target", body);
     const answer = payload.answers.next_action;
     if (!validProbabilities(answer.probabilities, descriptions.length)) {
@@ -422,17 +435,21 @@ class SystemOneDecisionModel implements DecisionModel {
         `capacity_choices: This decision model supports at most ${this.maxChoices} operation choices; ${descriptions.length} are available. Choose another model for this screen.`,
       );
     }
-    const response = await this.request(input, "operation", {
-      model: this.modelId,
-      state: operationState(input, actions),
-      questions: {
-        next_action: {
-          type: "choice",
-          instructions: `Which operation and available target best advance the current request: ${input.task}? Use the recent action results; do not repeat ineffective window switching.`,
-          criteria: criteriaFor(descriptions),
+    const response = await this.request(
+      input,
+      "operation",
+      budgetRequest((limit) => ({
+        model: this.modelId,
+        state: operationState(input, actions, limit),
+        questions: {
+          next_action: {
+            type: "choice",
+            instructions: `Which operation and available target best advance the current request: ${input.task}? Use the recent action results; do not repeat ineffective window switching.`,
+            criteria: criteriaFor(descriptions),
+          },
         },
-      },
-    });
+      })),
+    );
     const answer = response.answers.next_action;
     if (!validProbabilities(answer.probabilities, groups.length)) {
       throw new Error("System One returned an invalid operation distribution");

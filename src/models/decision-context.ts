@@ -3,6 +3,7 @@ import type { Action, Observation, Window } from "../agent/contracts.ts";
 import { screenContent } from "../agent/screen-content.ts";
 import { relevantControls, textTargetName } from "../agent/controls.ts";
 import { observedTargetName, targetDescriptionContext } from "../agent/target-context.ts";
+import { boundedContext } from "./request-budget.ts";
 import { serializeMenuInspection } from "./menu-inspection.ts";
 import type { ActionCriteria, DecisionAnswer } from "./system-one-schema.ts";
 import type { DecisionInput } from "./system-one.ts";
@@ -165,8 +166,6 @@ function describeObservation(observation: Observation, contextLength: number): s
       ? laterControls
       : `${laterControls.slice(0, LONG_LIST_HALF_CHARS)} ... ${laterControls.slice(-LONG_LIST_HALF_CHARS)}`;
   const lines = [
-    `Current window: ${current.app_name}: ${current.window_title}`,
-    ...(current.url === undefined ? [] : [`Current URL: ${current.url}`]),
     `Current visible content and values:\n${screenContent(observation) || "No content or values reported."}`,
     `Visible controls and values: ${controls.slice(0, Math.max(MIN_STATE_CHARS, MAX_STATE_CHARS - contextLength))}`,
     ...(remaining.length === 0
@@ -176,11 +175,27 @@ function describeObservation(observation: Observation, contextLength: number): s
   return lines.join("\n");
 }
 
-function decisionState(input: DecisionInput): string {
+function requiredState(input: DecisionInput): string[] {
   const state = [
     `User request: ${input.task}`,
     "Choose the next step from the current screen. A tool returning does not prove its intended result. Finish only when the current content shows the whole requested outcome.",
   ];
+  if (input.selectedOperation !== undefined) {
+    state.push(`Selected operation for this next step: ${input.selectedOperation}`);
+  }
+  if (input.observation.window !== undefined) {
+    const { window } = input.observation;
+    state.push(`Current window: ${window.app_name}: ${window.window_title}`);
+    if (window.url !== undefined) {
+      state.push(`Current URL: ${window.url}`);
+    }
+  }
+  return state;
+}
+
+function decisionState(input: DecisionInput, contextBudget = MAX_STATE_CHARS): string {
+  const context: string[] = [];
+  const state = requiredState(input);
   const switches = input.actions
     .filter(
       (action): action is Extract<Action, { kind: "select_surface" }> =>
@@ -197,23 +212,30 @@ function decisionState(input: DecisionInput): string {
       `Selected tool set: ${input.mode}. ${switches.length === 0 ? "No other tool set is offered now." : `Available switch targets: ${switches.join(", ")}.`}`,
     );
     if (input.observation.menuInspection !== undefined) {
-      state.push(serializeMenuInspection(input.observation.menuInspection));
+      context.push(serializeMenuInspection(input.observation.menuInspection));
     }
     if (input.observation.menuInspectionError !== undefined) {
-      state.push(`Menu inspection unavailable: ${input.observation.menuInspectionError}`);
+      context.push(`Menu inspection unavailable: ${input.observation.menuInspectionError}`);
     }
-    state.push(describeObservation(input.observation, input.context?.length ?? 0));
+    context.push(describeObservation(input.observation, input.context?.length ?? 0));
   }
   if (input.feedback !== undefined && input.feedback.length > 0) {
-    state.push(input.feedback);
+    context.push(input.feedback);
   }
   if (input.context !== undefined && input.context.length > 0) {
-    state.push(`Earlier session context: ${input.context}`);
+    context.push(`Earlier session context: ${input.context}`);
   }
-  return state.join("\n");
+  if (input.operationContext !== undefined) {
+    context.push(input.operationContext);
+  }
+  return [...state, ...boundedContext(context, contextBudget)].join("\n");
 }
 
-function operationState(input: DecisionInput, actions: readonly Action[]): string {
+function operationState(
+  input: DecisionInput,
+  actions: readonly Action[],
+  contextBudget = MAX_STATE_CHARS,
+): string {
   const groups = new Map<string, { path: readonly string[]; commands: string[] }>();
   const inspectedNames: string[] = [];
   for (const action of actions) {
@@ -229,11 +251,10 @@ function operationState(input: DecisionInput, actions: readonly Action[]): strin
     }
   }
   if (groups.size === 0 && inspectedNames.length === 0) {
-    return decisionState(input);
+    return decisionState(input, contextBudget);
   }
   const incomplete = input.observation.window?.menuComplete === false;
-  return [
-    decisionState(input),
+  const operationContext = [
     ...(incomplete
       ? ["Observed application menu inventory is incomplete; other commands may exist."]
       : []),
@@ -244,6 +265,7 @@ function operationState(input: DecisionInput, actions: readonly Action[]): strin
       ? []
       : [`Available observed menu paths: ${JSON.stringify([...groups.values()])}`]),
   ].join("\n");
+  return decisionState({ ...input, operationContext }, contextBudget);
 }
 
 function operationTargetInput(
@@ -261,13 +283,7 @@ function operationTargetInput(
   }
   return {
     ...input,
-    feedback: [
-      input.feedback ?? "",
-      `Selected operation for this next step: ${description}`,
-      "Choose a target for this operation; return to the operation choices if no suitable target is available.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    selectedOperation: description,
   };
 }
 

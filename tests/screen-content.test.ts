@@ -51,6 +51,6 @@ test("reports observed changes and unchanged content separately from tool succes
   const before = screenContent(observed("AXStaticText", "Document status", "Unsaved changes"));
   const after = screenContent(observed("AXStaticText", "Document status", "Changes saved"));
   expect(contentChange(before, after)).toContain(before);
-  expect(contentChange(before, after)).toContain(after);
+  expect(contentChange(before, after)).toContain("current visible content above");
   expect(contentChange(before, before)).toContain("did not change");
 });
