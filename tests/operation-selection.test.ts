@@ -81,7 +81,7 @@ test("groups text, click, and keyboard actions by their observed operation kind"
     "Confirm an observed control.",
   );
   expect(groups.find((group) => group.kind === "invoke_menu")?.description).toBe(
-    "Use an observed command in this application's menu.",
+    'Use a command in the observed "File" menu.',
   );
   expect(groups.flatMap((group) => group.actions).map((action) => action.reason)).toEqual(
     actions.map((action) => action.reason),

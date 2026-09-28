@@ -54,9 +54,6 @@ function blockedSummary(context: FinishContext): string {
     }
     return context.lastError;
   }
-  if (context.steps.every((step) => step.action.kind === "blocked")) {
-    return "Stopped before taking an action. Review the task text or dictate it again, then select Start.";
-  }
   if (
     context.observation.application !== undefined &&
     context.observation.window === undefined &&
@@ -66,10 +63,13 @@ function blockedSummary(context: FinishContext): string {
   ) {
     return `${context.observation.application.name} is running but has no controllable window. Open a document or window in that app, then continue this session.`;
   }
+  if (context.steps.every((step) => step.action.kind === "blocked")) {
+    return "The model stopped before taking an action.";
+  }
   const app = context.observation.window?.app_name;
   return app === undefined
-    ? "Stopped because the model could not choose a next step. Add the app and result you want, then continue."
-    : `Stopped in ${app} because the model could not choose a next step. Add what it should do next, then continue.`;
+    ? "The model stopped before completing the task."
+    : `The model stopped in ${app} before completing the task.`;
 }
 async function finish(context: FinishContext): Promise<TaskResult> {
   const totalMs = performance.now() - context.started;

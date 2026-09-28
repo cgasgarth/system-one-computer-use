@@ -1,5 +1,12 @@
 import type { Action, ActionChoices, Observation } from "../agent/contracts.ts";
-import { actionDescription, actionGroups, criteriaFor, decisionState } from "./decision-context.ts";
+import {
+  actionDescription,
+  actionGroups,
+  criteriaFor,
+  decisionState,
+  operationState,
+  operationTargetInput,
+} from "./decision-context.ts";
 import type { OperationDecision } from "./decision-context.ts";
 import type { ClickInspection } from "../computer/types.ts";
 import { requestDecision } from "./decision-request.ts";
@@ -199,11 +206,15 @@ class SystemOneDecisionModel implements DecisionModel {
       const otherOperations = operation !== undefined && remaining.length > actions.length;
       // None traverses target pages inside this operation; it does not spend an operation pass.
       // eslint-disable-next-line no-await-in-loop
-      const attempt = await this.choosePages(currentInput, actions, {
-        otherOperations,
-        started,
-        onPageAdvance,
-      });
+      const attempt = await this.choosePages(
+        operationTargetInput(currentInput, operation),
+        actions,
+        {
+          otherOperations,
+          started,
+          onPageAdvance,
+        },
+      );
       if (attempt.decision !== undefined) {
         return {
           ...attempt.decision,
@@ -422,8 +433,8 @@ class SystemOneDecisionModel implements DecisionModel {
     const groups = actionGroups(actions);
     const hasTargetedOperation =
       (input.observation.window !== undefined &&
-        actions.some(
-          (action) => action.kind === "click_element" || action.kind === "compose_text",
+        actions.some((action) =>
+          ["click_element", "compose_text", "invoke_menu"].includes(action.kind),
         )) ||
       actions.filter((action) => action.kind === "request_app").length > 1;
     if (groups.length <= 1 || !hasTargetedOperation) {
@@ -446,7 +457,7 @@ class SystemOneDecisionModel implements DecisionModel {
     }
     const response = await this.request(input, "operation", {
       model: this.modelId,
-      state: decisionState(input),
+      state: operationState(input, actions),
       questions: {
         next_action: {
           type: "choice",

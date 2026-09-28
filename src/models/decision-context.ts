@@ -52,34 +52,43 @@ const DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
   invoke_menu: "Use an observed command in this application's menu.",
 };
 function actionGroups(actions: readonly Action[]): readonly ActionGroup[] {
-  const grouped = new Map<ActionGroupKind, Action[]>();
+  const grouped = new Map<string, { kind: ActionGroupKind; menu?: string; actions: Action[] }>();
   for (const action of actions) {
-    const key: ActionGroupKind =
+    const kind: ActionGroupKind =
       action.kind === "click_element" ? `click_${action.operation ?? "press"}` : action.kind;
-    const group = grouped.get(key) ?? [];
-    group.push(action);
+    const menu = action.kind === "invoke_menu" ? action.path[0] : undefined;
+    if (action.kind === "invoke_menu" && menu === undefined) {
+      throw new Error("An offered menu command is missing its observed top-level path.");
+    }
+    const key = menu === undefined ? kind : `invoke_menu:${JSON.stringify(menu)}`;
+    const group = grouped.get(key) ?? {
+      kind,
+      actions: [],
+      ...(menu === undefined ? {} : { menu }),
+    };
+    group.actions.push(action);
     grouped.set(key, group);
   }
-  return [...grouped].map(([kind, group]) => ({
-    kind,
-    description:
-      kind === "navigate"
-        ? `Navigate to a supplied URL: ${group
-            .filter(
-              (action): action is Extract<Action, { kind: "navigate" }> =>
-                action.kind === "navigate",
-            )
-            .slice(0, MAX_GROUP_URLS)
-            .map(
-              (action) =>
-                `${action.url.slice(0, MAX_URL_CHARS)} (${action.reason.slice(0, MAX_URL_CHARS)})`,
-            )
-            .join(
-              " | ",
-            )}${group.length > MAX_GROUP_URLS ? ` | and ${group.length - MAX_GROUP_URLS} more` : ""}.`
-        : DESCRIPTIONS[kind],
-    actions: group,
-  }));
+  return [...grouped.values()].map((group) => {
+    let description = DESCRIPTIONS[group.kind];
+    if (group.menu !== undefined) {
+      description = `Use a command in the observed ${JSON.stringify(group.menu)} menu.`;
+    } else if (group.kind === "navigate") {
+      description = `Navigate to a supplied URL: ${group.actions
+        .filter(
+          (action): action is Extract<Action, { kind: "navigate" }> => action.kind === "navigate",
+        )
+        .slice(0, MAX_GROUP_URLS)
+        .map(
+          (action) =>
+            `${action.url.slice(0, MAX_URL_CHARS)} (${action.reason.slice(0, MAX_URL_CHARS)})`,
+        )
+        .join(
+          " | ",
+        )}${group.actions.length > MAX_GROUP_URLS ? ` | and ${group.actions.length - MAX_GROUP_URLS} more` : ""}.`;
+    }
+    return { kind: group.kind, description, actions: group.actions };
+  });
 }
 function actionDescription(action: Action, observation: Observation): string {
   if (action.kind !== "click_element" && action.kind !== "compose_text") {
@@ -191,6 +200,48 @@ function decisionState(input: DecisionInput): string {
   return state.join("\n");
 }
 
+function operationState(input: DecisionInput, actions: readonly Action[]): string {
+  const groups = new Map<string, { path: readonly string[]; commands: string[] }>();
+  for (const action of actions) {
+    if (action.kind === "invoke_menu") {
+      const parent = action.path.slice(0, -1);
+      const key = JSON.stringify(parent);
+      const group = groups.get(key) ?? { path: parent, commands: [] };
+      group.commands.push(...action.path.slice(-1));
+      groups.set(key, group);
+    }
+  }
+  if (groups.size === 0) {
+    return decisionState(input);
+  }
+  return `${decisionState(input)}\nAvailable observed menu paths: ${JSON.stringify([...groups.values()])}`;
+}
+
+function operationTargetInput(
+  input: DecisionInput,
+  operation: OperationDecision | undefined,
+): DecisionInput {
+  if (operation === undefined) {
+    return input;
+  }
+  const description = operation.options.find(
+    (_option, index) => `A${index}` === operation.answer.choice,
+  );
+  if (description === undefined) {
+    throw new Error("The selected operation has no matching observed description.");
+  }
+  return {
+    ...input,
+    feedback: [
+      input.feedback ?? "",
+      `Selected operation for this next step: ${description}`,
+      "Choose a target for this operation; return to the operation choices if no suitable target is available.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
 function criteriaFor(descriptions: readonly string[]): ActionCriteria {
   const criteria: ActionCriteria = {};
   for (const [index, description] of descriptions.entries()) {
@@ -204,6 +255,8 @@ export {
   actionGroups,
   criteriaFor,
   decisionState,
+  operationState,
+  operationTargetInput,
   describeControl,
   MAX_STATE_CHARS,
 };

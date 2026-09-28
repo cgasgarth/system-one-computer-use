@@ -25,6 +25,12 @@ Kev 4B also passed **7/8** tasks across two new sets of names and layouts. In th
 
 ## Installed app result
 
+### Native menu and target selection
+
+Native menu commands are grouped by their observed top-level menu. The operation request includes the offered command paths; the target request carries the operation that the model selected. This keeps a command such as File > New from competing with every command in the system menu. The model can still return to other operations, choose another surface, finish, or stop. There are no application-name routes or confidence thresholds.
+
+On one captured Calendar state, Kev 4B selected File > New Event or Reminder after this change. The comparison executed model requests only. Separate controls retained correct Finish, Blocked, and rejection of an unsuitable menu. On 18 fixed development states, the changed policy passed 17/18 and the baseline passed 16/18. The changed policy had no false Finish in this set. Both policies failed a pending-save state by selecting Save again. These are development checks, not an end-to-end success rate or a claim that repeat writes are solved.
+
 The prompt-preparation build `c873ad3` was signed and installed with the same local certificate. Its installed runtime bundles and Python bridge matched the source build. System One reached Ready with the user's Kev 4B decision model and Qwen 3.5 2B text model. Auto control and Automatic session mode remained selected. System One Accessibility, CUA Accessibility, and CUA Screen Recording showed Granted.
 
 Opening the installed task menu prepared the text cache. The first synthetic general-field request then reused **165 of 429 prompt tokens**. A subsequent unrelated readiness control reused 0 of 66 tokens. The probe sent no seed request and did not press Start, create a task session, or control another app. Typing and voice use the same warm call in source, but physical voice input was not retested in this check.

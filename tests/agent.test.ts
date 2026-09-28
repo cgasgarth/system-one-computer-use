@@ -385,9 +385,39 @@ test("explains a stop before any tool action without claiming a permission failu
       },
     },
   });
-  expect(result.summary).toBe(
-    "Stopped before taking an action. Review the task text or dictate it again, then select Start.",
-  );
+  expect(result.summary).toBe("The model stopped before taking an action.");
+});
+
+test("reports a model-selected Blocked in the current app without inventing missing input", async () => {
+  const { computer } = computerFixture();
+  const calendar: ManagedComputer = {
+    ...computer,
+    async desktop() {
+      return {
+        apps: [{ name: "Calendar", pid: 7 }],
+        windows: [{ app_name: "Calendar", pid: 7, window_id: 9, title: "Calendar" }],
+      };
+    },
+    async window() {
+      return { ...windowFixture(), app_name: "Calendar", window_title: "Calendar" };
+    },
+  };
+  let calls = 0;
+  const result = await runTask({
+    task: "Add an item to the calendar",
+    applications: ["Calendar"],
+    preferredSurface: "desktop",
+    computer: () => calendar,
+    text: textFixture(),
+    decision: {
+      async choose(input) {
+        calls += 1;
+        return pick(input, calls === 1 ? "request_app" : "blocked");
+      },
+    },
+  });
+  expect(result.steps.map((step) => step.action.kind)).toEqual(["request_app", "blocked"]);
+  expect(result.summary).toBe("The model stopped in Calendar before completing the task.");
 });
 
 test("continues after verifying a field value without writing it again", async () => {
