@@ -39,6 +39,7 @@ interface TaskStep {
   readonly actionMs: number;
   readonly elapsedMs: number;
   readonly observation: string;
+  readonly screenContent?: string;
   readonly terminalObservation?: string;
   readonly menuInspection?: MenuInspection;
   readonly terminalDecision?: Decision;

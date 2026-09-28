@@ -1,5 +1,6 @@
 import { describeAction, isEditableElement } from "../agent/contracts.ts";
 import type { Action, Observation, Window } from "../agent/contracts.ts";
+import { screenContent } from "../agent/screen-content.ts";
 import { relevantControls, textTargetName } from "../agent/controls.ts";
 import { observedTargetName, targetDescriptionContext } from "../agent/target-context.ts";
 import { serializeMenuInspection } from "./menu-inspection.ts";
@@ -46,7 +47,7 @@ const DESCRIPTIONS: Readonly<Record<ActionGroupKind, string>> = {
   select_surface: "Switch between Chrome and Mac application tools.",
   press_key: "Use the keyboard for the focused control.",
   refresh: "Wait for the current page to update.",
-  finish: "The requested result is complete. Stop.",
+  finish: "Finish because the current screen shows the complete requested result.",
   blocked: "Required input or access is missing. Stop.",
   request_app: "Open an installed application.",
   observe_window: "Select a different open window.",
@@ -166,6 +167,7 @@ function describeObservation(observation: Observation, contextLength: number): s
   const lines = [
     `Current window: ${current.app_name}: ${current.window_title}`,
     ...(current.url === undefined ? [] : [`Current URL: ${current.url}`]),
+    `Current visible content and values:\n${screenContent(observation) || "No content or values reported."}`,
     `Visible controls and values: ${controls.slice(0, Math.max(MIN_STATE_CHARS, MAX_STATE_CHARS - contextLength))}`,
     ...(remaining.length === 0
       ? []
@@ -175,19 +177,16 @@ function describeObservation(observation: Observation, contextLength: number): s
 }
 
 function decisionState(input: DecisionInput): string {
-  const state = [`User request: ${input.task}`];
+  const state = [
+    `User request: ${input.task}`,
+    "Choose the next step from the current screen. A tool returning does not prove its intended result. Finish only when the current content shows the whole requested outcome.",
+  ];
   const switches = input.actions
     .filter(
       (action): action is Extract<Action, { kind: "select_surface" }> =>
         action.kind === "select_surface",
     )
     .map((action) => action.surface);
-  if (input.context !== undefined && input.context.length > 0) {
-    state.push(input.context);
-  }
-  if (input.feedback !== undefined && input.feedback.length > 0) {
-    state.push(input.feedback);
-  }
   if (input.mode === undefined) {
     state.push(
       `No tool set selected yet. Available tool sets: ${switches.join(", ") || "none"}.`,
@@ -204,6 +203,12 @@ function decisionState(input: DecisionInput): string {
       state.push(`Menu inspection unavailable: ${input.observation.menuInspectionError}`);
     }
     state.push(describeObservation(input.observation, input.context?.length ?? 0));
+  }
+  if (input.feedback !== undefined && input.feedback.length > 0) {
+    state.push(input.feedback);
+  }
+  if (input.context !== undefined && input.context.length > 0) {
+    state.push(`Earlier session context: ${input.context}`);
   }
   return state.join("\n");
 }

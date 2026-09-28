@@ -274,7 +274,7 @@ function options(context: OptionContext): ActionChoices {
     {
       kind: "finish",
       summary: "Task marked complete",
-      reason: "Finish: the requested task has already been completed.",
+      reason: "Finish because the current screen shows the complete requested result.",
     },
     {
       kind: "blocked",

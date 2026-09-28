@@ -286,3 +286,22 @@ test("hides Codex control apps from the task desktop", () => {
   expect(desktop.windows.map((window) => window.app_name)).toEqual(["Calculator"]);
   expect(desktop.apps.map((app) => app.name)).toEqual(["Calculator"]);
 });
+
+test("preserves the exact observed link destination supplied by Chrome", async () => {
+  const wire = new FakeWire([
+    { browserId: "chrome-1", tabId: "12" },
+    {
+      ...page,
+      state: "0 AXWebArea Documents\n\t1 link Description: Review, Value: example.test/review",
+    },
+    [{ token: "ax:1", href: "https://example.test/review" }],
+  ]);
+  const browser = computer(wire);
+  const observed = await browser.window();
+  expect(observed.elements[0]).toMatchObject({
+    element_token: "ax:1",
+    label: "Review",
+    href: "https://example.test/review",
+  });
+  expect(wire.reads.at(-1)).toContain("getByRole('link'");
+});

@@ -6,6 +6,7 @@ import type { SurfaceSession } from "./surface.ts";
 import { executeInput } from "./surface.ts";
 import { enterText, openApplication, openUrl } from "./input.ts";
 import { options as actionOptions } from "./options.ts";
+import { contentChange, screenContent } from "./screen-content.ts";
 import { summarizeObservation } from "./observation.ts";
 import { progressStateKey, stateKey } from "./state-key.ts";
 import type { Decision, DecisionInput } from "../models/system-one.ts";
@@ -116,7 +117,7 @@ async function applyInput({
     observation,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
-  return { output: describeAction(action), performedAction: true };
+  return { output: "Tool returned. Observe the screen for its effect.", performedAction: true };
 }
 async function selectSurface({ options, surfaces, action }: TurnContext): Promise<ActionResult> {
   if (action.kind !== "select_surface") {
@@ -241,11 +242,16 @@ function chooseInput(
     .map((step) => `${describeAction(step.action)} -> ${step.error ?? step.output ?? "No result"}`)
     .join("\n");
   const last = history.at(-1);
+  const content = screenContent(observation);
+  const observedChange =
+    last?.performedAction === true && last.screenContent !== undefined
+      ? contentChange(last.screenContent, content)
+      : "";
   const changedAfterError =
     last?.error !== undefined && last.observation !== summarizeObservation(observation)
       ? "The screen changed after the last tool reported an error. Its effect is uncertain, not necessarily absent. Check the current result before repeating the action."
       : "";
-  const context = `${turnFeedback(lastError)}\n${changedAfterError}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
+  const context = `${turnFeedback(lastError)}\n${changedAfterError}\n${observedChange}\n${input.progress.context(observation)}\nRecent actions and results:\n${recentSteps.slice(-HISTORY_CHARS)}`;
   return {
     task: options.task,
     observation,
@@ -366,6 +372,7 @@ async function performTurn(input: TurnInput): Promise<TurnResult> {
       ? {}
       : { rejectedOperations: decision.rejectedOperations }),
     observation: summarizeObservation(observation),
+    screenContent: screenContent(observation),
     ...(finishSurface?.decision === undefined ? {} : { terminalDecision: finishSurface.decision }),
     ...(finishSurface?.observation === undefined
       ? {}

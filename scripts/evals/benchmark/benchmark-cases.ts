@@ -1,3 +1,4 @@
+import { isEditableElement } from "../../../src/agent/contracts.ts";
 import type { Window } from "../../../src/agent/contracts.ts";
 import type { Workspace } from "../workspace.ts";
 
@@ -44,9 +45,11 @@ const cases: readonly BenchmarkCase[] = [
     expectedWrites: zeroWrites,
     resultMatches: (workspace, window) =>
       window.url === `${workspace.origin}/projects?open=1` &&
-      window.elements.some((element) => element.role.toLowerCase().includes("dialog")) &&
       window.elements.some(
-        (element) => element.label === "Project name" && element.value === "Draft Only",
+        (element) =>
+          isEditableElement(element) &&
+          element.label === "Project name" &&
+          element.value === "Draft Only",
       ),
   },
   {

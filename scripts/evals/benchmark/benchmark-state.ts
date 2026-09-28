@@ -1,3 +1,4 @@
+import { isEditableElement } from "../../../src/agent/contracts.ts";
 import type { Window } from "../../../src/agent/contracts.ts";
 import type { Workspace } from "../workspace.ts";
 import { writeCounts } from "./benchmark-cases.ts";
@@ -54,9 +55,12 @@ function canonicalStart(input: {
     return false;
   }
   if (scenario.id === "fill-unsaved-draft") {
-    return (
-      window.elements.some((element) => element.role === "dialog") &&
-      window.elements.some((element) => element.label === "Project name" && element.value === "")
+    // Codex AX exposes this native dialog as a container and omits empty values.
+    return window.elements.some(
+      (element) =>
+        isEditableElement(element) &&
+        element.label === "Project name" &&
+        (element.value === "" || element.value === undefined),
     );
   }
   if (scenario.id === "select-duplicate-label") {

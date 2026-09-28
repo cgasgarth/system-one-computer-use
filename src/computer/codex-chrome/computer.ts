@@ -18,6 +18,7 @@ const fieldSchema = z.object({
   formRole: z.string().nullable(),
   formMethod: z.string().nullable(),
 });
+const linkSchema = z.array(z.object({ token: z.string(), href: z.url().nullable() }));
 const selectSchema = z.array(
   z.object({
     label: z.string(),
@@ -136,8 +137,32 @@ class CodexChromeComputer implements ManagedComputer {
     }
     const base = checked.data;
     this.choices.clear();
-    this.latest = await this.withSelectOptions(base);
+    this.latest = await this.withSelectOptions(await this.withLinkDestinations(base));
     return this.latest;
+  }
+
+  private async withLinkDestinations(window: Window): Promise<Window> {
+    const links = window.elements.filter((element) => element.role === "link");
+    if (links.length === 0) {
+      return window;
+    }
+    const targets = links.map((element) => ({
+      token: element.element_token,
+      label: element.label,
+    }));
+    const destinations = await this.wire.read(
+      `return await Promise.all(${JSON.stringify(targets)}.map(async (item) => {const link=s1Tab.playwright.getByRole('link',{name:item.label,exact:true}); return {token:item.token,href:await link.count()===1 ? await link.evaluate((node)=>node.tagName.toLowerCase()==='a' ? node.href : null) : null};}));`,
+      linkSchema,
+      "Read observed link destinations",
+    );
+    const byToken = new Map(destinations.map((item) => [item.token, item.href]));
+    return {
+      ...window,
+      elements: window.elements.map((element) => {
+        const href = byToken.get(element.element_token);
+        return href === undefined || href === null ? element : { ...element, href };
+      }),
+    };
   }
 
   private async withSelectOptions(window: Window): Promise<Window> {

@@ -147,6 +147,8 @@ The model can also **inspect an app menu** before choosing a command. It selects
 
 The decision model chooses the next action, including Finish and Blocked. There is no completion preflight. A selected Finish stops the task after a fresh observation confirms that the screen has not changed. The harness executes the selected action against current target references and reads back typed field values. If the screen changes before Finish, completion is checked again against the fresh observation. Model decisions use their selected answer; the harness does not override that answer with a confidence cutoff.
 
+Both control adapters feed the same observation context. Displayed text and field values appear before available controls. The next decision receives the observed content before and after the last action; a returned tool call is not reported as proof of task success. Finish means that the current screen shows the requested outcome. This uses observed roles and values, with no app-specific task rules.
+
 **Complex workflows remain under development.** Diagram authoring, arbitrary
 canvas interaction, and reliable multi-app workflows are not validated yet.
 A System One model ranks supplied choices; it does not independently generate
